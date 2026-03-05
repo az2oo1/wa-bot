@@ -28,6 +28,7 @@ if (!fs.existsSync(configPath)) {
     fs.writeFileSync(configPath, JSON.stringify({
         enableWordFilter: true,
         enableAIFilter: false,
+        autoAction: false, // 🔴 الميزة الجديدة: الإجراء التلقائي
         aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية، أو ترويج لبيع إجازات مرضية وتقارير طبية.',
         ollamaUrl: 'http://localhost:11434',
         ollamaModel: 'qwen2.5:7b',
@@ -41,6 +42,7 @@ let config = JSON.parse(fs.readFileSync(configPath));
 
 if (typeof config.enableWordFilter === 'undefined') config.enableWordFilter = true;
 if (typeof config.enableAIFilter === 'undefined') config.enableAIFilter = false;
+if (typeof config.autoAction === 'undefined') config.autoAction = false;
 if (typeof config.aiPrompt === 'undefined') config.aiPrompt = 'امنع أي رسالة تحتوي على إعلانات تجارية، أو ترويج لبيع إجازات مرضية وتقارير طبية.';
 if (typeof config.ollamaUrl === 'undefined') config.ollamaUrl = 'http://localhost:11434';
 if (typeof config.ollamaModel === 'undefined') config.ollamaModel = 'qwen2.5:7b';
@@ -178,6 +180,16 @@ app.get('/', (req, res) => {
                         <button type="button" class="add-btn" style="background: #0277bd; padding: 8px 15px;" onclick="openOllamaModal()">⚙️ إعدادات خادم AI</button>
                     </div>
 
+                    <div class="switch-container" style="border-color: #e91e63; background: rgba(233, 30, 99, 0.05);">
+                        <div class="switch-inner">
+                            <label class="switch">
+                                <input type="checkbox" id="autoAction" ${config.autoAction ? 'checked' : ''}>
+                                <span class="slider" style="background-color: #ccc;"></span>
+                            </label>
+                            <span style="font-size: 14px; font-weight: bold; color: #e91e63;">تفعيل الحذف والإبلاغ المباشر (تخطي تصويت الإدارة) للمجموعات العامة</span>
+                        </div>
+                    </div>
+
                     <div id="aiPromptContainer" style="margin-top: 15px; padding: 15px; background: var(--status-bg); border-radius: 8px; border: 1px dashed var(--status-text);">
                         <label style="margin-top:0; color: var(--status-text);">تعليمات الذكاء الاصطناعي (اكتب وصفاً دقيقاً للمحتوى الممنوع):</label>
                         <textarea id="aiPromptText" rows="3" placeholder="مثال: قم بمنع أي رسالة تروج للخدمات الطبية أو بيع المتابعين...">${config.aiPrompt}</textarea>
@@ -307,7 +319,8 @@ app.get('/', (req, res) => {
                 words: groupsConfigObj[key].words || [],
                 useDefaultWords: groupsConfigObj[key].useDefaultWords !== false,
                 enableWordFilter: groupsConfigObj[key].enableWordFilter !== false,
-                enableAIFilter: groupsConfigObj[key].enableAIFilter || false 
+                enableAIFilter: groupsConfigObj[key].enableAIFilter || false,
+                autoAction: groupsConfigObj[key].autoAction || false // 🔴 ميزة الإجراء التلقائي المستقل
             }));
 
             function renderDefaultWords() {
@@ -384,6 +397,16 @@ app.get('/', (req, res) => {
                             </div>
                         </div>
 
+                        <div class="switch-container" style="border-color: #e91e63; background: rgba(233, 30, 99, 0.05);">
+                            <div class="switch-inner">
+                                <label class="switch">
+                                    <input type="checkbox" \${group.autoAction ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'autoAction', this.checked)">
+                                    <span class="slider" style="background-color: #ccc;"></span>
+                                </label>
+                                <span style="font-size: 14px; font-weight: bold; color: #e91e63;">تفعيل الحذف والإبلاغ المباشر (تخطي تصويت الإدارة) لهذه المجموعة</span>
+                            </div>
+                        </div>
+
                         <label>الكلمات الممنوعة المخصصة لهذه المجموعة فقط:</label>
                         <div class="flex-input">
                             <input type="text" id="newGroupWord_\${groupIndex}" placeholder="أدخل الكلمة..." onkeypress="if(event.key === 'Enter') { event.preventDefault(); addGroupWord(\${groupIndex}); }">
@@ -396,7 +419,7 @@ app.get('/', (req, res) => {
             }
 
             function addGroup() {
-                groupsArr.push({ id: '', adminGroup: '', words: [], useDefaultWords: true, enableWordFilter: true, enableAIFilter: false });
+                groupsArr.push({ id: '', adminGroup: '', words: [], useDefaultWords: true, enableWordFilter: true, enableAIFilter: false, autoAction: false });
                 renderGroups();
             }
 
@@ -464,7 +487,8 @@ app.get('/', (req, res) => {
                             words: g.words,
                             useDefaultWords: g.useDefaultWords,
                             enableWordFilter: g.enableWordFilter,
-                            enableAIFilter: g.enableAIFilter
+                            enableAIFilter: g.enableAIFilter,
+                            autoAction: g.autoAction
                         };
                     }
                 });
@@ -472,6 +496,7 @@ app.get('/', (req, res) => {
                 const newConfig = {
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
                     enableAIFilter: document.getElementById('enableAIFilter').checked,
+                    autoAction: document.getElementById('autoAction').checked,
                     aiPrompt: document.getElementById('aiPromptText').value.trim(),
                     ollamaUrl: document.getElementById('ollamaUrl').value.trim(),
                     ollamaModel: document.getElementById('ollamaModel').value.trim(),
@@ -587,6 +612,7 @@ client.on('message', async msg => {
             let targetAdminGroup = config.defaultAdminGroup;
             let isWordFilterEnabledForThisGroup = config.enableWordFilter;
             let isAIFilterEnabledForThisGroup = config.enableAIFilter; 
+            let isAutoActionEnabledForThisGroup = config.autoAction; // 🔴 سحب قيمة الإجراء التلقائي
 
             if (groupConfig) {
                 targetAdminGroup = groupConfig.adminGroup || config.defaultAdminGroup;
@@ -597,6 +623,11 @@ client.on('message', async msg => {
                 
                 if (typeof groupConfig.enableAIFilter !== 'undefined') {
                     isAIFilterEnabledForThisGroup = groupConfig.enableAIFilter;
+                }
+
+                // 🔴 قراءة حالة الإجراء التلقائي للمجموعة المخصصة
+                if (typeof groupConfig.autoAction !== 'undefined') {
+                    isAutoActionEnabledForThisGroup = groupConfig.autoAction;
                 }
                 
                 if (groupConfig.useDefaultWords !== false) {
@@ -661,16 +692,27 @@ client.on('message', async msg => {
                 const messageContent = msg.body;
                 await msg.delete(true); 
                 console.log(`[DEBUG] 🗑️ تم حذف الرسالة المخالفة من المجموعة.`);
-                
-                const pollTitle = `🚨 تم حذف رسالة مخالفة في مجموعة "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nسبب الحذف: ${violationReason}\nمحتوى الرسالة:\n"${messageContent}"\n\nهل ترغب في طرد هذا العضو من جميع المجموعات؟`;
-                const poll = new Poll(pollTitle, ['نعم، اطرد العضو', 'لا، اكتفِ بالحذف']);
-                
-                const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
 
-                pendingBans.set(pollMsg.id._serialized, {
-                    senderId: senderId,
-                    pollMsg: pollMsg
-                });
+                // 🔴 التحقق من الإجراء: هل نرسل تصويت أو تقرير مباشر؟
+                if (isAutoActionEnabledForThisGroup) {
+                    // إرسال إيصال (تقرير) للمشرفين بدون تصويت
+                    const reportText = `🚨 *إشعار حذف تلقائي*\nتم حذف رسالة مخالفة في مجموعة "${chat.name}"\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${violationReason}\n📝 *محتوى الرسالة:*\n"${messageContent}"\n\n*(لم يتم فتح تصويت بناءً على إعدادات المجموعة)*`;
+                    
+                    await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
+                    console.log(`[DEBUG] 📩 تم إرسال إشعار الحذف التلقائي للإدارة بنجاح.`);
+                } else {
+                    // إرسال تصويت كالمعتاد
+                    const pollTitle = `🚨 تم حذف رسالة مخالفة في مجموعة "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nسبب الحذف: ${violationReason}\nمحتوى الرسالة:\n"${messageContent}"\n\nهل ترغب في طرد هذا العضو من جميع المجموعات؟`;
+                    const poll = new Poll(pollTitle, ['نعم، اطرد العضو', 'لا، اكتفِ بالحذف']);
+                    
+                    const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
+
+                    pendingBans.set(pollMsg.id._serialized, {
+                        senderId: senderId,
+                        pollMsg: pollMsg
+                    });
+                    console.log(`[DEBUG] 📩 تم إرسال طلب تصويت للإدارة.`);
+                }
             }
         }
     } catch (error) {}
