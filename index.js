@@ -14,7 +14,13 @@ if (!fs.existsSync(configPath)) {
     fs.writeFileSync(configPath, JSON.stringify({
         defaultAdminGroup: '120363424446982803@g.us',
         defaultWords: ['ســكــلــيف', 'اجــازة مرضـــية', 'تـــقريــر', '🏥', 'معتـــمد', 'مرضية', 'عذر طبي', 'تقرير طبي', 'عذر', 'سكليف', 'صحتي', 'تكاليف'],
-        groupsConfig: {}
+        groupsConfig: {
+            '120363000000000001@g.us': {
+                words: ['تسويق', 'إعلان', 'روابط'],
+                adminGroup: '',
+                useDefaultWords: true
+            }
+        }
     }, null, 4));
 }
 
@@ -25,36 +31,82 @@ let botStatus = 'جاري التهيئة والتشغيل...';
 app.get('/', (req, res) => {
     const html = `
     <!DOCTYPE html>
-    <html dir="rtl" lang="ar">
+    <html dir="rtl" lang="ar" data-theme="light">
     <head>
         <meta charset="UTF-8">
         <title>لوحة تحكم النظام</title>
         <style>
-            body { font-family: Tahoma, Arial; background: #f0f2f5; margin: 0; padding: 20px; }
-            .container { max-width: 800px; margin: auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-            h1 { color: #075e54; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 15px; }
-            .status-box { text-align: center; padding: 20px; background: #e1f5fe; border-radius: 8px; margin-bottom: 25px; border: 1px solid #b3e5fc; }
-            .status-box h2 { margin: 0 0 10px 0; color: #0277bd; font-size: 20px; }
-            label { font-weight: bold; display: block; margin-top: 20px; color: #333; }
-            input { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; font-size: 14px; }
+            /* متغيرات الألوان */
+            :root {
+                --bg-color: #f0f2f5;
+                --container-bg: #ffffff;
+                --text-main: #333333;
+                --text-heading: #075e54;
+                --input-bg: #ffffff;
+                --input-border: #cccccc;
+                --card-border: #dddddd;
+                --chip-bg: #dcf8c6;
+                --chip-text: #075e54;
+                --chip-border: #b2e289;
+                --status-bg: #e1f5fe;
+                --status-border: #b3e5fc;
+                --status-text: #0277bd;
+            }
+
+            [data-theme="dark"] {
+                --bg-color: #121212;
+                --container-bg: #1e1e1e;
+                --text-main: #e4e6eb;
+                --text-heading: #25d366;
+                --input-bg: #3a3b3c;
+                --input-border: #555555;
+                --card-border: #3a3b3c;
+                --chip-bg: #2a3942;
+                --chip-text: #e4e6eb;
+                --chip-border: #111b21;
+                --status-bg: #112a34;
+                --status-border: #0b1a20;
+                --status-text: #4fc3f7;
+            }
+
+            body { font-family: Tahoma, Arial; background: var(--bg-color); color: var(--text-main); margin: 0; padding: 20px; transition: background 0.3s, color 0.3s; }
+            .container { max-width: 800px; margin: auto; background: var(--container-bg); padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); position: relative; transition: background 0.3s; }
+            h1 { color: var(--text-heading); text-align: center; border-bottom: 2px solid var(--card-border); padding-bottom: 15px; }
+            .status-box { text-align: center; padding: 20px; background: var(--status-bg); border-radius: 8px; margin-bottom: 25px; border: 1px solid var(--status-border); }
+            .status-box h2 { margin: 0 0 10px 0; color: var(--status-text); font-size: 20px; }
+            label { font-weight: bold; display: block; margin-top: 20px; color: var(--text-main); }
+            input { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid var(--input-border); border-radius: 5px; box-sizing: border-box; font-size: 14px; background: var(--input-bg); color: var(--text-main); transition: 0.3s; }
             .flex-input { display: flex; gap: 10px; margin-top: 5px; }
             .flex-input input { margin-top: 0; }
-            .add-btn { background: #25d366; color: white; border: none; padding: 0 20px; font-weight: bold; border-radius: 5px; cursor: pointer; white-space: nowrap; }
+            .add-btn { background: #25d366; color: white; border: none; padding: 0 20px; font-weight: bold; border-radius: 5px; cursor: pointer; white-space: nowrap; transition: 0.3s;}
             .add-btn:hover { background: #1ebe57; }
-            .chip-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding: 10px; background: #f9f9f9; border-radius: 5px; min-height: 40px; border: 1px dashed #ccc; }
-            .chip { background: #dcf8c6; color: #075e54; padding: 5px 12px; border-radius: 15px; font-size: 13px; display: flex; align-items: center; gap: 8px; border: 1px solid #b2e289; }
-            .chip span { cursor: pointer; color: #d32f2f; font-weight: bold; font-size: 16px; }
-            .chip span:hover { color: #b71c1c; }
-            .group-card { background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 8px; margin-top: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-            .group-card-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-bottom: 10px;}
+            .chip-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding: 10px; background: var(--input-bg); border-radius: 5px; min-height: 40px; border: 1px dashed var(--input-border); }
+            .chip { background: var(--chip-bg); color: var(--chip-text); padding: 5px 12px; border-radius: 15px; font-size: 13px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--chip-border); }
+            .chip span { cursor: pointer; color: #ff5252; font-weight: bold; font-size: 16px; }
+            .chip span:hover { color: #d32f2f; }
+            .group-card { background: var(--container-bg); border: 1px solid var(--card-border); padding: 15px; border-radius: 8px; margin-top: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: 0.3s; }
+            .group-card-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 10px; margin-bottom: 10px;}
             .remove-btn { background: #ff4444; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-            .save-btn { background: #128c7e; color: white; border: none; padding: 15px; font-size: 18px; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 30px; width: 100%; }
+            .save-btn { background: #128c7e; color: white; border: none; padding: 15px; font-size: 18px; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 30px; width: 100%; transition: 0.3s; }
             .save-btn:hover { background: #075e54; }
             .success { background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; text-align: center; display: none; margin-top: 15px; border: 1px solid #c3e6cb; }
+            .theme-toggle { position: absolute; top: 20px; left: 20px; background: none; border: none; font-size: 24px; cursor: pointer; padding: 5px; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; transition: background 0.3s; }
+            .theme-toggle:hover { background: rgba(128,128,128,0.2); }
+
+            /* تصميم زر الـ Switch */
+            .switch-container { display: flex; align-items: center; gap: 15px; margin-top: 15px; background: var(--input-bg); padding: 12px; border-radius: 5px; border: 1px solid var(--input-border); }
+            .switch { position: relative; display: inline-block; width: 44px; height: 24px; margin: 0; flex-shrink: 0; }
+            .switch input { opacity: 0; width: 0; height: 0; }
+            .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px; }
+            .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
+            input:checked + .slider { background-color: #25d366; }
+            input:checked + .slider:before { transform: translateX(20px); }
         </style>
     </head>
     <body>
         <div class="container">
+            <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="تبديل المظهر">🌙</button>
+
             <h1>⚙️ إعدادات الإشراف والحماية (واجهة مرئية)</h1>
             
             <div class="status-box">
@@ -63,8 +115,8 @@ app.get('/', (req, res) => {
             </div>
 
             <form id="configForm">
-                <div class="group-card" style="border-color: #128c7e;">
-                    <h3 style="margin-top:0; color:#128c7e;">🔧 الإعدادات العامة (الافتراضية)</h3>
+                <div class="group-card" style="border-color: var(--text-heading);">
+                    <h3 style="margin-top:0; color: var(--text-heading);">🔧 الإعدادات العامة (الافتراضية)</h3>
                     <label>معرف قروب الإدارة (لتلقي التنبيهات والتصويتات):</label>
                     <input type="text" id="defaultAdminGroup" value="${config.defaultAdminGroup}" dir="ltr" style="text-align: left;">
 
@@ -76,7 +128,7 @@ app.get('/', (req, res) => {
                     <div id="defaultWordsContainer" class="chip-container"></div>
                 </div>
 
-                <h3 style="margin-top: 30px; border-bottom: 2px solid #eee; padding-bottom: 10px;">📋 تخصيص المجموعات المستقلة</h3>
+                <h3 style="margin-top: 30px; border-bottom: 2px solid var(--card-border); padding-bottom: 10px;">📋 تخصيص المجموعات المستقلة</h3>
                 <div id="groupsContainer"></div>
                 
                 <button type="button" class="add-btn" style="width:100%; padding:15px; margin-top:15px; background:#0277bd;" onclick="addGroup()">+ إضافة قروب مخصص جديد</button>
@@ -87,18 +139,38 @@ app.get('/', (req, res) => {
         </div>
         
         <script>
-            // البيانات الحية من الخادم
+            // تفعيل الوضع الليلي
+            const themeBtn = document.getElementById('themeToggle');
+            const currentTheme = localStorage.getItem('theme') || 'light';
+            if (currentTheme === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                themeBtn.textContent = '☀️';
+            }
+
+            function toggleTheme() {
+                let theme = document.documentElement.getAttribute('data-theme');
+                if (theme === 'dark') {
+                    document.documentElement.setAttribute('data-theme', 'light');
+                    localStorage.setItem('theme', 'light');
+                    themeBtn.textContent = '🌙';
+                } else {
+                    document.documentElement.setAttribute('data-theme', 'dark');
+                    localStorage.setItem('theme', 'dark');
+                    themeBtn.textContent = '☀️';
+                }
+            }
+
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
             let groupsConfigObj = ${JSON.stringify(config.groupsConfig)};
             
-            // تحويل كائن المجموعات إلى مصفوفة لسهولة العرض
             let groupsArr = Object.keys(groupsConfigObj).map(key => ({
                 id: key,
                 adminGroup: groupsConfigObj[key].adminGroup || '',
-                words: groupsConfigObj[key].words || []
+                words: groupsConfigObj[key].words || [],
+                useDefaultWords: groupsConfigObj[key].useDefaultWords !== false // افتراضيا مفعل
             }));
 
-            // --- دوال الكلمات الافتراضية ---
+            // دوال الكلمات الافتراضية
             function renderDefaultWords() {
                 const container = document.getElementById('defaultWordsContainer');
                 container.innerHTML = '';
@@ -122,7 +194,7 @@ app.get('/', (req, res) => {
                 renderDefaultWords();
             }
 
-            // --- دوال المجموعات المخصصة ---
+            // دوال المجموعات المخصصة
             function renderGroups() {
                 const container = document.getElementById('groupsContainer');
                 container.innerHTML = '';
@@ -144,6 +216,14 @@ app.get('/', (req, res) => {
                         <label>معرف قروب الإدارة (الخاص بهذا القروب فقط):</label>
                         <input type="text" placeholder="اختياري (إذا تركته فارغ سيستخدم الإدارة الافتراضية)" dir="ltr" style="text-align: left;" value="\${group.adminGroup}" onchange="updateGroupData(\${groupIndex}, 'adminGroup', this.value)">
 
+                        <div class="switch-container">
+                            <label class="switch">
+                                <input type="checkbox" \${group.useDefaultWords ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                            <span style="font-size: 14px; font-weight: bold;">تطبيق الكلمات الافتراضية (بالإضافة للكلمات الخاصة بالأسفل)</span>
+                        </div>
+
                         <label>الكلمات الممنوعة الخاصة بهذا القروب:</label>
                         <div class="flex-input">
                             <input type="text" id="newGroupWord_\${groupIndex}" placeholder="كلمة ممنوعة للقروب..." onkeypress="if(event.key === 'Enter') { event.preventDefault(); addGroupWord(\${groupIndex}); }">
@@ -156,7 +236,7 @@ app.get('/', (req, res) => {
             }
 
             function addGroup() {
-                groupsArr.push({ id: '', adminGroup: '', words: [] });
+                groupsArr.push({ id: '', adminGroup: '', words: [], useDefaultWords: true });
                 renderGroups();
             }
 
@@ -169,6 +249,10 @@ app.get('/', (req, res) => {
 
             function updateGroupData(index, field, value) {
                 groupsArr[index][field] = value.trim();
+            }
+
+            function updateGroupToggle(index, isChecked) {
+                groupsArr[index].useDefaultWords = isChecked;
             }
 
             function addGroupWord(groupIndex) {
@@ -185,11 +269,10 @@ app.get('/', (req, res) => {
                 renderGroups();
             }
 
-            // تشغيل العرض الأولي
             renderDefaultWords();
             renderGroups();
 
-            // --- الاتصال بالخادم ---
+            // الاتصال بالخادم
             setInterval(async () => {
                 try {
                     let res = await fetch('/api/status');
@@ -207,13 +290,13 @@ app.get('/', (req, res) => {
             document.getElementById('configForm').onsubmit = async (e) => {
                 e.preventDefault();
                 
-                // إعادة بناء كائن المجموعات من المصفوفة
                 let finalGroupsObj = {};
                 groupsArr.forEach(g => {
                     if(g.id) {
                         finalGroupsObj[g.id] = {
                             adminGroup: g.adminGroup,
-                            words: g.words
+                            words: g.words,
+                            useDefaultWords: g.useDefaultWords
                         };
                     }
                 });
@@ -303,9 +386,28 @@ client.on('message', async msg => {
             if (isSenderAdmin) return; 
 
             const groupId = chat.id._serialized;
-            const groupConfig = config.groupsConfig[groupId] || {};
-            const forbiddenWords = groupConfig.words && groupConfig.words.length > 0 ? groupConfig.words : config.defaultWords;
-            const targetAdminGroup = groupConfig.adminGroup || config.defaultAdminGroup;
+            const groupConfig = config.groupsConfig[groupId];
+            
+            let forbiddenWords = [];
+            let targetAdminGroup = config.defaultAdminGroup;
+
+            // تحديد الكلمات بناءً على إعدادات القروب وزر الدمج
+            if (groupConfig) {
+                targetAdminGroup = groupConfig.adminGroup || config.defaultAdminGroup;
+                
+                if (groupConfig.useDefaultWords !== false) {
+                    forbiddenWords = [...config.defaultWords];
+                }
+                
+                if (groupConfig.words && groupConfig.words.length > 0) {
+                    forbiddenWords = [...forbiddenWords, ...groupConfig.words];
+                }
+            } else {
+                forbiddenWords = [...config.defaultWords];
+            }
+
+            // إذا كانت القائمة فارغة تماما (الزر مغلق ولا توجد كلمات خاصة)، يتم تخطي الفحص
+            if (forbiddenWords.length === 0) return;
 
             const containsForbiddenWord = forbiddenWords.some(word => msg.body.includes(word));
 
