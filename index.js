@@ -87,13 +87,13 @@ app.get('/', (req, res) => {
             .group-card { background: var(--container-bg); border: 1px solid var(--card-border); padding: 15px; border-radius: 8px; margin-top: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: 0.3s; }
             .group-card-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 10px; margin-bottom: 10px;}
             .remove-btn { background: #ff4444; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+            .logout-btn { background: #ff3b30; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; margin-top: 15px; display: none; transition: 0.3s; }
+            .logout-btn:hover { background: #d32f2f; }
             .save-btn { background: #128c7e; color: white; border: none; padding: 15px; font-size: 18px; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 30px; width: 100%; transition: 0.3s; }
             .save-btn:hover { background: #075e54; }
             .success { background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; text-align: center; display: none; margin-top: 15px; border: 1px solid #c3e6cb; }
             .theme-toggle { position: absolute; top: 20px; left: 20px; background: none; border: none; font-size: 24px; cursor: pointer; padding: 5px; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; transition: background 0.3s; }
             .theme-toggle:hover { background: rgba(128,128,128,0.2); }
-
-            /* تصميم زر الـ Switch */
             .switch-container { display: flex; align-items: center; gap: 15px; margin-top: 15px; background: var(--input-bg); padding: 12px; border-radius: 5px; border: 1px solid var(--input-border); }
             .switch { position: relative; display: inline-block; width: 44px; height: 24px; margin: 0; flex-shrink: 0; }
             .switch input { opacity: 0; width: 0; height: 0; }
@@ -112,6 +112,7 @@ app.get('/', (req, res) => {
             <div class="status-box">
                 <h2>حالة الاتصال: <span id="status-text">${botStatus}</span></h2>
                 <img id="qr-image" src="" style="display:none; max-width: 250px; margin: 15px auto 0; border: 10px solid white; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);" />
+                <button type="button" id="logoutBtn" class="logout-btn" onclick="logoutBot()">🚪 تسجيل الخروج من واتساب</button>
             </div>
 
             <form id="configForm">
@@ -139,7 +140,7 @@ app.get('/', (req, res) => {
         </div>
         
         <script>
-            // تفعيل الوضع الليلي
+            // الوضع الليلي
             const themeBtn = document.getElementById('themeToggle');
             const currentTheme = localStorage.getItem('theme') || 'light';
             if (currentTheme === 'dark') {
@@ -160,6 +161,15 @@ app.get('/', (req, res) => {
                 }
             }
 
+            // دوال تسجيل الخروج
+            async function logoutBot() {
+                if(confirm('هل أنت متأكد من تسجيل الخروج؟ ستحتاج إلى مسح الرمز من جديد للاتصال.')) {
+                    document.getElementById('status-text').innerText = 'جاري تسجيل الخروج...';
+                    document.getElementById('logoutBtn').style.display = 'none';
+                    await fetch('/api/logout', { method: 'POST' });
+                }
+            }
+
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
             let groupsConfigObj = ${JSON.stringify(config.groupsConfig)};
             
@@ -167,10 +177,9 @@ app.get('/', (req, res) => {
                 id: key,
                 adminGroup: groupsConfigObj[key].adminGroup || '',
                 words: groupsConfigObj[key].words || [],
-                useDefaultWords: groupsConfigObj[key].useDefaultWords !== false // افتراضيا مفعل
+                useDefaultWords: groupsConfigObj[key].useDefaultWords !== false
             }));
 
-            // دوال الكلمات الافتراضية
             function renderDefaultWords() {
                 const container = document.getElementById('defaultWordsContainer');
                 container.innerHTML = '';
@@ -194,7 +203,6 @@ app.get('/', (req, res) => {
                 renderDefaultWords();
             }
 
-            // دوال المجموعات المخصصة
             function renderGroups() {
                 const container = document.getElementById('groupsContainer');
                 container.innerHTML = '';
@@ -278,6 +286,14 @@ app.get('/', (req, res) => {
                     let res = await fetch('/api/status');
                     let data = await res.json();
                     document.getElementById('status-text').innerText = data.status;
+                    
+                    // إظهار وإخفاء زر تسجيل الخروج بناءً على حالة الاتصال
+                    if(data.status.includes('متصل وجاهز')) {
+                        document.getElementById('logoutBtn').style.display = 'inline-block';
+                    } else {
+                        document.getElementById('logoutBtn').style.display = 'none';
+                    }
+
                     if(data.qr) {
                         document.getElementById('qr-image').src = data.qr;
                         document.getElementById('qr-image').style.display = 'block';
@@ -329,6 +345,18 @@ app.get('/api/status', (req, res) => {
     res.json({ qr: currentQR, status: botStatus });
 });
 
+// استقبال طلب تسجيل الخروج من اللوحة
+app.post('/api/logout', async (req, res) => {
+    try {
+        botStatus = 'جاري تسجيل الخروج وتنظيف الجلسة...';
+        await client.logout();
+        res.sendStatus(200);
+    } catch (error) {
+        console.error('Logout error:', error);
+        res.sendStatus(500);
+    }
+});
+
 app.post('/save', (req, res) => {
     config = req.body;
     fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
@@ -372,6 +400,22 @@ client.on('authenticated', () => {
     currentQR = '';
 });
 
+// إعادة تشغيل البوت عند تسجيل الخروج بنجاح
+client.on('disconnected', async (reason) => {
+    console.log('تم الانفصال أو تسجيل الخروج:', reason);
+    botStatus = 'تم تسجيل الخروج بنجاح. جاري إعادة التشغيل...';
+    currentQR = '';
+    
+    try {
+        await client.destroy();
+    } catch(e) {}
+    
+    // الانتظار ثواني قليلة قبل بدء جلسة جديدة لضمان تنظيف الملفات
+    setTimeout(() => {
+        client.initialize();
+    }, 3000);
+});
+
 const pendingBans = new Map();
 
 client.on('message', async msg => {
@@ -391,7 +435,6 @@ client.on('message', async msg => {
             let forbiddenWords = [];
             let targetAdminGroup = config.defaultAdminGroup;
 
-            // تحديد الكلمات بناءً على إعدادات القروب وزر الدمج
             if (groupConfig) {
                 targetAdminGroup = groupConfig.adminGroup || config.defaultAdminGroup;
                 
@@ -406,7 +449,6 @@ client.on('message', async msg => {
                 forbiddenWords = [...config.defaultWords];
             }
 
-            // إذا كانت القائمة فارغة تماما (الزر مغلق ولا توجد كلمات خاصة)، يتم تخطي الفحص
             if (forbiddenWords.length === 0) return;
 
             const containsForbiddenWord = forbiddenWords.some(word => msg.body.includes(word));
