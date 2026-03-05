@@ -15,8 +15,8 @@ function saveLog(type, args) {
     if (logsHistory.length > 200) logsHistory.shift(); 
 }
 
-console.log = (...args) => { origLog(...args); saveLog('INFO', args); };
-console.error = (...args) => { origErr(...args); saveLog('ERROR', args); };
+console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
+console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
 const app = express();
 app.use(express.urlencoded({ extended: true }));
@@ -28,10 +28,11 @@ if (!fs.existsSync(configPath)) {
     fs.writeFileSync(configPath, JSON.stringify({
         enableWordFilter: true,
         enableAIFilter: false,
-        autoAction: false, // 🔴 الميزة الجديدة: الإجراء التلقائي
+        enableAIMedia: false, // 🟣 الخيار الجديد: تحليل المرفقات
+        autoAction: false, 
         aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية، أو ترويج لبيع إجازات مرضية وتقارير طبية.',
         ollamaUrl: 'http://localhost:11434',
-        ollamaModel: 'qwen2.5:7b',
+        ollamaModel: 'llava', // نموذج افتراضي يدعم الصور
         defaultAdminGroup: '120363424446982803@g.us',
         defaultWords: ['ســكــلــيف', 'اجــازة مرضـــية', 'تـــقريــر', '🏥', 'معتـــمد', 'مرضية', 'عذر طبي', 'تقرير طبي', 'عذر', 'سكليف', 'صحتي', 'تكاليف'],
         groupsConfig: {}
@@ -42,10 +43,11 @@ let config = JSON.parse(fs.readFileSync(configPath));
 
 if (typeof config.enableWordFilter === 'undefined') config.enableWordFilter = true;
 if (typeof config.enableAIFilter === 'undefined') config.enableAIFilter = false;
+if (typeof config.enableAIMedia === 'undefined') config.enableAIMedia = false;
 if (typeof config.autoAction === 'undefined') config.autoAction = false;
 if (typeof config.aiPrompt === 'undefined') config.aiPrompt = 'امنع أي رسالة تحتوي على إعلانات تجارية، أو ترويج لبيع إجازات مرضية وتقارير طبية.';
 if (typeof config.ollamaUrl === 'undefined') config.ollamaUrl = 'http://localhost:11434';
-if (typeof config.ollamaModel === 'undefined') config.ollamaModel = 'qwen2.5:7b';
+if (typeof config.ollamaModel === 'undefined') config.ollamaModel = 'llava';
 
 let currentQR = '';
 let botStatus = 'جاري تهيئة النظام وبدء التشغيل...';
@@ -135,7 +137,7 @@ app.get('/', (req, res) => {
             .close-modal:hover { color: #ff4444; }
             @keyframes slideIn { from { transform: translateY(-30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
-            #terminalOutput { background: #000; color: #0f0; font-family: 'Courier New', Courier, monospace; height: 400px; overflow-y: scroll; padding: 15px; border-radius: 5px; font-size: 13px; direction: ltr; text-align: left; margin-top: 15px; border: 1px solid #333; }
+            #terminalOutput { background: #000; color: #0f0; font-family: monospace; height: 400px; overflow-y: scroll; padding: 15px; border-radius: 5px; font-size: 13px; direction: ltr; text-align: left; margin-top: 15px; border: 1px solid #333; }
             #terminalOutput div { margin-bottom: 5px; border-bottom: 1px dashed #222; padding-bottom: 5px; word-wrap: break-word; }
         </style>
     </head>
@@ -165,19 +167,29 @@ app.get('/', (req, res) => {
                                 <input type="checkbox" id="enableWordFilter" ${config.enableWordFilter ? 'checked' : ''}>
                                 <span class="slider"></span>
                             </label>
-                            <span style="font-size: 14px; font-weight: bold;">تفعيل فلتر الكلمات الممنوعة (للمجموعات غير المخصصة)</span>
+                            <span style="font-size: 14px; font-weight: bold;">تفعيل فلتر الكلمات الممنوعة</span>
                         </div>
                     </div>
 
                     <div class="switch-container" style="border-color: var(--status-text);">
                         <div class="switch-inner">
                             <label class="switch">
-                                <input type="checkbox" id="enableAIFilter" onchange="toggleAiPrompt(this.checked)" ${config.enableAIFilter ? 'checked' : ''}>
+                                <input type="checkbox" id="enableAIFilter" ${config.enableAIFilter ? 'checked' : ''}>
                                 <span class="slider"></span>
                             </label>
-                            <span style="font-size: 14px; font-weight: bold; color: var(--status-text);">تفعيل المشرف الذكي (AI) (للمجموعات غير المخصصة)</span>
+                            <span style="font-size: 14px; font-weight: bold; color: var(--status-text);">تفعيل المشرف الذكي (AI) للنصوص</span>
                         </div>
                         <button type="button" class="add-btn" style="background: #0277bd; padding: 8px 15px;" onclick="openOllamaModal()">⚙️ إعدادات خادم AI</button>
+                    </div>
+
+                    <div class="switch-container" style="border-color: #9c27b0; background: rgba(156, 39, 176, 0.05);">
+                        <div class="switch-inner">
+                            <label class="switch">
+                                <input type="checkbox" id="enableAIMedia" ${config.enableAIMedia ? 'checked' : ''}>
+                                <span class="slider" style="background-color: #ccc;"></span>
+                            </label>
+                            <span style="font-size: 14px; font-weight: bold; color: #9c27b0;">تفعيل تحليل الصور للمشرف الذكي (يستهلك موارد عالية - يتطلب نموذج Vision)</span>
+                        </div>
                     </div>
 
                     <div class="switch-container" style="border-color: #e91e63; background: rgba(233, 30, 99, 0.05);">
@@ -186,21 +198,21 @@ app.get('/', (req, res) => {
                                 <input type="checkbox" id="autoAction" ${config.autoAction ? 'checked' : ''}>
                                 <span class="slider" style="background-color: #ccc;"></span>
                             </label>
-                            <span style="font-size: 14px; font-weight: bold; color: #e91e63;">تفعيل الحذف والإبلاغ المباشر (تخطي تصويت الإدارة) للمجموعات العامة</span>
+                            <span style="font-size: 14px; font-weight: bold; color: #e91e63;">تفعيل الحذف والإبلاغ المباشر (تخطي تصويت الإدارة)</span>
                         </div>
                     </div>
 
                     <div id="aiPromptContainer" style="margin-top: 15px; padding: 15px; background: var(--status-bg); border-radius: 8px; border: 1px dashed var(--status-text);">
-                        <label style="margin-top:0; color: var(--status-text);">تعليمات الذكاء الاصطناعي (اكتب وصفاً دقيقاً للمحتوى الممنوع):</label>
-                        <textarea id="aiPromptText" rows="3" placeholder="مثال: قم بمنع أي رسالة تروج للخدمات الطبية أو بيع المتابعين...">${config.aiPrompt}</textarea>
+                        <label style="margin-top:0; color: var(--status-text);">تعليمات الذكاء الاصطناعي (وصف المحتوى الممنوع):</label>
+                        <textarea id="aiPromptText" rows="3" placeholder="مثال: قم بمنع أي رسالة تروج للخدمات...">${config.aiPrompt}</textarea>
                     </div>
 
-                    <label style="border-top: 1px solid var(--card-border); padding-top: 15px;">معرّف (ID) مجموعة الإدارة (لتلقي تنبيهات المخالفات):</label>
+                    <label style="border-top: 1px solid var(--card-border); padding-top: 15px;">معرّف (ID) مجموعة الإدارة (لتلقي التنبيهات):</label>
                     <input type="text" id="defaultAdminGroup" value="${config.defaultAdminGroup}" dir="ltr" style="text-align: left;">
 
-                    <label>الكلمات الممنوعة (تُطبق على المجموعات التي ليس لها قائمة خاصة):</label>
+                    <label>الكلمات الممنوعة:</label>
                     <div class="flex-input">
-                        <input type="text" id="newDefaultWord" placeholder="أدخل الكلمة الممنوعة هنا ثم اضغط إضافة..." onkeypress="if(event.key === 'Enter') { event.preventDefault(); addDefaultWord(); }">
+                        <input type="text" id="newDefaultWord" placeholder="أدخل الكلمة الممنوعة هنا..." onkeypress="if(event.key === 'Enter') { event.preventDefault(); addDefaultWord(); }">
                         <button type="button" class="add-btn" onclick="addDefaultWord()">+ إضافة كلمة</button>
                     </div>
                     <div id="defaultWordsContainer" class="chip-container"></div>
@@ -224,7 +236,7 @@ app.get('/', (req, res) => {
                 <label>رابط الخادم (Endpoint URL):</label>
                 <input type="text" id="ollamaUrl" value="${config.ollamaUrl}" dir="ltr" style="text-align: left;">
                 
-                <label>اسم النموذج اللغوي (Model Name):</label>
+                <label>اسم النموذج (يجب أن يكون نموذج Vision إذا أردت تحليل الصور، مثل llava):</label>
                 <input type="text" id="ollamaModel" value="${config.ollamaModel}" dir="ltr" style="text-align: left;">
                 
                 <button type="button" class="add-btn" style="width: 100%; margin-top: 20px; padding: 12px; background: var(--status-text);" onclick="closeOllamaModal()">حفظ وإغلاق</button>
@@ -287,9 +299,9 @@ app.get('/', (req, res) => {
                     const term = document.getElementById('terminalOutput');
                     
                     let html = logs.map(l => {
-                        let styled = l.replace(/\\[ERROR\\]/g, '<span style="color:#ff3b30">[ERROR]</span>')
-                                      .replace(/\\[INFO\\]/g, '<span style="color:#4fc3f7">[INFO]</span>')
-                                      .replace(/\\[DEBUG\\]/g, '<span style="color:#ffeb3b">[DEBUG]</span>');
+                        let styled = l.replace(/\\[خطأ\\]/g, '<span style="color:#ff3b30">[خطأ]</span>')
+                                      .replace(/\\[معلومة\\]/g, '<span style="color:#4fc3f7">[معلومة]</span>')
+                                      .replace(/\\[فحص\\]/g, '<span style="color:#ffeb3b">[فحص]</span>');
                         return \`<div>\${styled}</div>\`;
                     }).join('');
                     
@@ -299,8 +311,6 @@ app.get('/', (req, res) => {
                     }
                 } catch(e) {}
             }
-
-            function toggleAiPrompt(isChecked) {}
 
             async function logoutBot() {
                 if(confirm('هل أنت متأكد من رغبتك في تسجيل الخروج من حساب واتساب؟ سيتم فصل البوت.')) {
@@ -320,7 +330,8 @@ app.get('/', (req, res) => {
                 useDefaultWords: groupsConfigObj[key].useDefaultWords !== false,
                 enableWordFilter: groupsConfigObj[key].enableWordFilter !== false,
                 enableAIFilter: groupsConfigObj[key].enableAIFilter || false,
-                autoAction: groupsConfigObj[key].autoAction || false // 🔴 ميزة الإجراء التلقائي المستقل
+                enableAIMedia: groupsConfigObj[key].enableAIMedia || false,
+                autoAction: groupsConfigObj[key].autoAction || false 
             }));
 
             function renderDefaultWords() {
@@ -397,6 +408,16 @@ app.get('/', (req, res) => {
                             </div>
                         </div>
 
+                        <div class="switch-container" style="border-color: #9c27b0; background: rgba(156, 39, 176, 0.05);">
+                            <div class="switch-inner">
+                                <label class="switch">
+                                    <input type="checkbox" \${group.enableAIMedia ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAIMedia', this.checked)">
+                                    <span class="slider" style="background-color: #ccc;"></span>
+                                </label>
+                                <span style="font-size: 14px; font-weight: bold; color: #9c27b0;">تفعيل تحليل الصور للمشرف الذكي في هذه المجموعة</span>
+                            </div>
+                        </div>
+
                         <div class="switch-container" style="border-color: #e91e63; background: rgba(233, 30, 99, 0.05);">
                             <div class="switch-inner">
                                 <label class="switch">
@@ -419,7 +440,7 @@ app.get('/', (req, res) => {
             }
 
             function addGroup() {
-                groupsArr.push({ id: '', adminGroup: '', words: [], useDefaultWords: true, enableWordFilter: true, enableAIFilter: false, autoAction: false });
+                groupsArr.push({ id: '', adminGroup: '', words: [], useDefaultWords: true, enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, autoAction: false });
                 renderGroups();
             }
 
@@ -488,6 +509,7 @@ app.get('/', (req, res) => {
                             useDefaultWords: g.useDefaultWords,
                             enableWordFilter: g.enableWordFilter,
                             enableAIFilter: g.enableAIFilter,
+                            enableAIMedia: g.enableAIMedia,
                             autoAction: g.autoAction
                         };
                     }
@@ -496,6 +518,7 @@ app.get('/', (req, res) => {
                 const newConfig = {
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
                     enableAIFilter: document.getElementById('enableAIFilter').checked,
+                    enableAIMedia: document.getElementById('enableAIMedia').checked,
                     autoAction: document.getElementById('autoAction').checked,
                     aiPrompt: document.getElementById('aiPromptText').value.trim(),
                     ollamaUrl: document.getElementById('ollamaUrl').value.trim(),
@@ -528,11 +551,11 @@ app.get('/api/logs', (req, res) => res.json(logsHistory));
 
 app.post('/api/logout', async (req, res) => {
     try {
-        botStatus = 'جاري تسجيل الخروج من الحساب...';
+        botStatus = 'جاري إنهاء الجلسة...';
         await client.logout();
         res.sendStatus(200);
     } catch (error) {
-        console.error('Logout error:', error);
+        console.error('حدث خطأ أثناء إنهاء الجلسة:', error);
         res.sendStatus(500);
     }
 });
@@ -540,7 +563,7 @@ app.post('/api/logout', async (req, res) => {
 app.post('/save', (req, res) => {
     config = req.body;
     fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
-    console.log('[DEBUG] 💾 تم حفظ إعدادات النظام بنجاح.');
+    console.log('[فحص] 💾 تم حفظ إعدادات النظام بنجاح.');
     res.sendStatus(200);
 });
 
@@ -580,7 +603,7 @@ client.on('authenticated', () => {
 });
 
 client.on('disconnected', async (reason) => {
-    console.log('تم قطع الاتصال:', reason);
+    console.log('تم قطع الاتصال بالخادم الداخلي:', reason);
     botStatus = 'تم تسجيل الخروج من الحساب. جاري إعادة تشغيل النظام...';
     currentQR = '';
     
@@ -612,7 +635,8 @@ client.on('message', async msg => {
             let targetAdminGroup = config.defaultAdminGroup;
             let isWordFilterEnabledForThisGroup = config.enableWordFilter;
             let isAIFilterEnabledForThisGroup = config.enableAIFilter; 
-            let isAutoActionEnabledForThisGroup = config.autoAction; // 🔴 سحب قيمة الإجراء التلقائي
+            let isAIMediaEnabledForThisGroup = config.enableAIMedia; 
+            let isAutoActionEnabledForThisGroup = config.autoAction; 
 
             if (groupConfig) {
                 targetAdminGroup = groupConfig.adminGroup || config.defaultAdminGroup;
@@ -625,7 +649,10 @@ client.on('message', async msg => {
                     isAIFilterEnabledForThisGroup = groupConfig.enableAIFilter;
                 }
 
-                // 🔴 قراءة حالة الإجراء التلقائي للمجموعة المخصصة
+                if (typeof groupConfig.enableAIMedia !== 'undefined') {
+                    isAIMediaEnabledForThisGroup = groupConfig.enableAIMedia;
+                }
+
                 if (typeof groupConfig.autoAction !== 'undefined') {
                     isAutoActionEnabledForThisGroup = groupConfig.autoAction;
                 }
@@ -641,47 +668,94 @@ client.on('message', async msg => {
                 forbiddenWords = [...config.defaultWords];
             }
 
-            console.log(`[DEBUG] 🔍 جاري فحص رسالة في مجموعة (${chat.name}) | فلتر الكلمات: (${isWordFilterEnabledForThisGroup})، المشرف الذكي: (${isAIFilterEnabledForThisGroup})`);
+            console.log(`[فحص] متابعة رسالة في (${chat.name}) | كلمات(${isWordFilterEnabledForThisGroup})، ذكي(${isAIFilterEnabledForThisGroup})، مرفقات(${isAIMediaEnabledForThisGroup})`);
 
             let isViolating = false;
             let violationReason = '';
 
-            if (isWordFilterEnabledForThisGroup && forbiddenWords.length > 0) {
+            const isMediaContent = msg.hasMedia || msg.type === 'image' || msg.type === 'video' || msg.type === 'audio' || msg.type === 'ptt' || msg.type === 'sticker' || msg.type === 'document';
+
+            // 1. الفحص التقليدي (للنصوص فقط)
+            if (isWordFilterEnabledForThisGroup && forbiddenWords.length > 0 && msg.body) {
                 const matchedWord = forbiddenWords.find(word => msg.body.includes(word));
                 if (matchedWord) {
                     isViolating = true;
-                    violationReason = `تطابق مع الكلمة المحظورة: [${matchedWord}]`;
-                    console.log(`[DEBUG] 🛑 تم اكتشاف مخالفة (فلتر الكلمات). الكلمة المحظورة: ${matchedWord}`);
+                    violationReason = `تطابق تام مع الكلمة المحظورة: [${matchedWord}]`;
+                    console.log(`[فحص] تم اكتشاف مخالفة صريحة للكلمات.`);
                 }
             }
 
+            // 2. التحضير لإرسال البيانات للذكاء الاصطناعي
+            let canSendToAI = false;
+            let base64Image = null;
+
             if (!isViolating && isAIFilterEnabledForThisGroup) {
-                console.log(`[DEBUG] 🧠 يتم الآن عرض الرسالة على الذكاء الاصطناعي لتحليلها...`);
+                if (!isMediaContent) {
+                    // رسالة نصية عادية
+                    if (msg.body && msg.body.trim().length > 0) canSendToAI = true;
+                } else {
+                    // رسالة تحتوي على مرفق
+                    if (isAIMediaEnabledForThisGroup) {
+                        canSendToAI = true;
+                        // تحميل الصورة فقط للتحليل البصري
+                        if (msg.type === 'image') {
+                            try {
+                                console.log(`[معلومة] جاري تحميل الصورة لإرسالها لمحرك الرؤية (Vision)...`);
+                                const media = await msg.downloadMedia();
+                                if (media && media.data) {
+                                    base64Image = media.data;
+                                }
+                            } catch (err) {
+                                console.error('[خطأ] فشل تحميل المرفق للتحليل:', err.message);
+                            }
+                        }
+                    } else if (msg.body && msg.body.trim().length > 0) {
+                        // إذا كان خيار الصور مغلق، والرسالة تحتوي على نص (Caption) أسفل الصورة، أرسل النص فقط.
+                        canSendToAI = true;
+                        console.log(`[فحص] تحليل الصور معطل، سيتم فحص النص المرافق للملف فقط.`);
+                    } else {
+                        console.log(`[فحص] تم تخطي الرسالة (مرفق بدون نص، وخيار تحليل الصور معطل).`);
+                    }
+                }
+            }
+
+            // 3. التنفيذ الفعلي للذكاء الاصطناعي
+            if (canSendToAI) {
+                console.log(`[فحص] يتم الآن عرض المحتوى على المشرف الذكي للتقييم...`);
                 try {
-                    const aiPromptText = `أنت مشرف مجموعة صارم. تعليماتك هي: ${config.aiPrompt}\n\nبناء على التعليمات، هل الرسالة التالية تعتبر مخالفة؟ أجب بكلمة "نعم" أو "لا" فقط وبدون أي إضافات.\nالرسالة: "${msg.body}"`;
+                    const msgText = msg.body || '[صورة بدون نص مرفق]';
+                    const aiPromptText = `أنت مشرف مجموعة صارم. تعليماتك هي: ${config.aiPrompt}\n\nبناء على التعليمات، هل هذا المحتوى (النص أو الصورة) يعتبر مخالف؟ أجب بكلمة "نعم" أو "لا" فقط وبدون أي إضافات.\nالمحتوى: "${msgText}"`;
                     
+                    const payload = {
+                        model: config.ollamaModel,
+                        prompt: aiPromptText,
+                        stream: false
+                    };
+
+                    // إرفاق الصورة المشفرة في حال وجودها وتفعيل الخيار
+                    if (base64Image) {
+                        payload.images = [base64Image];
+                    }
+
                     const response = await fetch(`${config.ollamaUrl}/api/generate`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            model: config.ollamaModel,
-                            prompt: aiPromptText,
-                            stream: false
-                        })
+                        body: JSON.stringify(payload)
                     });
                     
                     const data = await response.json();
-                    console.log(`[DEBUG] 🤖 قرار الذكاء الاصطناعي: ${data.response}`);
+                    console.log(`[فحص] الرد الوارد من المشرف الذكي: ${data.response}`);
                     
                     if (data.response && data.response.includes('نعم')) {
                         isViolating = true;
-                        violationReason = 'صُنفت كمخالفة من قبل المشرف الذكي (الذكاء الاصطناعي)';
+                        violationReason = 'تم التصنيف كمخالفة عبر التحليل الذكي (AI)';
                     }
                 } catch (error) {
-                    console.error('[ERROR] تعذر الاتصال بخادم الذكاء الاصطناعي (Ollama):', error.message);
+                    console.error('[خطأ] فشل في تمرير المحتوى إلى المعالج المستقل:', error.message);
                 }
             }
 
+            // 4. اتخاذ الإجراء (حذف وإبلاغ)
             if (isViolating) {
                 const contact = await msg.getContact();
                 let senderId = cleanAuthorId; 
@@ -689,21 +763,18 @@ client.on('message', async msg => {
                     senderId = `${contact.number}@c.us`;
                 }
 
-                const messageContent = msg.body;
+                const messageContent = msg.body || '[مرفق وسائط]';
                 await msg.delete(true); 
-                console.log(`[DEBUG] 🗑️ تم حذف الرسالة المخالفة من المجموعة.`);
+                console.log(`[فحص] تم إزالة المحتوى المخالف بنجاح من مساحة المحادثة.`);
 
-                // 🔴 التحقق من الإجراء: هل نرسل تصويت أو تقرير مباشر؟
                 if (isAutoActionEnabledForThisGroup) {
-                    // إرسال إيصال (تقرير) للمشرفين بدون تصويت
-                    const reportText = `🚨 *إشعار حذف تلقائي*\nتم حذف رسالة مخالفة في مجموعة "${chat.name}"\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${violationReason}\n📝 *محتوى الرسالة:*\n"${messageContent}"\n\n*(لم يتم فتح تصويت بناءً على إعدادات المجموعة)*`;
+                    const reportText = `🚨 *تقرير إجراء تلقائي*\nتم مسح محتوى مخالف في مجموعة "${chat.name}"\n\n👤 *صاحب المشاركة:* @${senderId.split('@')[0]}\n📋 *سبب الإزالة:* ${violationReason}\n📝 *النص الممسوح:*\n"${messageContent}"\n\n*(تم التنفيذ التلقائي بدون فتح تصويت بناءً على الإعدادات)*`;
                     
                     await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
-                    console.log(`[DEBUG] 📩 تم إرسال إشعار الحذف التلقائي للإدارة بنجاح.`);
+                    console.log(`[فحص] تم رفع تقرير الحذف المباشر إلى قائمة الإدارة.`);
                 } else {
-                    // إرسال تصويت كالمعتاد
-                    const pollTitle = `🚨 تم حذف رسالة مخالفة في مجموعة "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nسبب الحذف: ${violationReason}\nمحتوى الرسالة:\n"${messageContent}"\n\nهل ترغب في طرد هذا العضو من جميع المجموعات؟`;
-                    const poll = new Poll(pollTitle, ['نعم، اطرد العضو', 'لا، اكتفِ بالحذف']);
+                    const pollTitle = `🚨 إشعار بوجود محتوى مخالف في "${chat.name}"\nصاحب المشاركة: @${senderId.split('@')[0]}\nسبب الإزالة: ${violationReason}\nالنص:\n"${messageContent}"\n\nهل ترغب في إصدار قرار بالطرد الشامل لهذا الرقم؟`;
+                    const poll = new Poll(pollTitle, ['نعم، تطبيق الطرد', 'لا، تجاهل']);
                     
                     const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
 
@@ -711,7 +782,7 @@ client.on('message', async msg => {
                         senderId: senderId,
                         pollMsg: pollMsg
                     });
-                    console.log(`[DEBUG] 📩 تم إرسال طلب تصويت للإدارة.`);
+                    console.log(`[فحص] تم فتح بطاقة تصويت لمجموعة الإدارة.`);
                 }
             }
         }
@@ -727,7 +798,7 @@ client.on('vote_update', async vote => {
             const data = pendingBans.get(pollId);
             const userToBan = data.senderId;
 
-            console.log(`[DEBUG] 🗳️ قرار الإدارة: ${selectedOption}`);
+            console.log(`[فحص] تم استلام قرار التدخل البشري: ${selectedOption}`);
 
             if (selectedOption.includes('نعم')) {
                 const botId = client.info.wid._serialized;
@@ -742,16 +813,16 @@ client.on('vote_update', async vote => {
                         if (botIsAdmin) {
                             try {
                                 await chat.removeParticipants([userToBan]);
-                                console.log(`[DEBUG] 🔨 تم طرد العضو من مجموعة: ${chat.name}`);
+                                console.log(`[فحص] تم تنفيذ الإبعاد في مساحة: ${chat.name}`);
                                 await new Promise(resolve => setTimeout(resolve, 1000)); 
                             } catch(e) { }
                         }
                     }
                 }
-                await data.pollMsg.reply('✅ *تم تنفيذ قرار الطرد في المجموعات بنجاح وإغلاق الطلب.*');
+                await data.pollMsg.reply('✅ *تم تعميم وتطبيق الابعاد بنجاح.*');
 
             } else if (selectedOption.includes('لا')) {
-                await data.pollMsg.reply('🛑 *تم تجاهل طلب الطرد بناءً على تصويت الإدارة.*');
+                await data.pollMsg.reply('🛑 *تم إلغاء الإبعاد بناء على التدخل البشري.*');
             }
 
             pendingBans.delete(pollId);
