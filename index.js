@@ -34,7 +34,7 @@ if (!fs.existsSync(configPath)) {
         aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية، أو ترويج لبيع إجازات مرضية وتقارير طبية.',
         ollamaUrl: 'http://localhost:11434',
         ollamaModel: 'llava', 
-        defaultAdminGroup: '120363424446982803@g.us',
+        defaultAdminGroup: '**************@g.us',
         defaultWords: ['ســكــلــيف', 'اجــازة مرضـــية', 'تـــقريــر', '🏥', 'معتـــمد', 'مرضية', 'عذر طبي', 'تقرير طبي', 'عذر', 'سكليف', 'صحتي', 'تكاليف'],
         blacklist: [], 
         groupsConfig: {}
@@ -170,7 +170,7 @@ app.get('/', (req, res) => {
                     
                     <label style="color: #d32f2f;">أرقام المخالفين (اكتب الرقم مباشرة وسيتم تجهيزه تلقائياً):</label>
                     <div class="flex-input">
-                        <input type="text" id="newBlacklistNumber" placeholder="مثال: 966582014941" onkeypress="if(event.key === 'Enter') { event.preventDefault(); addBlacklistNumber(); }">
+                        <input type="text" id="newBlacklistNumber" placeholder="مثال: 966*********" onkeypress="if(event.key === 'Enter') { event.preventDefault(); addBlacklistNumber(); }">
                         <button type="button" class="add-btn" style="background: #d32f2f;" onclick="addBlacklistNumber()">+ إضافة حظر</button>
                     </div>
                     <div id="blacklistContainer" class="chip-container"></div>
