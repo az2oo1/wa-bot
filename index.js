@@ -383,7 +383,9 @@ app.get('/', (req, res) => {
                 enableAntiSpam: groupsConfigObj[key].enableAntiSpam || false,
                 spamDuplicateLimit: groupsConfigObj[key].spamDuplicateLimit || 3,
                 spamFloodLimit: groupsConfigObj[key].spamFloodLimit || 5,
-                spamAction: groupsConfigObj[key].spamAction || 'poll'
+                spamAction: groupsConfigObj[key].spamAction || 'poll',
+                enableWelcomeMessage: groupsConfigObj[key].enableWelcomeMessage || false, // 🟢 تفعيل رسالة الترحيب
+                welcomeMessageText: groupsConfigObj[key].welcomeMessageText || 'مرحباً بك يا {user} في مجموعتنا!' // 🟢 نص الترحيب
             }));
 
             function renderBlacklist() {
@@ -459,6 +461,20 @@ app.get('/', (req, res) => {
                         <label>معرّف مجموعة الإدارة (لتلقي تنبيهات هذه المجموعة فقط):</label>
                         <input type="text" placeholder="(اتركه فارغاً لاستخدام مجموعة الإدارة العامة)" dir="ltr" style="text-align: left;" value="\${group.adminGroup}" onchange="updateGroupData(\${groupIndex}, 'adminGroup', this.value)">
 
+                        <div class="switch-container" style="border-color: #4caf50; background: rgba(76, 175, 80, 0.05);">
+                            <div class="switch-inner">
+                                <label class="switch">
+                                    <input type="checkbox" \${group.enableWelcomeMessage ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableWelcomeMessage', this.checked)">
+                                    <span class="slider" style="background-color: #ccc;"></span>
+                                </label>
+                                <span style="font-size: 14px; font-weight: bold; color: #4caf50;">تفعيل إرسال رسالة ترحيبية عند الانضمام</span>
+                            </div>
+                        </div>
+                        <div style="margin-top: 10px; padding: 10px; background: var(--input-bg); border-radius: 5px; border: 1px dashed #4caf50;">
+                            <label style="margin-top:0; color: #4caf50; font-size: 13px;">نص رسالة الترحيب (اكتب {user} لعمل منشن للعضو الجديد):</label>
+                            <textarea rows="2" onchange="updateGroupData(\${groupIndex}, 'welcomeMessageText', this.value)">\${group.welcomeMessageText}</textarea>
+                        </div>
+
                         <div class="switch-container" style="border-color: #d32f2f; background: rgba(211, 47, 47, 0.05);">
                             <div class="switch-inner">
                                 <label class="switch">
@@ -475,7 +491,7 @@ app.get('/', (req, res) => {
                                     <input type="checkbox" \${group.enableAntiSpam ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAntiSpam', this.checked)">
                                     <span class="slider" style="background-color: #ccc;"></span>
                                 </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #ff9800;">تفعيل الحماية من الإزعاج السريع (Anti-Spam) لهذه المجموعة</span>
+                                <span style="font-size: 14px; font-weight: bold; color: #ff9800;">تفعيل الحماية من الإزعاج السريع (Anti-Spam)</span>
                             </div>
                         </div>
                         
@@ -563,7 +579,8 @@ app.get('/', (req, res) => {
                     id: '', adminGroup: '', words: [], useDefaultWords: true, 
                     enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
                     autoAction: false, enableBlacklist: true,
-                    enableAntiSpam: false, spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll' 
+                    enableAntiSpam: false, spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll',
+                    enableWelcomeMessage: false, welcomeMessageText: 'مرحباً بك يا {user} في مجموعتنا!'
                 });
                 renderGroups();
             }
@@ -576,7 +593,7 @@ app.get('/', (req, res) => {
             }
 
             function updateGroupData(index, field, value) {
-                groupsArr[index][field] = typeof value === 'string' ? value.trim() : value;
+                groupsArr[index][field] = value; 
             }
 
             function updateGroupToggle(index, field, isChecked) {
@@ -640,7 +657,9 @@ app.get('/', (req, res) => {
                             enableAntiSpam: g.enableAntiSpam,
                             spamDuplicateLimit: g.spamDuplicateLimit,
                             spamFloodLimit: g.spamFloodLimit,
-                            spamAction: g.spamAction
+                            spamAction: g.spamAction,
+                            enableWelcomeMessage: g.enableWelcomeMessage,
+                            welcomeMessageText: g.welcomeMessageText
                         };
                     }
                 });
@@ -758,8 +777,6 @@ client.on('group_join', async (notification) => {
     try {
         console.log(`[معلومة] 🔔 حدث انضمام جديد في مجموعة: ${notification.chatId}`);
         
-        if (!config.blacklist || config.blacklist.length === 0) return;
-        
         const chat = await notification.getChat();
         const groupId = chat.id._serialized;
         const groupConfig = config.groupsConfig[groupId];
@@ -768,8 +785,6 @@ client.on('group_join', async (notification) => {
         if (groupConfig && typeof groupConfig.enableBlacklist !== 'undefined') {
             isBlacklistEnabledForGroup = groupConfig.enableBlacklist;
         }
-
-        if (!isBlacklistEnabledForGroup) return;
 
         for (const participantId of notification.recipientIds) {
             let cleanJoinedId = participantId.replace(/:[0-9]+/, '');
@@ -787,8 +802,12 @@ client.on('group_join', async (notification) => {
                 }
             }
 
-            if (config.blacklist.includes(cleanJoinedId)) {
+            let isKicked = false;
+
+            // 1. التحقق من القائمة السوداء
+            if (isBlacklistEnabledForGroup && config.blacklist && config.blacklist.includes(cleanJoinedId)) {
                 console.log(`[أمان] 🛡️ تنبيه: محاولة دخول من رقم محظور (${cleanJoinedId}) في مجموعة (${chat.name}). جاري الطرد...`);
+                isKicked = true;
                 
                 setTimeout(async () => {
                     try {
@@ -803,6 +822,21 @@ client.on('group_join', async (notification) => {
                         console.error('[خطأ] فشل الطرد الفعلي بعد الانضمام:', err.message);
                     }
                 }, 2000);
+            }
+
+            // 2. إرسال رسالة الترحيب (فقط إذا لم يتم طرده، والمجموعة مخصصة، والميزة مفعلة)
+            if (!isKicked && groupConfig && groupConfig.enableWelcomeMessage && groupConfig.welcomeMessageText) {
+                setTimeout(async () => {
+                    try {
+                        // استبدال {user} بمنشن فعلي للرقم
+                        const welcomeText = groupConfig.welcomeMessageText.replace(/{user}/g, `@${cleanJoinedId.split('@')[0]}`);
+                        
+                        await client.sendMessage(groupId, welcomeText, { mentions: [cleanJoinedId] });
+                        console.log(`[معلومة] 👋 تم إرسال رسالة ترحيبية للعضو الجديد: ${cleanJoinedId}`);
+                    } catch (err) {
+                        console.error('[خطأ] فشل إرسال رسالة الترحيب:', err.message);
+                    }
+                }, 3500); // تأخير 3.5 ثوانٍ ليبدو الترحيب طبيعياً
             }
         }
     } catch (error) {}
@@ -877,11 +911,9 @@ client.on('message', async msg => {
                 return; 
             }
 
-            // 🛡️ --- نظام مكافحة الإزعاج (Anti-Spam) المباشر ---
             if (isAntiSpamEnabled) {
                 const trackerKey = `${groupId}_${cleanAuthorId}`;
                 
-                // التكتيك الأول: صندوق العقوبة (مسح أي رسائل لاحقة فوراً لمدة دقيقة كاملة)
                 if (spamMutedUsers.has(trackerKey)) {
                     if (Date.now() < spamMutedUsers.get(trackerKey)) {
                         console.log(`[تنظيف] 🧹 مسح رسالة إضافية لمزعج (في فترة العقوبة - 60 ثانية).`);
@@ -924,31 +956,25 @@ client.on('message', async msg => {
                 if (isSpamFlagged) {
                     console.log(`[أمان] 🚨 تم رصد مزعج في (${chat.name}) السبب: ${spamFlagReason}`);
                     
-                    // 🔴 تفعيل صندوق العقاب لمدة 60 ثانية (دقيقة كاملة)
                     spamMutedUsers.set(trackerKey, Date.now() + 60000);
 
-                    // 1. إحباط الذكاء الاصطناعي
                     for (const m of tracker) {
                         abortedMessages.add(m.id);
                     }
 
-                    // 🔥 2. التكتيك الجذري: المسح المتسلسل (Sequential Deletion) لحل مشكلة واتساب
                     console.log(`[تنظيف] جاري مسح جميع الرسائل السابقة المتراكمة...`);
                     
-                    // مسح الرسالة اللي تسببت بالإنذار فوراً
                     try { await msg.delete(true); } catch(e) {}
 
-                    // مسح باقي الرسائل المخزنة في العداد مع تأخير نصف ثانية بين كل رسالة لتجنب رفض واتساب (Rate Limit)
                     for (const m of tracker) {
                         if (m.id !== msgId) { 
                             try { 
                                 await m.msgObj.delete(true); 
-                                await new Promise(r => setTimeout(r, 500)); // ⏱️ تأخير تكتيكي لضمان الحذف
+                                await new Promise(r => setTimeout(r, 500)); 
                             } catch(err) {}
                         }
                     }
                     
-                    // 🧹 التكتيك الإضافي (Deep Sweep): للتأكد من إن الشات نظيف 100%
                     try {
                         const recentMsgs = await chat.fetchMessages({ limit: 15 });
                         for (const rMsg of recentMsgs) {
@@ -961,7 +987,7 @@ client.on('message', async msg => {
                         }
                     } catch(err) {}
                     
-                    userTrackers.delete(trackerKey); // تصفير العداد بعد الجلد
+                    userTrackers.delete(trackerKey); 
 
                     const contact = await msg.getContact();
                     let senderId = cleanAuthorId; 
@@ -995,7 +1021,6 @@ client.on('message', async msg => {
                     return; 
                 }
             }
-            // --------------------------------------------------------
 
             console.log(`[فحص] متابعة رسالة في (${chat.name}) | كلمات(${isWordFilterEnabledForThisGroup})، ذكي(${isAIFilterEnabledForThisGroup})`);
 
