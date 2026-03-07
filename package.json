@@ -13,6 +13,7 @@
   "dependencies": {
     "express": "^4.18.2",
     "qrcode": "^1.5.3",
-    "whatsapp-web.js": "^1.34.6"
+    "whatsapp-web.js": "^1.34.6",
+    "better-sqlite3": "^9.4.3"
   }
 }

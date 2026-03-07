@@ -1,8 +1,9 @@
 const express = require('express');
 const { Client, LocalAuth, Poll } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
-const fs = require('fs');
+const Database = require('better-sqlite3'); 
 const util = require('util'); 
+const fs = require('fs'); 
 
 const logsHistory = [];
 const origLog = console.log;
@@ -18,48 +19,144 @@ function saveLog(type, args) {
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
+// 🗄️ تهيئة قاعدة البيانات بالهيكلة المتقدمة (Normalized Schema)
+const db = new Database('./bot_data.sqlite');
+db.pragma('journal_mode = WAL'); 
+
+db.exec(`
+    CREATE TABLE IF NOT EXISTS global_settings (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE IF NOT EXISTS llm_settings (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE IF NOT EXISTS blacklist (number TEXT PRIMARY KEY);
+    CREATE TABLE IF NOT EXISTS custom_groups (
+        group_id TEXT PRIMARY KEY,
+        admin_group TEXT,
+        use_default_words INTEGER,
+        enable_word_filter INTEGER,
+        enable_ai_filter INTEGER,
+        enable_ai_media INTEGER,
+        auto_action INTEGER,
+        enable_blacklist INTEGER,
+        enable_anti_spam INTEGER,
+        spam_duplicate_limit INTEGER,
+        spam_flood_limit INTEGER,
+        spam_action TEXT,
+        enable_welcome_message INTEGER,
+        welcome_message_text TEXT,
+        custom_words TEXT
+    );
+`);
+
+// دالة لجلب الإعدادات من الجداول وتحويلها لكائن (Object) عشان سرعة البوت
+function loadConfigFromDB() {
+    let newConfig = {
+        enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
+        autoAction: false, enableBlacklist: true, enableAntiSpam: false, 
+        spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll',
+        defaultAdminGroup: '120363424446982803@g.us', defaultWords: [],
+        aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية.',
+        ollamaUrl: 'http://localhost:11434', ollamaModel: 'llava',
+        groupsConfig: {}
+    };
+
+    // 1. جلب الإعدادات العامة
+    const globals = db.prepare('SELECT * FROM global_settings').all();
+    globals.forEach(row => {
+        if (row.key === 'defaultWords') newConfig.defaultWords = JSON.parse(row.value);
+        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableAntiSpam'].includes(row.key)) {
+            newConfig[row.key] = row.value === '1';
+        } 
+        else if (['spamDuplicateLimit', 'spamFloodLimit'].includes(row.key)) {
+            newConfig[row.key] = parseInt(row.value, 10);
+        }
+        else newConfig[row.key] = row.value;
+    });
+
+    // 2. جلب إعدادات الذكاء الاصطناعي
+    const llms = db.prepare('SELECT * FROM llm_settings').all();
+    llms.forEach(row => { newConfig[row.key] = row.value; });
+
+    // 3. جلب المجموعات المخصصة
+    const groups = db.prepare('SELECT * FROM custom_groups').all();
+    groups.forEach(g => {
+        newConfig.groupsConfig[g.group_id] = {
+            adminGroup: g.admin_group,
+            useDefaultWords: g.use_default_words === 1,
+            enableWordFilter: g.enable_word_filter === 1,
+            enableAIFilter: g.enable_ai_filter === 1,
+            enableAIMedia: g.enable_ai_media === 1,
+            autoAction: g.auto_action === 1,
+            enableBlacklist: g.enable_blacklist === 1,
+            enableAntiSpam: g.enable_anti_spam === 1,
+            spamDuplicateLimit: g.spam_duplicate_limit,
+            spamFloodLimit: g.spam_flood_limit,
+            spamAction: g.spam_action,
+            enableWelcomeMessage: g.enable_welcome_message === 1,
+            welcomeMessageText: g.welcome_message_text,
+            words: JSON.parse(g.custom_words || '[]')
+        };
+    });
+
+    return newConfig;
+}
+
+// دالة لحفظ التعديلات في الجداول المنفصلة بضمانة (Transaction)
+function saveConfigToDB(conf) {
+    const saveTx = db.transaction(() => {
+        // 1. حفظ الإعدادات العامة
+        const setGlobal = db.prepare('INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)');
+        setGlobal.run('enableWordFilter', conf.enableWordFilter ? '1' : '0');
+        setGlobal.run('enableAIFilter', conf.enableAIFilter ? '1' : '0');
+        setGlobal.run('enableAIMedia', conf.enableAIMedia ? '1' : '0');
+        setGlobal.run('autoAction', conf.autoAction ? '1' : '0');
+        setGlobal.run('enableBlacklist', conf.enableBlacklist ? '1' : '0');
+        setGlobal.run('enableAntiSpam', conf.enableAntiSpam ? '1' : '0');
+        setGlobal.run('spamDuplicateLimit', conf.spamDuplicateLimit.toString());
+        setGlobal.run('spamFloodLimit', conf.spamFloodLimit.toString());
+        setGlobal.run('spamAction', conf.spamAction);
+        setGlobal.run('defaultAdminGroup', conf.defaultAdminGroup);
+        setGlobal.run('defaultWords', JSON.stringify(conf.defaultWords));
+
+        // 2. حفظ إعدادات LLM
+        const setLLM = db.prepare('INSERT OR REPLACE INTO llm_settings (key, value) VALUES (?, ?)');
+        setLLM.run('aiPrompt', conf.aiPrompt);
+        setLLM.run('ollamaUrl', conf.ollamaUrl);
+        setLLM.run('ollamaModel', conf.ollamaModel);
+
+        // 3. حفظ المجموعات المخصصة (نمسح القديم وننزل الجديد للترتيب)
+        db.prepare('DELETE FROM custom_groups').run();
+        const insertGroup = db.prepare(`
+            INSERT INTO custom_groups (
+                group_id, admin_group, use_default_words, enable_word_filter, enable_ai_filter, 
+                enable_ai_media, auto_action, enable_blacklist, enable_anti_spam, spam_duplicate_limit, 
+                spam_flood_limit, spam_action, enable_welcome_message, welcome_message_text, custom_words
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
+            insertGroup.run(
+                gId, gData.adminGroup, gData.useDefaultWords ? 1 : 0, gData.enableWordFilter ? 1 : 0,
+                gData.enableAIFilter ? 1 : 0, gData.enableAIMedia ? 1 : 0, gData.autoAction ? 1 : 0,
+                gData.enableBlacklist ? 1 : 0, gData.enableAntiSpam ? 1 : 0, gData.spamDuplicateLimit,
+                gData.spamFloodLimit, gData.spamAction, gData.enableWelcomeMessage ? 1 : 0, 
+                gData.welcomeMessageText, JSON.stringify(gData.words)
+            );
+        }
+    });
+    saveTx();
+}
+
+// تشغيل لأول مرة: لو الجداول فاضية، نحفظ القيم الافتراضية
+const hasSettings = db.prepare('SELECT count(*) as count FROM global_settings').get();
+if (hasSettings.count === 0) {
+    saveConfigToDB(loadConfigFromDB()); // تحفظ الافتراضي في الداتا بيس
+}
+
+// تحميل الإعدادات للرام
+let config = loadConfigFromDB();
+
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-
-const configPath = './config.json';
-
-if (!fs.existsSync(configPath)) {
-    fs.writeFileSync(configPath, JSON.stringify({
-        enableWordFilter: true,
-        enableAIFilter: false,
-        enableAIMedia: false, 
-        autoAction: false, 
-        enableBlacklist: true, 
-        enableAntiSpam: false, 
-        spamDuplicateLimit: 3, 
-        spamFloodLimit: 5,     
-        spamAction: 'poll',    
-        aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية، أو ترويج لبيع إجازات مرضية وتقارير طبية.',
-        ollamaUrl: 'http://localhost:11434',
-        ollamaModel: 'llava', 
-        defaultAdminGroup: '120363424446982803@g.us',
-        defaultWords: ['ســكــلــيف', 'اجــازة مرضـــية', 'تـــقريــر', '🏥', 'معتـــمد', 'مرضية', 'عذر طبي', 'تقرير طبي', 'عذر', 'سكليف', 'صحتي', 'تكاليف'],
-        blacklist: [], 
-        groupsConfig: {}
-    }, null, 4));
-}
-
-let config = JSON.parse(fs.readFileSync(configPath));
-
-if (typeof config.enableAntiSpam === 'undefined') config.enableAntiSpam = false;
-if (typeof config.spamDuplicateLimit === 'undefined') config.spamDuplicateLimit = 3;
-if (typeof config.spamFloodLimit === 'undefined') config.spamFloodLimit = 5;
-if (typeof config.spamAction === 'undefined') config.spamAction = 'poll';
-if (typeof config.enableWordFilter === 'undefined') config.enableWordFilter = true;
-if (typeof config.enableAIFilter === 'undefined') config.enableAIFilter = false;
-if (typeof config.enableAIMedia === 'undefined') config.enableAIMedia = false;
-if (typeof config.autoAction === 'undefined') config.autoAction = false;
-if (typeof config.enableBlacklist === 'undefined') config.enableBlacklist = true;
-if (typeof config.aiPrompt === 'undefined') config.aiPrompt = 'امنع أي رسالة تحتوي على إعلانات تجارية، أو ترويج لبيع إجازات مرضية وتقارير طبية.';
-if (typeof config.ollamaUrl === 'undefined') config.ollamaUrl = 'http://localhost:11434';
-if (typeof config.ollamaModel === 'undefined') config.ollamaModel = 'llava';
-if (typeof config.blacklist === 'undefined') config.blacklist = [];
 
 let currentQR = '';
 let botStatus = 'جاري تهيئة النظام وبدء التشغيل...';
@@ -70,6 +167,10 @@ const abortedMessages = new Set();
 const spamMutedUsers = new Map(); 
 
 app.get('/', (req, res) => {
+    // جلب القائمة السوداء الحية 
+    const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
+    const blacklistArr = blacklistRows.map(r => r.number);
+
     const html = `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar" data-theme="light">
@@ -142,7 +243,7 @@ app.get('/', (req, res) => {
         <div class="container">
             <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="تبديل المظهر (فاتح/داكن)">🌙</button>
 
-            <h1>⚙️ إعدادات المشرف الآلي (لوحة التحكم)</h1>
+            <h1>⚙️ إعدادات المشرف الآلي (جداول SQLite المنفصلة)</h1>
             
             <div class="status-box">
                 <h2>حالة الربط مع واتساب: <span id="status-text">${botStatus}</span></h2>
@@ -157,19 +258,19 @@ app.get('/', (req, res) => {
             <form id="configForm">
                 
                 <div class="group-card" style="border-color: #f44336; background: rgba(244, 67, 54, 0.02);">
-                    <h3 style="margin-top:0; color: #d32f2f;">🚫 القائمة السوداء العالمية (الطرد التلقائي)</h3>
-                    <p style="font-size: 13px; color: #666; margin-top: -5px;">أي رقم يتم إضافته هنا سيتم طرده تلقائياً بمجرد محاولته دخول أي مجموعة مفعل فيها الخيار.</p>
+                    <h3 style="margin-top:0; color: #d32f2f;">🚫 القائمة السوداء العالمية (جدول Blacklist)</h3>
+                    <p style="font-size: 13px; color: #666; margin-top: -5px;">يتم الحفظ والإلغاء لحظياً في الجداول بدون الحاجة لزر الحفظ بالأسفل.</p>
                     
-                    <label style="color: #d32f2f;">أرقام المخالفين (اكتب الرقم مباشرة وسيتم تجهيزه تلقائياً):</label>
+                    <label style="color: #d32f2f;">أرقام المخالفين (اكتب الرقم مباشرة):</label>
                     <div class="flex-input">
                         <input type="text" id="newBlacklistNumber" placeholder="مثال: 966582014941" onkeypress="if(event.key === 'Enter') { event.preventDefault(); addBlacklistNumber(); }">
-                        <button type="button" class="add-btn" style="background: #d32f2f;" onclick="addBlacklistNumber()">+ إضافة حظر</button>
+                        <button type="button" class="add-btn" style="background: #d32f2f;" onclick="addBlacklistNumber()">+ إضافة حظر مباشر</button>
                     </div>
                     <div id="blacklistContainer" class="chip-container"></div>
                 </div>
 
                 <div class="group-card" style="border-color: var(--text-heading);">
-                    <h3 style="margin-top:0; color: var(--text-heading);">🔧 الإعدادات العامة (تُطبق على جميع المجموعات)</h3>
+                    <h3 style="margin-top:0; color: var(--text-heading);">🔧 الإعدادات العامة (جدول Global Settings)</h3>
                     
                     <div class="switch-container" style="border-color: #d32f2f; background: rgba(211, 47, 47, 0.05);">
                         <div class="switch-inner">
@@ -177,7 +278,7 @@ app.get('/', (req, res) => {
                                 <input type="checkbox" id="enableBlacklist" ${config.enableBlacklist ? 'checked' : ''}>
                                 <span class="slider" style="background-color: #ccc;"></span>
                             </label>
-                            <span style="font-size: 14px; font-weight: bold; color: #d32f2f;">تفعيل نظام القائمة السوداء للمجموعات العامة (منع الدخول والإضافة التلقائية)</span>
+                            <span style="font-size: 14px; font-weight: bold; color: #d32f2f;">تفعيل نظام القائمة السوداء للمجموعات العامة (طرد من الدخول والإضافة)</span>
                         </div>
                     </div>
 
@@ -197,11 +298,11 @@ app.get('/', (req, res) => {
                                 <input type="number" id="spamDuplicateLimit" value="${config.spamDuplicateLimit}" min="2" max="15">
                             </div>
                             <div style="flex:1;">
-                                <label>الحد الأقصى للرسائل السريعة (خلال 10ث):</label>
+                                <label>الحد الأقصى للرسائل السريعة (خلال 15ث):</label>
                                 <input type="number" id="spamFloodLimit" value="${config.spamFloodLimit}" min="3" max="20">
                             </div>
                         </div>
-                        <label>الإجراء عند رصد المزعج (يتم حذف جميع رسائله فوراً بجميع الأحوال):</label>
+                        <label>الإجراء عند رصد المزعج (يتم الحذف الجذري للرسائل ووضعه بصندوق العقوبة لمدة دقيقة):</label>
                         <select id="spamAction">
                             <option value="poll" ${config.spamAction === 'poll' ? 'selected' : ''}>فتح تصويت للإدارة</option>
                             <option value="auto" ${config.spamAction === 'auto' ? 'selected' : ''}>طرد تلقائي وإضافة للقائمة السوداء</option>
@@ -249,15 +350,10 @@ app.get('/', (req, res) => {
                         </div>
                     </div>
 
-                    <div id="aiPromptContainer" style="margin-top: 15px; padding: 15px; background: var(--status-bg); border-radius: 8px; border: 1px dashed var(--status-text);">
-                        <label style="margin-top:0; color: var(--status-text);">تعليمات الذكاء الاصطناعي (وصف المحتوى الممنوع):</label>
-                        <textarea id="aiPromptText" rows="3" placeholder="مثال: قم بمنع أي رسالة تروج للخدمات...">${config.aiPrompt}</textarea>
-                    </div>
-
                     <label style="border-top: 1px solid var(--card-border); padding-top: 15px;">معرّف (ID) مجموعة الإدارة (لتلقي التنبيهات):</label>
                     <input type="text" id="defaultAdminGroup" value="${config.defaultAdminGroup}" dir="ltr" style="text-align: left;">
 
-                    <label>الكلمات الممنوعة:</label>
+                    <label>الكلمات الممنوعة الافتراضية:</label>
                     <div class="flex-input">
                         <input type="text" id="newDefaultWord" placeholder="أدخل الكلمة الممنوعة هنا..." onkeypress="if(event.key === 'Enter') { event.preventDefault(); addDefaultWord(); }">
                         <button type="button" class="add-btn" onclick="addDefaultWord()">+ إضافة كلمة</button>
@@ -265,25 +361,27 @@ app.get('/', (req, res) => {
                     <div id="defaultWordsContainer" class="chip-container"></div>
                 </div>
 
-                <h3 style="margin-top: 30px; border-bottom: 2px solid var(--card-border); padding-bottom: 10px;">📋 إعدادات المجموعات المخصصة (استثناءات)</h3>
+                <h3 style="margin-top: 30px; border-bottom: 2px solid var(--card-border); padding-bottom: 10px;">📋 المجموعات المخصصة (جدول Custom Groups)</h3>
                 <div id="groupsContainer"></div>
                 
                 <button type="button" class="add-btn" style="width:100%; padding:15px; margin-top:15px; background:#0277bd;" onclick="addGroup()">+ إضافة إعدادات لمجموعة جديدة</button>
 
-                <button type="submit" class="save-btn">💾 حفظ الإعدادات وتطبيقها فوراً</button>
-                <div id="msg" class="success">✅ تم حفظ الإعدادات بنجاح، وهي قيد العمل الآن.</div>
+                <button type="submit" class="save-btn">💾 تطبيق وحفظ في الجداول (Commit to Database)</button>
+                <div id="msg" class="success">✅ تم تحديث جميع الجداول بنجاح.</div>
             </form>
         </div>
 
         <div id="ollamaModal" class="modal">
             <div class="modal-content">
                 <span class="close-modal" onclick="closeOllamaModal()">&times;</span>
-                <h3 style="margin-top: 0; color: var(--status-text); border-bottom: 1px solid var(--card-border); padding-bottom: 10px;">🔗 إعدادات ربط محرك الذكاء الاصطناعي (Ollama)</h3>
+                <h3 style="margin-top: 0; color: var(--status-text); border-bottom: 1px solid var(--card-border); padding-bottom: 10px;">🔗 إعدادات محرك الذكاء الاصطناعي (جدول LLM)</h3>
                 <label>رابط الخادم (Endpoint URL):</label>
                 <input type="text" id="ollamaUrl" value="${config.ollamaUrl}" dir="ltr" style="text-align: left;">
                 <label>اسم النموذج (يجب أن يكون نموذج Vision إذا أردت تحليل الصور، مثل llava):</label>
                 <input type="text" id="ollamaModel" value="${config.ollamaModel}" dir="ltr" style="text-align: left;">
-                <button type="button" class="add-btn" style="width: 100%; margin-top: 20px; padding: 12px; background: var(--status-text);" onclick="closeOllamaModal()">حفظ وإغلاق</button>
+                <label style="margin-top:20px;">البرومبت الأساسي (Prompt):</label>
+                <textarea id="aiPromptText" rows="3" placeholder="مثال: قم بمنع أي رسالة تروج للخدمات...">${config.aiPrompt}</textarea>
+                <button type="button" class="add-btn" style="width: 100%; margin-top: 20px; padding: 12px; background: var(--status-text);" onclick="closeOllamaModal()">إغلاق</button>
             </div>
         </div>
 
@@ -367,7 +465,7 @@ app.get('/', (req, res) => {
             }
 
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
-            let blacklistArr = ${JSON.stringify(config.blacklist)}; 
+            let blacklistArr = ${JSON.stringify(blacklistArr)}; 
             let groupsConfigObj = ${JSON.stringify(config.groupsConfig)};
             
             let groupsArr = Object.keys(groupsConfigObj).map(key => ({
@@ -384,10 +482,11 @@ app.get('/', (req, res) => {
                 spamDuplicateLimit: groupsConfigObj[key].spamDuplicateLimit || 3,
                 spamFloodLimit: groupsConfigObj[key].spamFloodLimit || 5,
                 spamAction: groupsConfigObj[key].spamAction || 'poll',
-                enableWelcomeMessage: groupsConfigObj[key].enableWelcomeMessage || false, // 🟢 تفعيل رسالة الترحيب
-                welcomeMessageText: groupsConfigObj[key].welcomeMessageText || 'مرحباً بك يا {user} في مجموعتنا!' // 🟢 نص الترحيب
+                enableWelcomeMessage: groupsConfigObj[key].enableWelcomeMessage || false, 
+                welcomeMessageText: groupsConfigObj[key].welcomeMessageText || 'مرحباً بك يا {user} في مجموعتنا!' 
             }));
 
+            // 🟢 وظائف القائمة السوداء
             function renderBlacklist() {
                 const container = document.getElementById('blacklistContainer');
                 container.innerHTML = '';
@@ -396,25 +495,41 @@ app.get('/', (req, res) => {
                 });
             }
 
-            function addBlacklistNumber() {
+            async function addBlacklistNumber() {
                 const input = document.getElementById('newBlacklistNumber');
                 let rawValue = input.value;
-                let justNumbers = rawValue.replace(/\\D/g, '');
+                let justNumbers = rawValue.replace(/\\D/g, ''); 
                 
                 if (justNumbers) {
                     let finalId = justNumbers + '@c.us';
                     if (!blacklistArr.includes(finalId)) {
                         blacklistArr.push(finalId);
+                        renderBlacklist(); 
+                        
+                        try {
+                            await fetch('/api/blacklist/add', {
+                                method: 'POST',
+                                headers: {'Content-Type': 'application/json'},
+                                body: JSON.stringify({number: finalId})
+                            });
+                        } catch(e) {}
                     }
                 }
-                
                 input.value = '';
-                renderBlacklist();
             }
 
-            function removeBlacklistNumber(index) {
+            async function removeBlacklistNumber(index) {
+                const numberToRemove = blacklistArr[index];
                 blacklistArr.splice(index, 1);
                 renderBlacklist();
+                
+                try {
+                    await fetch('/api/blacklist/remove', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({number: numberToRemove})
+                    });
+                } catch(e) {}
             }
 
             function renderDefaultWords() {
@@ -502,7 +617,7 @@ app.get('/', (req, res) => {
                                     <input type="number" value="\${group.spamDuplicateLimit}" min="2" max="15" onchange="updateGroupData(\${groupIndex}, 'spamDuplicateLimit', parseInt(this.value))">
                                 </div>
                                 <div style="flex:1;">
-                                    <label>حد السرعة (رسائل/10ث):</label>
+                                    <label>حد السرعة (رسائل/15ث):</label>
                                     <input type="number" value="\${group.spamFloodLimit}" min="3" max="20" onchange="updateGroupData(\${groupIndex}, 'spamFloodLimit', parseInt(this.value))">
                                 </div>
                             </div>
@@ -679,7 +794,6 @@ app.get('/', (req, res) => {
                     ollamaModel: document.getElementById('ollamaModel').value.trim(),
                     defaultAdminGroup: document.getElementById('defaultAdminGroup').value.trim(),
                     defaultWords: defaultWordsArr,
-                    blacklist: blacklistArr, 
                     groupsConfig: finalGroupsObj
                 };
                 
@@ -701,6 +815,27 @@ app.get('/', (req, res) => {
     res.send(html);
 });
 
+// 🚀 API Endpoints القائمة السوداء
+app.post('/api/blacklist/add', (req, res) => {
+    if(req.body.number) {
+        try {
+            db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(req.body.number);
+            console.log(`[أمان] تم إضافة رقم للقائمة السوداء عبر اللوحة: ${req.body.number}`);
+        } catch(e) {}
+    }
+    res.sendStatus(200);
+});
+
+app.post('/api/blacklist/remove', (req, res) => {
+    if(req.body.number) {
+        try {
+            db.prepare('DELETE FROM blacklist WHERE number = ?').run(req.body.number);
+            console.log(`[أمان] تم إزالة رقم من القائمة السوداء عبر اللوحة: ${req.body.number}`);
+        } catch(e) {}
+    }
+    res.sendStatus(200);
+});
+
 app.get('/api/status', (req, res) => res.json({ qr: currentQR, status: botStatus }));
 app.get('/api/logs', (req, res) => res.json(logsHistory));
 
@@ -716,10 +851,15 @@ app.post('/api/logout', async (req, res) => {
 });
 
 app.post('/save', (req, res) => {
-    config = req.body;
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
-    console.log('[فحص] 💾 تم حفظ إعدادات النظام بنجاح.');
-    res.sendStatus(200);
+    try {
+        saveConfigToDB(req.body);
+        config = loadConfigFromDB(); // تحديث الرام فوراً
+        console.log('[فحص] 💾 تم حفظ الإعدادات في الجداول وتحديث النظام بنجاح.');
+        res.sendStatus(200);
+    } catch(e) {
+        console.error('[خطأ] تعذر حفظ الإعدادات في قاعدة البيانات:', e.message);
+        res.sendStatus(500);
+    }
 });
 
 app.listen(3000, () => console.log('لوحة التحكم تعمل الآن عبر المنفذ 3000...'));
@@ -804,39 +944,35 @@ client.on('group_join', async (notification) => {
 
             let isKicked = false;
 
-            // 1. التحقق من القائمة السوداء
-            if (isBlacklistEnabledForGroup && config.blacklist && config.blacklist.includes(cleanJoinedId)) {
-                console.log(`[أمان] 🛡️ تنبيه: محاولة دخول من رقم محظور (${cleanJoinedId}) في مجموعة (${chat.name}). جاري الطرد...`);
-                isKicked = true;
+            if (isBlacklistEnabledForGroup) {
+                const isBanned = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanJoinedId);
                 
-                setTimeout(async () => {
-                    try {
-                        await chat.removeParticipants([participantId]);
-                        console.log(`[أمان] ✅ تم طرد الرقم المحظور بنجاح من مساحة: ${chat.name}`);
-                        
-                        const targetAdminGroup = groupConfig?.adminGroup || config.defaultAdminGroup;
-                        const reportText = `🛡️ *تنبيه حماية (القائمة السوداء)*\nحاول رقم محظور مسبقاً الدخول (عبر رابط أو إضافة) إلى مجموعة "${chat.name}" وتم طرده فوراً.\n\nالرقم المحظور: @${cleanJoinedId.split('@')[0]}`;
-                        
-                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanJoinedId] });
-                    } catch(err) {
-                        console.error('[خطأ] فشل الطرد الفعلي بعد الانضمام:', err.message);
-                    }
-                }, 2000);
+                if (isBanned) {
+                    console.log(`[أمان] 🛡️ تنبيه: محاولة دخول من رقم محظور (${cleanJoinedId}) في مجموعة (${chat.name}). جاري الطرد...`);
+                    isKicked = true;
+                    
+                    setTimeout(async () => {
+                        try {
+                            await chat.removeParticipants([participantId]);
+                            console.log(`[أمان] ✅ تم طرد الرقم المحظور بنجاح من مساحة: ${chat.name}`);
+                            
+                            const targetAdminGroup = groupConfig?.adminGroup || config.defaultAdminGroup;
+                            const reportText = `🛡️ *تنبيه حماية (القائمة السوداء)*\nحاول رقم محظور مسبقاً الدخول (عبر رابط أو إضافة) إلى مجموعة "${chat.name}" وتم طرده فوراً.\n\nالرقم المحظور: @${cleanJoinedId.split('@')[0]}`;
+                            
+                            await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanJoinedId] });
+                        } catch(err) {}
+                    }, 2000);
+                }
             }
 
-            // 2. إرسال رسالة الترحيب (فقط إذا لم يتم طرده، والمجموعة مخصصة، والميزة مفعلة)
             if (!isKicked && groupConfig && groupConfig.enableWelcomeMessage && groupConfig.welcomeMessageText) {
                 setTimeout(async () => {
                     try {
-                        // استبدال {user} بمنشن فعلي للرقم
                         const welcomeText = groupConfig.welcomeMessageText.replace(/{user}/g, `@${cleanJoinedId.split('@')[0]}`);
-                        
                         await client.sendMessage(groupId, welcomeText, { mentions: [cleanJoinedId] });
                         console.log(`[معلومة] 👋 تم إرسال رسالة ترحيبية للعضو الجديد: ${cleanJoinedId}`);
-                    } catch (err) {
-                        console.error('[خطأ] فشل إرسال رسالة الترحيب:', err.message);
-                    }
-                }, 3500); // تأخير 3.5 ثوانٍ ليبدو الترحيب طبيعياً
+                    } catch (err) {}
+                }, 3500); 
             }
         }
     } catch (error) {}
@@ -904,11 +1040,14 @@ client.on('message', async msg => {
                 forbiddenWords = [...config.defaultWords];
             }
 
-            if (isBlacklistEnabledForThisGroup && config.blacklist && config.blacklist.includes(cleanAuthorId)) {
-                console.log(`[أمان] 🛡️ رقم محظور أرسل رسالة. سيتم حذفه وطرده.`);
-                await msg.delete(true);
-                await chat.removeParticipants([rawAuthorId]);
-                return; 
+            if (isBlacklistEnabledForThisGroup) {
+                const isBanned = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanAuthorId);
+                if (isBanned) {
+                    console.log(`[أمان] 🛡️ رقم محظور أرسل رسالة. سيتم حذفه وطرده.`);
+                    await msg.delete(true);
+                    await chat.removeParticipants([rawAuthorId]);
+                    return; 
+                }
             }
 
             if (isAntiSpamEnabled) {
@@ -955,12 +1094,9 @@ client.on('message', async msg => {
 
                 if (isSpamFlagged) {
                     console.log(`[أمان] 🚨 تم رصد مزعج في (${chat.name}) السبب: ${spamFlagReason}`);
-                    
                     spamMutedUsers.set(trackerKey, Date.now() + 60000);
 
-                    for (const m of tracker) {
-                        abortedMessages.add(m.id);
-                    }
+                    for (const m of tracker) abortedMessages.add(m.id);
 
                     console.log(`[تنظيف] جاري مسح جميع الرسائل السابقة المتراكمة...`);
                     
@@ -998,10 +1134,8 @@ client.on('message', async msg => {
                     if (spamAction === 'auto') {
                         try {
                             await chat.removeParticipants([rawAuthorId]);
-                            if (isBlacklistEnabledForThisGroup && !config.blacklist.includes(senderId)) {
-                                config.blacklist.push(senderId);
-                                fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
-                                console.log(`[أمان] 🚫 تم إدراج الرقم المزعج في القائمة السوداء.`);
+                            if (isBlacklistEnabledForThisGroup) {
+                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
                             }
                             const reportText = `🚨 *حظر تلقائي (نظام مكافحة الإزعاج)*\nتم مسح رسائل مزعجة وطرد العضو من مجموعة "${chat.name}"${isBlacklistEnabledForThisGroup ? ' وإدراجه في القائمة السوداء' : ''}.\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${spamFlagReason}`;
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
@@ -1117,9 +1251,8 @@ client.on('message', async msg => {
                     try {
                         await chat.removeParticipants([rawAuthorId]);
                         
-                        if (isBlacklistEnabledForThisGroup && !config.blacklist.includes(senderId)) {
-                            config.blacklist.push(senderId);
-                            fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
+                        if (isBlacklistEnabledForThisGroup) {
+                            db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
                         }
 
                         const reportText = `🚨 *تقرير إجراء وحظر تلقائي*\nتم مسح محتوى مخالف وطرد العضو من مجموعة "${chat.name}"${isBlacklistEnabledForThisGroup ? ' وإدراجه في القائمة السوداء' : ''}.\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *سبب الإزالة:* ${violationReason}\n📝 *النص الممسوح:*\n"${messageContent}"`;
@@ -1158,10 +1291,11 @@ client.on('vote_update', async vote => {
             console.log(`[فحص] تم استلام قرار التدخل البشري: ${selectedOption}`);
 
             if (selectedOption.includes('نعم')) {
-                if (data.isBlacklistEnabled && !config.blacklist.includes(userToBan)) {
-                    config.blacklist.push(userToBan);
-                    fs.writeFileSync(configPath, JSON.stringify(config, null, 4));
-                    console.log(`[أمان] 🚫 تم إضافة الرقم ${userToBan} إلى القائمة السوداء.`);
+                if (data.isBlacklistEnabled) {
+                    try {
+                        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan);
+                        console.log(`[أمان] 🚫 تم إضافة الرقم ${userToBan} إلى القائمة السوداء في Database.`);
+                    } catch(e) {}
                 }
 
                 const botId = client.info.wid._serialized;
