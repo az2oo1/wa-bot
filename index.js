@@ -19,7 +19,6 @@ function saveLog(type, args) {
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
-// 🗄️ تهيئة قاعدة البيانات بالهيكلة المتقدمة (Normalized Schema)
 const db = new Database('./bot_data.sqlite');
 db.pragma('journal_mode = WAL'); 
 
@@ -46,7 +45,6 @@ db.exec(`
     );
 `);
 
-// دالة لجلب الإعدادات من الجداول وتحويلها لكائن (Object) عشان سرعة البوت
 function loadConfigFromDB() {
     let newConfig = {
         enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
@@ -58,7 +56,6 @@ function loadConfigFromDB() {
         groupsConfig: {}
     };
 
-    // 1. جلب الإعدادات العامة
     const globals = db.prepare('SELECT * FROM global_settings').all();
     globals.forEach(row => {
         if (row.key === 'defaultWords') newConfig.defaultWords = JSON.parse(row.value);
@@ -71,11 +68,9 @@ function loadConfigFromDB() {
         else newConfig[row.key] = row.value;
     });
 
-    // 2. جلب إعدادات الذكاء الاصطناعي
     const llms = db.prepare('SELECT * FROM llm_settings').all();
     llms.forEach(row => { newConfig[row.key] = row.value; });
 
-    // 3. جلب المجموعات المخصصة
     const groups = db.prepare('SELECT * FROM custom_groups').all();
     groups.forEach(g => {
         newConfig.groupsConfig[g.group_id] = {
@@ -99,10 +94,8 @@ function loadConfigFromDB() {
     return newConfig;
 }
 
-// دالة لحفظ التعديلات في الجداول المنفصلة بضمانة (Transaction)
 function saveConfigToDB(conf) {
     const saveTx = db.transaction(() => {
-        // 1. حفظ الإعدادات العامة
         const setGlobal = db.prepare('INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)');
         setGlobal.run('enableWordFilter', conf.enableWordFilter ? '1' : '0');
         setGlobal.run('enableAIFilter', conf.enableAIFilter ? '1' : '0');
@@ -116,13 +109,11 @@ function saveConfigToDB(conf) {
         setGlobal.run('defaultAdminGroup', conf.defaultAdminGroup);
         setGlobal.run('defaultWords', JSON.stringify(conf.defaultWords));
 
-        // 2. حفظ إعدادات LLM
         const setLLM = db.prepare('INSERT OR REPLACE INTO llm_settings (key, value) VALUES (?, ?)');
         setLLM.run('aiPrompt', conf.aiPrompt);
         setLLM.run('ollamaUrl', conf.ollamaUrl);
         setLLM.run('ollamaModel', conf.ollamaModel);
 
-        // 3. حفظ المجموعات المخصصة (نمسح القديم وننزل الجديد للترتيب)
         db.prepare('DELETE FROM custom_groups').run();
         const insertGroup = db.prepare(`
             INSERT INTO custom_groups (
@@ -145,13 +136,11 @@ function saveConfigToDB(conf) {
     saveTx();
 }
 
-// تشغيل لأول مرة: لو الجداول فاضية، نحفظ القيم الافتراضية
 const hasSettings = db.prepare('SELECT count(*) as count FROM global_settings').get();
 if (hasSettings.count === 0) {
-    saveConfigToDB(loadConfigFromDB()); // تحفظ الافتراضي في الداتا بيس
+    saveConfigToDB(loadConfigFromDB()); 
 }
 
-// تحميل الإعدادات للرام
 let config = loadConfigFromDB();
 
 const app = express();
@@ -161,13 +150,11 @@ app.use(express.json());
 let currentQR = '';
 let botStatus = 'جاري تهيئة النظام وبدء التشغيل...';
 
-// 🧠 ذاكرة تتبع الإزعاج وصندوق العقوبة
 const userTrackers = new Map();
 const abortedMessages = new Set(); 
 const spamMutedUsers = new Map(); 
 
 app.get('/', (req, res) => {
-    // جلب القائمة السوداء الحية 
     const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
     const blacklistArr = blacklistRows.map(r => r.number);
 
@@ -202,6 +189,8 @@ app.get('/', (req, res) => {
             .flex-input input { margin-top: 0; }
             .add-btn { background: #25d366; color: white; border: none; padding: 10px 20px; font-weight: bold; border-radius: 5px; cursor: pointer; white-space: nowrap; transition: 0.3s;}
             .add-btn:hover { background: #1ebe57; }
+            .purge-btn { background: #ff9800; color: white; border: none; padding: 12px 20px; font-weight: bold; border-radius: 5px; cursor: pointer; transition: 0.3s; width: 100%; margin-top: 15px; font-size: 15px;}
+            .purge-btn:hover { background: #e68a00; }
             .chip-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding: 10px; background: var(--input-bg); border-radius: 5px; min-height: 40px; border: 1px dashed var(--input-border); }
             .chip { background: var(--chip-bg); color: var(--chip-text); padding: 5px 12px; border-radius: 15px; font-size: 13px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--chip-border); }
             .chip.blacklist-chip { background: #ffebee; color: #c62828; border-color: #ffcdd2; }
@@ -243,7 +232,7 @@ app.get('/', (req, res) => {
         <div class="container">
             <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="تبديل المظهر (فاتح/داكن)">🌙</button>
 
-            <h1>⚙️ إعدادات المشرف الآلي (جداول SQLite المنفصلة)</h1>
+            <h1>⚙️ إعدادات المشرف الآلي (قاعدة بيانات SQLite)</h1>
             
             <div class="status-box">
                 <h2>حالة الربط مع واتساب: <span id="status-text">${botStatus}</span></h2>
@@ -258,8 +247,8 @@ app.get('/', (req, res) => {
             <form id="configForm">
                 
                 <div class="group-card" style="border-color: #f44336; background: rgba(244, 67, 54, 0.02);">
-                    <h3 style="margin-top:0; color: #d32f2f;">🚫 القائمة السوداء العالمية (جدول Blacklist)</h3>
-                    <p style="font-size: 13px; color: #666; margin-top: -5px;">يتم الحفظ والإلغاء لحظياً في الجداول بدون الحاجة لزر الحفظ بالأسفل.</p>
+                    <h3 style="margin-top:0; color: #d32f2f;">🚫 القائمة السوداء العالمية (Database)</h3>
+                    <p style="font-size: 13px; color: #666; margin-top: -5px;">يتم حفظ الأرقام هنا لحظياً ومباشرة في قاعدة البيانات.</p>
                     
                     <label style="color: #d32f2f;">أرقام المخالفين (اكتب الرقم مباشرة):</label>
                     <div class="flex-input">
@@ -267,6 +256,8 @@ app.get('/', (req, res) => {
                         <button type="button" class="add-btn" style="background: #d32f2f;" onclick="addBlacklistNumber()">+ إضافة حظر مباشر</button>
                     </div>
                     <div id="blacklistContainer" class="chip-container"></div>
+                    
+                    <button type="button" id="purgeBtn" class="purge-btn" onclick="purgeBlacklisted()">🧹 طرد جميع المحظورين من كافة المجموعات الآن (تطبيق رجعي)</button>
                 </div>
 
                 <div class="group-card" style="border-color: var(--text-heading);">
@@ -348,6 +339,11 @@ app.get('/', (req, res) => {
                             </label>
                             <span style="font-size: 14px; font-weight: bold; color: #e91e63;">تفعيل الحذف والإبلاغ المباشر (تخطي تصويت الإدارة) للمخالفات الأخرى</span>
                         </div>
+                    </div>
+
+                    <div id="aiPromptContainer" style="margin-top: 15px; padding: 15px; background: var(--status-bg); border-radius: 8px; border: 1px dashed var(--status-text);">
+                        <label style="margin-top:0; color: var(--status-text);">تعليمات الذكاء الاصطناعي (وصف المحتوى الممنوع):</label>
+                        <textarea id="aiPromptText" rows="3" placeholder="مثال: قم بمنع أي رسالة تروج للخدمات...">${config.aiPrompt}</textarea>
                     </div>
 
                     <label style="border-top: 1px solid var(--card-border); padding-top: 15px;">معرّف (ID) مجموعة الإدارة (لتلقي التنبيهات):</label>
@@ -464,6 +460,7 @@ app.get('/', (req, res) => {
                 }
             }
 
+            // المتغيرات القادمة من السيرفر
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
             let blacklistArr = ${JSON.stringify(blacklistArr)}; 
             let groupsConfigObj = ${JSON.stringify(config.groupsConfig)};
@@ -486,7 +483,7 @@ app.get('/', (req, res) => {
                 welcomeMessageText: groupsConfigObj[key].welcomeMessageText || 'مرحباً بك يا {user} في مجموعتنا!' 
             }));
 
-            // 🟢 وظائف القائمة السوداء
+            // 🟢 وظائف القائمة السوداء والتحديث المباشر للـ API
             function renderBlacklist() {
                 const container = document.getElementById('blacklistContainer');
                 container.innerHTML = '';
@@ -530,6 +527,32 @@ app.get('/', (req, res) => {
                         body: JSON.stringify({number: numberToRemove})
                     });
                 } catch(e) {}
+            }
+
+            // 🧹 دالة المسح الشامل للمحظورين
+            async function purgeBlacklisted() {
+                if(!confirm('⚠️ تحذير: هذا الخيار سيجعل البوت يبحث في جميع المجموعات، وسيطرد أي شخص موجود في القائمة السوداء فوراً (تطبيق بأثر رجعي). هل أنت متأكد من تنفيذ هذا الأمر؟')) return;
+
+                const btn = document.getElementById('purgeBtn');
+                const originalText = btn.innerText;
+                btn.innerText = '⏳ جاري المسح والطرد من المجموعات... يرجى الانتظار';
+                btn.disabled = true;
+
+                try {
+                    const res = await fetch('/api/blacklist/purge', { method: 'POST' });
+                    const data = await res.json();
+                    
+                    if(data.error) {
+                        alert('❌ ' + data.error);
+                    } else {
+                        alert('✅ ' + data.message);
+                    }
+                } catch(e) {
+                    alert('حدث خطأ في الاتصال بالخادم.');
+                }
+
+                btn.innerText = originalText;
+                btn.disabled = false;
             }
 
             function renderDefaultWords() {
@@ -836,6 +859,63 @@ app.post('/api/blacklist/remove', (req, res) => {
     res.sendStatus(200);
 });
 
+// 🧹 مسار (API) جديد لمسح وطرد المزعجين من جميع المجموعات بأثر رجعي
+app.post('/api/blacklist/purge', async (req, res) => {
+    if (!client.info || !client.info.wid) {
+        return res.status(400).json({ error: 'البوت غير متصل حالياً، يرجى الانتظار حتى يتصل بواتساب.' });
+    }
+
+    try {
+        console.log(`[تنظيف] بدأت عملية المسح الشامل للمجموعات للبحث عن محظورين...`);
+        const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
+        const blacklistArr = blacklistRows.map(r => r.number);
+
+        if (blacklistArr.length === 0) {
+            return res.json({ message: 'القائمة السوداء فارغة، لا يوجد شخص لطرده.' });
+        }
+
+        const chats = await client.getChats();
+        const botId = client.info.wid._serialized;
+        let kickedCount = 0;
+
+        for (const chat of chats) {
+            if (chat.isGroup) {
+                // هل البوت أدمن في هذا القروب عشان يقدر يطرد؟
+                const botData = chat.participants.find(p => p.id._serialized === botId);
+                const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
+
+                if (botIsAdmin) {
+                    // تصفية الأعضاء الموجودين في القروب ومطابقتهم مع القائمة السوداء
+                    const usersToKick = chat.participants
+                        .map(p => p.id._serialized)
+                        .filter(id => {
+                            const cleanId = id.replace(/:[0-9]+/, ''); // تنظيف المعرفات
+                            return blacklistArr.includes(cleanId) || blacklistArr.includes(id);
+                        });
+
+                    if (usersToKick.length > 0) {
+                        try {
+                            await chat.removeParticipants(usersToKick);
+                            kickedCount += usersToKick.length;
+                            console.log(`[أمان] 🧹 تم طرد ${usersToKick.length} محظورين من مجموعة: ${chat.name}`);
+                            // تأخير تكتيكي عشان واتساب ما يعطي بلوك سرعة
+                            await new Promise(resolve => setTimeout(resolve, 1500)); 
+                        } catch (e) {
+                            console.error(`[خطأ] فشل الطرد الجماعي في ${chat.name}:`, e.message);
+                        }
+                    }
+                }
+            }
+        }
+        console.log(`[تنظيف] انتهت عملية المسح الشامل. تم طرد ${kickedCount} شخص.`);
+        res.json({ message: `تمت عملية المسح بنجاح! تم العثور على (${kickedCount}) عضو محظور وطردهم من المجموعات.` });
+    } catch (error) {
+        console.error('[خطأ] حدث خطأ أثناء عملية المسح الشامل:', error);
+        res.status(500).json({ error: 'حدث خطأ في السيرفر أثناء عملية المسح.' });
+    }
+});
+
+
 app.get('/api/status', (req, res) => res.json({ qr: currentQR, status: botStatus }));
 app.get('/api/logs', (req, res) => res.json(logsHistory));
 
@@ -853,7 +933,7 @@ app.post('/api/logout', async (req, res) => {
 app.post('/save', (req, res) => {
     try {
         saveConfigToDB(req.body);
-        config = loadConfigFromDB(); // تحديث الرام فوراً
+        config = loadConfigFromDB(); 
         console.log('[فحص] 💾 تم حفظ الإعدادات في الجداول وتحديث النظام بنجاح.');
         res.sendStatus(200);
     } catch(e) {
