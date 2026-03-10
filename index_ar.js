@@ -214,9 +214,9 @@ app.get('/', (req, res) => {
                 --input-border: #1e2830;
                 --text: #dce8f5;
                 --text-muted: #6b8099;
-                --accent: #00e676;
-                --accent-dim: rgba(0,230,118,0.10);
-                --accent-hover: #00c853;
+                --accent: #00c853;
+                --accent-dim: rgba(0,200,83,0.10);
+                --accent-hover: #00a846;
                 --red: #ff5252;
                 --red-dim: rgba(255,82,82,0.10);
                 --orange: #ffab40;
@@ -226,10 +226,77 @@ app.get('/', (req, res) => {
                 --purple: #d18cff;
                 --purple-dim: rgba(209,140,255,0.10);
                 --modal-bg: rgba(0,0,0,0.80);
+                --topbar-bg: rgba(8,12,16,0.92);
                 --radius: 12px;
-                --font: 'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif;
+                --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                 font-size: 16px;
             }
+
+            /* ── Light Mode ── */
+            html.light {
+                --bg: #f0f4f8;
+                --sidebar-bg: #ffffff;
+                --card-bg: #ffffff;
+                --card-border: #dde3eb;
+                --input-bg: #f5f8fb;
+                --input-border: #dde3eb;
+                --text: #0f1923;
+                --text-muted: #5a7289;
+                --accent: #00a846;
+                --accent-dim: rgba(0,168,70,0.10);
+                --accent-hover: #008c3a;
+                --red: #e53935;
+                --red-dim: rgba(229,57,53,0.10);
+                --orange: #f57c00;
+                --orange-dim: rgba(245,124,0,0.10);
+                --blue: #0288d1;
+                --blue-dim: rgba(2,136,209,0.10);
+                --purple: #7b1fa2;
+                --purple-dim: rgba(123,31,162,0.10);
+                --modal-bg: rgba(0,0,0,0.55);
+                --topbar-bg: rgba(240,244,248,0.94);
+            }
+            html.light .nav-item:hover { background: rgba(0,0,0,0.05); color: var(--text); }
+            html.light .toggle-row { background: rgba(0,0,0,0.03); }
+            html.light .toggle-row.danger { background: rgba(229,57,53,0.06); }
+            html.light .toggle-row.warning { background: rgba(245,124,0,0.06); }
+            html.light .toggle-row.blue { background: rgba(2,136,209,0.06); }
+            html.light .toggle-row.purple { background: rgba(123,31,162,0.06); }
+            html.light .toggle-row.pink { background: rgba(194,24,91,0.06); }
+            html.light .toggle-row.green { background: rgba(0,150,80,0.06); }
+            html.light .slider { background: #d0dae4; border-color: #b8c8d8; }
+            html.light .slider:before { background: #8fa8bf; }
+            html.light input:checked + .slider { background: rgba(0,168,70,0.18); border-color: var(--accent); }
+            html.light input:checked + .slider:before { background: var(--accent); }
+            html.light .sub-panel { background: rgba(0,0,0,0.03); }
+            html.light #terminalOutput { background: #1a1a2e; }
+            html.light .card.danger { background: linear-gradient(180deg, rgba(229,57,53,0.04) 0%, var(--card-bg) 60%); }
+            html.light .card.warning { background: linear-gradient(180deg, rgba(245,124,0,0.04) 0%, var(--card-bg) 60%); }
+            html.light .card.info { background: linear-gradient(180deg, rgba(2,136,209,0.04) 0%, var(--card-bg) 60%); }
+            html.light .card.success { background: linear-gradient(180deg, rgba(0,168,70,0.04) 0%, var(--card-bg) 60%); }
+            html.light .card.purple { background: linear-gradient(180deg, rgba(123,31,162,0.04) 0%, var(--card-bg) 60%); }
+            html.light .logo-icon { box-shadow: 0 0 20px rgba(0,168,70,0.2); }
+            html.light .btn-primary { box-shadow: none; }
+            html.light .qr-wrap { background: #e8edf3; }
+            html.light ::-webkit-scrollbar-track { background: var(--bg); }
+            html.light ::-webkit-scrollbar-thumb { background: #c5d0db; }
+
+            /* Theme toggle button */
+            .theme-toggle {
+                width: 38px; height: 38px; border-radius: 10px; border: 1.5px solid var(--card-border);
+                background: var(--input-bg); color: var(--text-muted); cursor: pointer;
+                display: flex; align-items: center; justify-content: center; font-size: 17px;
+                transition: all 0.2s; flex-shrink: 0;
+            }
+            .theme-toggle:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+            /* Smooth transitions for all theme-sensitive elements */
+            body, .sidebar, .main, .topbar, .card, .toggle-row, input, textarea, select,
+            .nav-item, .chip, .chip-container, .sub-panel, .modal-content, .qr-wrap,
+            .group-card, .limit-item, .cb-label, .status-pill, .sidebar-footer button {
+                transition: background 0.25s ease, border-color 0.25s ease, color 0.15s ease, box-shadow 0.25s ease;
+            }
+            
             html { font-size: 16px; }
             body { font-family: var(--font); font-size: 1rem; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; line-height: 1.6; }
 
@@ -285,7 +352,7 @@ app.get('/', (req, res) => {
 
             .topbar {
                 position: sticky; top: 0; z-index: 50;
-                background: rgba(8,12,16,0.92); backdrop-filter: blur(16px);
+                background: var(--topbar-bg); backdrop-filter: blur(16px);
                 border-bottom: 1px solid var(--card-border);
                 padding: 0 40px; height: 66px;
                 display: flex; align-items: center; justify-content: space-between;
@@ -589,6 +656,7 @@ app.get('/', (req, res) => {
                     <span class="topbar-title" id="topbarTitle">حالة الاتصال</span>
                 </div>
                 <div class="topbar-right">
+                 <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode">🌙</button>    
                     <div class="status-pill">
                         <div class="status-dot" id="statusDot"></div>
                         <span id="status-text">${botStatus}</span>
@@ -1476,6 +1544,23 @@ app.get('/', (req, res) => {
                 e.preventDefault();
                 await saveConfig();
             }
+            
+            // ── Theme Toggle ──
+            function toggleTheme() {
+                const isLight = document.documentElement.classList.toggle('light');
+                document.getElementById('themeToggle').textContent = isLight ? '🌑' : '🌙';
+                try { localStorage.setItem('theme', isLight ? 'light' : 'dark'); } catch(e) {}
+            }
+
+            // Restore saved theme on load
+            (function() {
+                try {
+                    if (localStorage.getItem('theme') === 'light') {
+                        document.documentElement.classList.add('light');
+                        document.getElementById('themeToggle').textContent = '🌑';
+                    }
+                } catch(e) {}
+            })();
         </script>
     </body>
     </html>
