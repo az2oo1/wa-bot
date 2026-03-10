@@ -196,303 +196,754 @@ app.get('/', (req, res) => {
 
     const html = `
     <!DOCTYPE html>
-    <html dir="rtl" lang="ar" data-theme="light">
+    <html dir="rtl" lang="ar">
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>لوحة تحكم المشرف الآلي</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
         <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
             :root {
-                --bg-color: #f0f2f5; --container-bg: #ffffff; --text-main: #333333; --text-heading: #075e54;
-                --input-bg: #ffffff; --input-border: #cccccc; --card-border: #dddddd; --chip-bg: #dcf8c6;
-                --chip-text: #075e54; --chip-border: #b2e289; --status-bg: #e1f5fe; --status-border: #b3e5fc;
-                --status-text: #0277bd; --modal-bg: rgba(0,0,0,0.5);
+                --bg: #080c10;
+                --sidebar-bg: #0e1318;
+                --card-bg: #131920;
+                --card-border: #1e2830;
+                --input-bg: #0a0f14;
+                --input-border: #1e2830;
+                --text: #dce8f5;
+                --text-muted: #6b8099;
+                --accent: #00e676;
+                --accent-dim: rgba(0,230,118,0.10);
+                --accent-hover: #00c853;
+                --red: #ff5252;
+                --red-dim: rgba(255,82,82,0.10);
+                --orange: #ffab40;
+                --orange-dim: rgba(255,171,64,0.10);
+                --blue: #40c4ff;
+                --blue-dim: rgba(64,196,255,0.10);
+                --purple: #d18cff;
+                --purple-dim: rgba(209,140,255,0.10);
+                --modal-bg: rgba(0,0,0,0.80);
+                --radius: 12px;
+                --font: 'IBM Plex Sans Arabic', Tahoma, Arial, sans-serif;
+                font-size: 16px;
             }
-            [data-theme="dark"] {
-                --bg-color: #121212; --container-bg: #1e1e1e; --text-main: #e4e6eb; --text-heading: #25d366;
-                --input-bg: #3a3b3c; --input-border: #555555; --card-border: #3a3b3c; --chip-bg: #2a3942;
-                --chip-text: #e4e6eb; --chip-border: #111b21; --status-bg: #112a34; --status-border: #0b1a20;
-                --status-text: #4fc3f7; --modal-bg: rgba(0,0,0,0.7);
+            html { font-size: 16px; }
+            body { font-family: var(--font); font-size: 1rem; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; line-height: 1.6; }
+
+            /* ── Sidebar ── */
+            .sidebar {
+                width: 260px; min-height: 100vh; background: var(--sidebar-bg);
+                border-left: 1px solid var(--card-border);
+                display: flex; flex-direction: column;
+                position: fixed; right: 0; top: 0; z-index: 100;
+                transition: transform 0.3s;
             }
-            body { font-family: Tahoma, Arial; background: var(--bg-color); color: var(--text-main); margin: 0; padding: 20px; transition: 0.3s; }
-            .container { max-width: 800px; margin: auto; background: var(--container-bg); padding: 30px; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); position: relative; }
-            h1 { color: var(--text-heading); text-align: center; border-bottom: 2px solid var(--card-border); padding-bottom: 15px; }
-            .status-box { text-align: center; padding: 20px; background: var(--status-bg); border-radius: 8px; margin-bottom: 25px; border: 1px solid var(--status-border); }
-            .status-box h2 { margin: 0 0 10px 0; color: var(--status-text); font-size: 20px; }
-            label { font-weight: bold; display: block; margin-top: 20px; color: var(--text-main); }
-            input, textarea, select { width: 100%; padding: 10px; margin-top: 5px; border: 1px solid var(--input-border); border-radius: 5px; box-sizing: border-box; font-size: 14px; background: var(--input-bg); color: var(--text-main); transition: 0.3s; }
+            .sidebar-logo {
+                padding: 28px 22px 20px;
+                border-bottom: 1px solid var(--card-border);
+                display: flex; align-items: center; gap: 14px;
+            }
+            .logo-icon {
+                width: 46px; height: 46px; border-radius: 14px;
+                background: linear-gradient(135deg, #00e676, #00b0ff);
+                display: flex; align-items: center; justify-content: center;
+                font-size: 22px; flex-shrink: 0;
+                box-shadow: 0 0 20px rgba(0,230,118,0.3);
+            }
+            .logo-text { font-size: 15px; font-weight: 700; color: var(--text); line-height: 1.3; }
+            .logo-text small { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+
+            .nav-section { padding: 18px 16px 8px; font-size: 10px; font-weight: 700; color: var(--text-muted); letter-spacing: 1.5px; text-transform: uppercase; }
+            .nav-item {
+                display: flex; align-items: center; gap: 12px;
+                padding: 12px 18px; margin: 2px 10px; border-radius: 10px;
+                cursor: pointer; color: var(--text-muted); font-size: 15px;
+                transition: all 0.2s; border: none; background: none; width: calc(100% - 20px);
+                text-align: right; font-family: var(--font);
+            }
+            .nav-item:hover { background: rgba(255,255,255,0.06); color: var(--text); }
+            .nav-item.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; border: 1px solid rgba(0,230,118,0.2); }
+            .nav-item .nav-icon { font-size: 18px; width: 24px; text-align: center; flex-shrink: 0; }
+            .nav-item .nav-badge {
+                margin-right: auto; background: var(--red); color: #fff;
+                font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; min-width: 22px; text-align: center;
+            }
+
+            .sidebar-footer { margin-top: auto; padding: 18px; border-top: 1px solid var(--card-border); display: flex; gap: 10px; }
+            .sidebar-footer button {
+                flex: 1; padding: 11px 8px; border-radius: 10px; border: 1px solid var(--card-border);
+                background: var(--input-bg); color: var(--text-muted); cursor: pointer; font-size: 14px;
+                transition: all 0.2s; font-family: var(--font); font-weight: 600;
+            }
+            .sidebar-footer button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+
+            /* ── Main ── */
+            .main { margin-right: 260px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; min-width: 0; }
+
+            .topbar {
+                position: sticky; top: 0; z-index: 50;
+                background: rgba(8,12,16,0.92); backdrop-filter: blur(16px);
+                border-bottom: 1px solid var(--card-border);
+                padding: 0 40px; height: 66px;
+                display: flex; align-items: center; justify-content: space-between;
+            }
+            .topbar-title { font-size: 18px; font-weight: 700; color: var(--text); }
+            .topbar-right { display: flex; align-items: center; gap: 14px; }
+            .status-pill {
+                display: flex; align-items: center; gap: 10px;
+                background: var(--card-bg); border: 1px solid var(--card-border);
+                padding: 8px 18px; border-radius: 24px; font-size: 14px; color: var(--text-muted);
+            }
+            .status-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
+            .status-dot.online { background: var(--accent); box-shadow: 0 0 10px var(--accent); animation: pulse 2s infinite; }
+            .status-dot.waiting { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
+            @keyframes pulse { 0%,100% { opacity:1; box-shadow: 0 0 10px var(--accent); } 50% { opacity:0.6; box-shadow: 0 0 4px var(--accent); } }
+
+            /* ── Content pages ── */
+            .page { display: none; padding: 32px 40px; width: 100%; max-width: 1400px; }
+            .page.active { display: block; }
+
+            .page-header { margin-bottom: 28px; }
+            .page-header h2 { font-size: 26px; font-weight: 700; color: var(--text); letter-spacing: -0.3px; }
+            .page-header p { color: var(--text-muted); font-size: 15px; margin-top: 5px; }
+
+            /* Cards */
+            .card {
+                background: var(--card-bg); border: 1px solid var(--card-border);
+                border-radius: var(--radius); padding: 24px; margin-bottom: 20px;
+            }
+            .card-header {
+                display: flex; justify-content: space-between; align-items: center;
+                margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--card-border);
+            }
+            .card-header h3 { font-size: 17px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
+            .card.danger { border-color: rgba(255,82,82,0.35); background: linear-gradient(180deg, rgba(255,82,82,0.04) 0%, var(--card-bg) 60%); }
+            .card.warning { border-color: rgba(255,171,64,0.35); background: linear-gradient(180deg, rgba(255,171,64,0.04) 0%, var(--card-bg) 60%); }
+            .card.info { border-color: rgba(64,196,255,0.35); background: linear-gradient(180deg, rgba(64,196,255,0.04) 0%, var(--card-bg) 60%); }
+            .card.purple { border-color: rgba(209,140,255,0.35); background: linear-gradient(180deg, rgba(209,140,255,0.04) 0%, var(--card-bg) 60%); }
+            .card.success { border-color: rgba(0,230,118,0.35); background: linear-gradient(180deg, rgba(0,230,118,0.04) 0%, var(--card-bg) 60%); }
+
+            /* Form elements */
+            label.field-label { display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.8px; }
+            input[type="text"], input[type="number"], textarea, select {
+                width: 100%; padding: 12px 16px;
+                background: var(--input-bg); border: 1.5px solid var(--input-border);
+                border-radius: 10px; color: var(--text); font-size: 15px;
+                font-family: var(--font); transition: border-color 0.2s, box-shadow 0.2s;
+                outline: none;
+            }
+            input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,230,118,0.12); }
             textarea { resize: vertical; }
-            .flex-input { display: flex; gap: 10px; margin-top: 5px; }
-            .flex-input input { margin-top: 0; }
-            .add-btn { background: #25d366; color: white; border: none; padding: 10px 20px; font-weight: bold; border-radius: 5px; cursor: pointer; white-space: nowrap; transition: 0.3s;}
-            .add-btn:hover { background: #1ebe57; }
-            .purge-btn { background: #ff9800; color: white; border: none; padding: 12px 20px; font-weight: bold; border-radius: 5px; cursor: pointer; transition: 0.3s; width: 100%; margin-top: 15px; font-size: 15px;}
-            .purge-btn:hover { background: #e68a00; }
-            .chip-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; padding: 10px; background: var(--input-bg); border-radius: 5px; min-height: 40px; border: 1px dashed var(--input-border); }
-            .chip { background: var(--chip-bg); color: var(--chip-text); padding: 5px 12px; border-radius: 15px; font-size: 13px; display: flex; align-items: center; gap: 8px; border: 1px solid var(--chip-border); }
-            .chip.blacklist-chip { background: #ffebee; color: #c62828; border-color: #ffcdd2; }
-            .chip span { cursor: pointer; color: #ff5252; font-weight: bold; font-size: 16px; }
-            .chip span:hover { color: #d32f2f; }
-            .group-card { background: var(--container-bg); border: 1px solid var(--card-border); padding: 15px; border-radius: 8px; margin-top: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); transition: 0.3s; }
-            .group-card-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 10px; margin-bottom: 10px;}
-            .remove-btn { background: #ff4444; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-            .logout-btn { background: #ff3b30; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; margin-top: 15px; display: none; transition: 0.3s; }
-            .logout-btn:hover { background: #d32f2f; }
-            .debug-btn { background: #333; color: #0f0; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; font-size: 14px; font-weight: bold; margin-top: 15px; font-family: monospace; transition: 0.3s; }
-            .debug-btn:hover { background: #000; }
-            .save-btn { background: #128c7e; color: white; border: none; padding: 15px; font-size: 18px; font-weight: bold; border-radius: 5px; cursor: pointer; margin-top: 30px; width: 100%; transition: 0.3s; }
-            .save-btn:hover { background: #075e54; }
-            .success { background: #d4edda; color: #155724; padding: 10px; border-radius: 5px; text-align: center; display: none; margin-top: 15px; border: 1px solid #c3e6cb; }
-            .theme-toggle { position: absolute; top: 20px; left: 20px; background: none; border: none; font-size: 24px; cursor: pointer; padding: 5px; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; transition: background 0.3s; }
-            .theme-toggle:hover { background: rgba(128,128,128,0.2); }
-            .switch-container { display: flex; align-items: center; gap: 15px; margin-top: 15px; background: var(--input-bg); padding: 12px; border-radius: 5px; border: 1px solid var(--input-border); justify-content: space-between; }
-            .switch-inner { display: flex; align-items: center; gap: 15px; }
-            .switch { position: relative; display: inline-block; width: 44px; height: 24px; margin: 0; flex-shrink: 0; }
+            select option { background: var(--card-bg); }
+
+            .field-group { margin-bottom: 20px; }
+            .field-row { display: flex; gap: 14px; }
+            .field-row > * { flex: 1; }
+            .input-with-btn { display: flex; gap: 10px; }
+            .input-with-btn input { margin: 0; }
+
+            /* Buttons */
+            .btn {
+                padding: 11px 22px; border-radius: 10px; border: none;
+                font-size: 15px; font-weight: 700; cursor: pointer;
+                font-family: var(--font); transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px;
+                white-space: nowrap; letter-spacing: 0.2px;
+            }
+            .btn-primary { background: var(--accent); color: #000; }
+            .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,230,118,0.4); }
+            .btn-danger { background: var(--red); color: #fff; }
+            .btn-danger:hover { background: #ff1744; transform: translateY(-1px); box-shadow: 0 4px 14px rgba(255,82,82,0.4); }
+            .btn-warning { background: var(--orange); color: #000; }
+            .btn-warning:hover { background: #ff9100; transform: translateY(-1px); }
+            .btn-ghost { background: transparent; border: 1.5px solid var(--card-border); color: var(--text-muted); }
+            .btn-ghost:hover { border-color: var(--text); color: var(--text); }
+            .btn-blue { background: var(--blue); color: #000; }
+            .btn-blue:hover { transform: translateY(-1px); }
+            .btn-sm { padding: 7px 14px; font-size: 13px; }
+            .btn-full { width: 100%; justify-content: center; padding: 15px; font-size: 16px; }
+
+            /* Toggle switch */
+            .toggle-row {
+                display: flex; align-items: center; justify-content: space-between;
+                padding: 16px 18px; border-radius: 10px;
+                background: rgba(255,255,255,0.03); border: 1.5px solid var(--card-border);
+                margin-bottom: 12px; gap: 14px;
+            }
+            .toggle-row.danger { border-color: rgba(255,82,82,0.3); background: rgba(255,82,82,0.05); }
+            .toggle-row.warning { border-color: rgba(255,171,64,0.3); background: rgba(255,171,64,0.05); }
+            .toggle-row.blue { border-color: rgba(64,196,255,0.3); background: rgba(64,196,255,0.05); }
+            .toggle-row.purple { border-color: rgba(209,140,255,0.3); background: rgba(209,140,255,0.05); }
+            .toggle-row.pink { border-color: rgba(240,100,170,0.3); background: rgba(240,100,170,0.05); }
+            .toggle-row.green { border-color: rgba(100,200,120,0.3); background: rgba(100,200,120,0.05); }
+            .toggle-left { display: flex; align-items: center; gap: 16px; }
+            .toggle-label { font-size: 15px; font-weight: 600; color: var(--text); }
+            .toggle-label small { display: block; font-size: 12px; color: var(--text-muted); font-weight: 400; margin-top: 2px; }
+            .toggle-label.danger { color: var(--red); }
+            .toggle-label.warning { color: var(--orange); }
+            .toggle-label.blue { color: var(--blue); }
+            .toggle-label.purple { color: var(--purple); }
+            .toggle-label.pink { color: #ff80ab; }
+            .toggle-label.green { color: #69f0ae; }
+
+            /* Switch */
+            .switch { position: relative; display: inline-block; width: 50px; height: 28px; flex-shrink: 0; }
             .switch input { opacity: 0; width: 0; height: 0; }
-            .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 24px; }
-            .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
-            input:checked + .slider { background-color: #25d366; }
-            input:checked + .slider:before { transform: translateX(20px); }
-            .spam-settings, .media-settings { background: rgba(255, 152, 0, 0.05); padding: 15px; border: 1px solid #ff9800; border-radius: 8px; margin-top: 10px; }
-            .media-settings { border-color: #f44336; background: rgba(244, 67, 54, 0.05); }
-            
-            .cb-group { display: flex; gap: 15px; flex-wrap: wrap; margin-top: 8px; font-size: 14px;}
-            .cb-group label { margin: 0; font-weight: normal; cursor: pointer; display: flex; align-items: center; gap: 5px; }
-            .limit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
-            .limit-item { display: flex; align-items: center; gap: 8px; background: var(--container-bg); padding: 6px 10px; border-radius: 5px; border: 1px solid var(--card-border); }
-            .limit-item input[type="number"] { width: 60px; padding: 4px; margin: 0; text-align: center;}
+            .slider { position: absolute; cursor: pointer; inset: 0; background: #1e2830; border: 1.5px solid #2a3a4a; transition: .3s; border-radius: 28px; }
+            .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background: #4a5a6a; transition: .3s; border-radius: 50%; }
+            input:checked + .slider { background: rgba(0,230,118,0.2); border-color: var(--accent); }
+            input:checked + .slider:before { transform: translateX(22px); background: var(--accent); box-shadow: 0 0 8px rgba(0,230,118,0.6); }
 
-            .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: var(--modal-bg); backdrop-filter: blur(3px); }
-            .modal-content { background-color: var(--container-bg); margin: 5% auto; padding: 25px; border: 1px solid var(--card-border); width: 90%; max-width: 600px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); animation: slideIn 0.3s; }
-            .close-modal { color: #aaa; float: left; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 20px; }
-            .close-modal:hover { color: #ff4444; }
-            @keyframes slideIn { from { transform: translateY(-30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+            /* Chips */
+            .chip-container {
+                display: flex; flex-wrap: wrap; gap: 10px;
+                padding: 14px; background: var(--input-bg); border-radius: 10px;
+                min-height: 52px; border: 1.5px dashed var(--card-border); margin-top: 10px;
+            }
+            .chip {
+                background: var(--accent-dim); color: var(--accent); padding: 6px 14px;
+                border-radius: 20px; font-size: 14px; display: flex; align-items: center;
+                gap: 8px; border: 1px solid rgba(0,230,118,0.3); font-weight: 500;
+            }
+            .chip.red-chip { background: var(--red-dim); color: var(--red); border-color: rgba(255,82,82,0.3); }
+            .chip-remove { cursor: pointer; font-size: 16px; font-weight: 700; opacity: 0.6; line-height: 1; }
+            .chip-remove:hover { opacity: 1; }
 
-            #terminalOutput { background: #000; color: #0f0; font-family: monospace; height: 400px; overflow-y: scroll; padding: 15px; border-radius: 5px; font-size: 13px; direction: ltr; text-align: left; margin-top: 15px; border: 1px solid #333; }
-            #terminalOutput div { margin-bottom: 5px; border-bottom: 1px dashed #222; padding-bottom: 5px; word-wrap: break-word; }
+            /* Sub-settings panels */
+            .sub-panel {
+                background: rgba(0,0,0,0.2); border: 1.5px solid var(--card-border);
+                border-radius: 10px; padding: 18px; margin-top: 12px;
+            }
+            .sub-panel.orange { border-color: rgba(255,171,64,0.3); }
+            .sub-panel.red { border-color: rgba(255,82,82,0.3); }
+            .sub-panel h4 { font-size: 14px; font-weight: 700; color: var(--text-muted); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+
+            /* Checkboxes row */
+            .cb-group { display: flex; gap: 10px; flex-wrap: wrap; }
+            .cb-label {
+                display: flex; align-items: center; gap: 8px; padding: 8px 14px;
+                background: var(--card-bg); border: 1.5px solid var(--card-border);
+                border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--text-muted);
+                transition: all 0.2s; user-select: none;
+            }
+            .cb-label:hover { border-color: var(--accent); color: var(--text); }
+            .cb-label input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+
+            /* Limit grid */
+            .limit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+            .limit-item {
+                display: flex; align-items: center; gap: 10px;
+                background: var(--card-bg); padding: 10px 14px; border-radius: 9px;
+                border: 1.5px solid var(--card-border);
+            }
+            .limit-item input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; }
+            .limit-item span { font-size: 14px; flex: 1; color: var(--text); }
+            .limit-item input[type="number"] { width: 60px; padding: 6px 8px; font-size: 14px; margin: 0; text-align: center; }
+
+            /* Group card */
+            .group-card {
+                background: var(--card-bg); border: 1.5px solid var(--card-border);
+                border-radius: 14px; margin-bottom: 16px; overflow: hidden;
+                transition: border-color 0.2s;
+            }
+            .group-card:hover { border-color: rgba(64,196,255,0.3); }
+            .group-card-header {
+                display: flex; justify-content: space-between; align-items: center;
+                padding: 16px 20px; background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--card-border);
+            }
+            .group-card-title { font-size: 16px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
+            .group-card-body { padding: 20px; }
+            .group-id-badge {
+                font-family: monospace; font-size: 12px; color: var(--text-muted);
+                background: var(--input-bg); padding: 3px 10px; border-radius: 6px;
+                border: 1px solid var(--card-border);
+            }
+
+            /* QR section */
+            .qr-wrap {
+                display: flex; flex-direction: column; align-items: center; gap: 20px;
+                padding: 36px; background: var(--input-bg); border-radius: 12px;
+                border: 1.5px dashed var(--card-border);
+            }
+            #qr-image { max-width: 230px; border-radius: 12px; border: 10px solid #fff; box-shadow: 0 8px 30px rgba(0,0,0,0.5); display: none; }
+
+            /* Toast */
+            .toast {
+                position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%) translateY(24px);
+                background: var(--accent); color: #000; padding: 13px 28px; border-radius: 40px;
+                font-weight: 700; font-size: 15px; z-index: 9999;
+                opacity: 0; transition: all 0.35s; pointer-events: none;
+                box-shadow: 0 4px 20px rgba(0,230,118,0.5);
+            }
+            .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+            /* Modal */
+            .modal { display: none; position: fixed; z-index: 1000; inset: 0; background: var(--modal-bg); backdrop-filter: blur(8px); align-items: center; justify-content: center; }
+            .modal.open { display: flex; }
+            .modal-content {
+                background: var(--card-bg); border: 1.5px solid var(--card-border);
+                border-radius: 16px; padding: 32px; width: 90%; max-width: 640px;
+                box-shadow: 0 24px 80px rgba(0,0,0,0.7); animation: slideIn 0.25s ease;
+                max-height: 90vh; overflow-y: auto;
+            }
+            .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
+            .modal-header h3 { font-size: 20px; font-weight: 700; }
+            .close-modal { background: none; border: none; color: var(--text-muted); font-size: 26px; cursor: pointer; padding: 4px; line-height: 1; }
+            .close-modal:hover { color: var(--red); }
+            @keyframes slideIn { from { transform: translateY(-24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+            /* Terminal */
+            #terminalOutput {
+                background: #000; color: #00ff88; font-family: 'Courier New', monospace;
+                height: 400px; overflow-y: auto; padding: 16px; border-radius: 10px;
+                font-size: 13px; direction: ltr; text-align: left; border: 1px solid #0a1a0a;
+            }
+            #terminalOutput div { margin-bottom: 5px; border-bottom: 1px solid #0a1a0a; padding-bottom: 5px; word-wrap: break-word; line-height: 1.6; }
+
+            /* Two-column card grid for wide screens */
+            .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
+            .card-grid .card { margin-bottom: 0; }
+            .card-grid-full { grid-column: 1 / -1; }
+            @media (max-width: 1100px) { .card-grid { grid-template-columns: 1fr; } }
+
+            /* Section divider */
+            .section-sep { height: 1px; background: var(--card-border); margin: 20px 0; }
+
+            /* Scrollbar */
+            ::-webkit-scrollbar { width: 7px; }
+            ::-webkit-scrollbar-track { background: var(--bg); }
+            ::-webkit-scrollbar-thumb { background: var(--card-border); border-radius: 4px; }
+
+            /* Mobile */
+            .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 99; }
+            .hamburger { display: none; background: none; border: none; color: var(--text); font-size: 24px; cursor: pointer; padding: 4px; }
+
+            @media (max-width: 768px) {
+                .sidebar { transform: translateX(100%); }
+                .sidebar.open { transform: translateX(0); }
+                .sidebar-overlay.open { display: block; }
+                .main { margin-right: 0; }
+                .hamburger { display: block; }
+                .page { padding: 18px; }
+                .topbar { padding: 0 18px; }
+                .limit-grid { grid-template-columns: 1fr; }
+                .card-grid { grid-template-columns: 1fr; }
+                .field-row { flex-direction: column; }
+            }
         </style>
     </head>
     <body>
-        <div class="container">
-            <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="تبديل المظهر">🌙</button>
+        <!-- Sidebar -->
+        <nav class="sidebar" id="sidebar">
+            <div class="sidebar-logo">
+                <div class="logo-icon">🤖</div>
+                <div class="logo-text">المشرف الآلي <small>لوحة التحكم V6</small></div>
+            </div>
 
-            <h1>⚙️ إعدادات المشرف الآلي (V4)</h1>
-            
-            <div class="status-box">
-                <h2>حالة الربط مع واتساب: <span id="status-text">${botStatus}</span></h2>
-                <img id="qr-image" src="" style="display:none; max-width: 250px; margin: 15px auto 0; border: 10px solid white; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.2);" />
-                
-                <div style="margin-top: 15px; display: flex; gap: 10px; justify-content: center;">
-                    <button type="button" id="logoutBtn" class="logout-btn" onclick="logoutBot()">🚪 فصل الحساب (تسجيل خروج)</button>
-                    <button type="button" class="debug-btn" onclick="openDebuggerModal()">🐞 سجل الأحداث (Debugger)</button>
+            <div class="nav-section">الرئيسية</div>
+            <button class="nav-item active" onclick="showPage('page-status', this)">
+                <span class="nav-icon">📡</span> حالة الاتصال
+            </button>
+            <button class="nav-item" onclick="showPage('page-blacklist', this)">
+                <span class="nav-icon">🚫</span> القائمة السوداء
+                <span class="nav-badge" id="blacklist-count">0</span>
+            </button>
+
+            <div class="nav-section">الإعدادات</div>
+            <button class="nav-item" onclick="showPage('page-general', this)">
+                <span class="nav-icon">⚙️</span> الإعدادات العامة
+            </button>
+            <button class="nav-item" onclick="showPage('page-spam', this)">
+                <span class="nav-icon">🛡️</span> مكافحة الإزعاج
+            </button>
+            <button class="nav-item" onclick="showPage('page-media', this)">
+                <span class="nav-icon">🛑</span> فلتر الوسائط
+            </button>
+            <button class="nav-item" onclick="showPage('page-ai', this)">
+                <span class="nav-icon">🧠</span> الذكاء الاصطناعي
+            </button>
+            <button class="nav-item" onclick="showPage('page-groups', this)">
+                <span class="nav-icon">👥</span> المجموعات المخصصة
+            </button>
+
+            <div class="nav-section">أدوات</div>
+            <button class="nav-item" onclick="openDebuggerModal()">
+                <span class="nav-icon">🐞</span> سجل الأحداث
+            </button>
+
+            <div class="sidebar-footer">
+                <button id="logoutBtn" onclick="logoutBot()" style="display:none; background: var(--red-dim); border-color: rgba(248,81,73,0.4); color: var(--red);">🚪 قطع الاتصال</button>
+                <button onclick="saveConfig()" style="background: var(--accent-dim); border-color: rgba(0,230,118,0.4); color: var(--accent); font-weight:700;">💾 حفظ</button>
+            </div>
+        </nav>
+
+        <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+
+        <!-- Main -->
+        <div class="main">
+            <div class="topbar">
+                <div style="display:flex;align-items:center;gap:12px;">
+                    <button class="hamburger" onclick="toggleSidebar()">☰</button>
+                    <span class="topbar-title" id="topbarTitle">حالة الاتصال</span>
+                </div>
+                <div class="topbar-right">
+                    <div class="status-pill">
+                        <div class="status-dot" id="statusDot"></div>
+                        <span id="status-text">${botStatus}</span>
+                    </div>
                 </div>
             </div>
 
             <form id="configForm">
-                
-                <div class="group-card" style="border-color: #f44336; background: rgba(244, 67, 54, 0.02);">
-                    <h3 style="margin-top:0; color: #d32f2f;">🚫 القائمة السوداء العالمية (Database)</h3>
-                    <p style="font-size: 13px; color: #666; margin-top: -5px;">يتم حفظ الأرقام هنا لحظياً ومباشرة في قاعدة البيانات.</p>
-                    
-                    <label style="color: #d32f2f;">أرقام المخالفين (اكتب الرقم مباشرة):</label>
-                    <div class="flex-input">
-                        <input type="text" id="newBlacklistNumber" placeholder="مثال: 966582014941" onkeypress="if(event.key === 'Enter') { event.preventDefault(); addBlacklistNumber(); }">
-                        <button type="button" class="add-btn" style="background: #d32f2f;" onclick="addBlacklistNumber()">+ إضافة حظر مباشر</button>
+
+            <!-- PAGE: Status -->
+            <div class="page active" id="page-status">
+                <div class="page-header">
+                    <h2>📡 حالة الاتصال بواتساب</h2>
+                    <p>اربط حساب واتساب بمسح رمز QR أو راقب الاتصال الحالي</p>
+                </div>
+                <div class="card-grid">
+                    <div class="card" style="grid-column: 1;">
+                        <div class="card-header"><h3>📱 رمز QR</h3></div>
+                        <div class="qr-wrap">
+                            <img id="qr-image" src="" alt="QR Code" />
+                            <div id="qr-placeholder" style="text-align:center; color: var(--text-muted); padding: 20px 0;">
+                                <div style="font-size: 64px; margin-bottom: 16px;">📱</div>
+                                <div style="font-size: 18px; font-weight: 700; color: var(--text);">في انتظار رمز QR...</div>
+                                <div style="font-size: 14px; margin-top: 8px;">سيظهر الرمز هنا تلقائياً</div>
+                            </div>
+                        </div>
                     </div>
-                    <div id="blacklistContainer" class="chip-container"></div>
-                    
-                    <button type="button" id="purgeBtn" class="purge-btn" onclick="purgeBlacklisted()">🧹 طرد جميع المحظورين من كافة المجموعات الآن (تطبيق رجعي)</button>
+                    <div style="display:flex; flex-direction:column; gap:20px;">
+                        <div class="card success">
+                            <div class="card-header"><h3 style="color:var(--accent);">📊 حالة النظام</h3></div>
+                            <div style="font-size:16px; color:var(--text-muted); line-height:2.2;">
+                                <div>🤖 <strong style="color:var(--text);">البوت:</strong> <span id="status-text-detail">${botStatus}</span></div>
+                                <div>🗄️ <strong style="color:var(--text);">قاعدة البيانات:</strong> <span style="color:var(--accent);">متصلة ✓</span></div>
+                                <div>🌐 <strong style="color:var(--text);">المنفذ:</strong> <span style="color:var(--accent);">3000 ✓</span></div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header"><h3>🔗 مجموعة الإدارة الافتراضية</h3></div>
+                            <div class="field-group">
+                                <label class="field-label">معرّف المجموعة (لتلقي التنبيهات)</label>
+                                <input type="text" id="defaultAdminGroup" value="${config.defaultAdminGroup}" dir="ltr" style="text-align:left; font-family: monospace; font-size:13px;">
+                            </div>
+                        </div>
+                        <div class="card info">
+                            <div class="card-header"><h3 style="color:var(--blue);">ℹ️ تعليمات الاستخدام</h3></div>
+                            <div style="font-size:14px; color:var(--text-muted); line-height:2.2;">
+                                <div>1️⃣ امسح رمز QR بهاتفك من واتساب</div>
+                                <div>2️⃣ أضف البوت كمشرف في المجموعات</div>
+                                <div>3️⃣ افتح صفحة الإعدادات وخصّص القواعد</div>
+                                <div>4️⃣ اضغط <strong style="color:var(--accent);">💾 حفظ</strong> لتطبيق التغييرات</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PAGE: Blacklist -->
+            <div class="page" id="page-blacklist">
+                <div class="page-header">
+                    <h2>🚫 القائمة السوداء العالمية</h2>
+                    <p>الأرقام المحظورة تُطرد فوراً من أي مجموعة يكون فيها البوت مشرفاً</p>
+                </div>
+                <div class="card-grid">
+                    <div class="card danger">
+                        <div class="card-header">
+                            <h3 style="color:var(--red);">➕ إضافة رقم للحظر</h3>
+                            <span style="font-size: 13px; color: var(--text-muted); background:var(--red-dim); padding:4px 10px; border-radius:20px;">يُحفظ فوراً في DB</span>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">رقم الهاتف (بدون +)</label>
+                            <div class="input-with-btn">
+                                <input type="text" id="newBlacklistNumber" placeholder="مثال: 966582014941" onkeypress="if(event.key==='Enter'){event.preventDefault();addBlacklistNumber();}">
+                                <button type="button" class="btn btn-danger" onclick="addBlacklistNumber()">+ حظر</button>
+                            </div>
+                        </div>
+                        <label class="field-label">الأرقام المحظورة حالياً</label>
+                        <div id="blacklistContainer" class="chip-container"></div>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:20px;">
+                        <div class="card">
+                            <div class="toggle-row danger" style="margin-bottom:0;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" id="enableBlacklist" ${config.enableBlacklist ? 'checked' : ''}><span class="slider"></span></label>
+                                    <div class="toggle-label danger">
+                                        تفعيل نظام القائمة السوداء
+                                        <small>طرد فوري عند محاولة الدخول أو الإضافة</small>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card warning">
+                            <div class="card-header"><h3 style="color:var(--orange);">🧹 طرد رجعي شامل</h3></div>
+                            <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.</p>
+                            <button type="button" id="purgeBtn" class="btn btn-warning btn-full" onclick="purgeBlacklisted()">
+                                🧹 تنفيذ الطرد الشامل الآن
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PAGE: General -->
+            <div class="page" id="page-general">
+                <div class="page-header">
+                    <h2>⚙️ الإعدادات العامة</h2>
+                    <p>تطبّق على جميع المجموعات التي لا تملك إعدادات مخصصة</p>
+                </div>
+                <div class="card-grid">
+                    <div class="card">
+                        <div class="card-header"><h3>🔤 فلتر الكلمات الممنوعة</h3></div>
+                        <div class="toggle-row" style="margin-bottom:18px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableWordFilter" ${config.enableWordFilter ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label">تفعيل فلتر الكلمات<small>حذف فوري عند رصد أي كلمة ممنوعة</small></div>
+                            </div>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">الكلمات الممنوعة الافتراضية</label>
+                            <div class="input-with-btn">
+                                <input type="text" id="newDefaultWord" placeholder="أدخل الكلمة الممنوعة..." onkeypress="if(event.key==='Enter'){event.preventDefault();addDefaultWord();}">
+                                <button type="button" class="btn btn-primary" onclick="addDefaultWord()">+ إضافة</button>
+                            </div>
+                            <div id="defaultWordsContainer" class="chip-container"></div>
+                        </div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><h3>🚦 الإجراء التلقائي</h3></div>
+                        <div class="toggle-row pink">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="autoAction" ${config.autoAction ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label pink">
+                                    الحذف والإبلاغ المباشر
+                                    <small>تخطي تصويت الإدارة عند رصد المخالفات</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="margin-top:20px; padding:16px; background:var(--input-bg); border-radius:10px; border:1px solid var(--card-border);">
+                            <div style="font-size:13px; color:var(--text-muted); line-height:2;">
+                                <div>🔴 <strong style="color:var(--text);">مفعّل:</strong> حذف فوري + طرد تلقائي</div>
+                                <div>🟡 <strong style="color:var(--text);">معطّل:</strong> حذف + تصويت للإدارة</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PAGE: Spam -->
+            <div class="page" id="page-spam">
+                <div class="page-header">
+                    <h2>🛡️ مكافحة الإزعاج</h2>
+                    <p>Anti-Spam — رصد الرسائل المتكررة خلال نافذة 15 ثانية</p>
                 </div>
 
-                <div class="group-card" style="border-color: var(--text-heading);">
-                    <h3 style="margin-top:0; color: var(--text-heading);">🔧 الإعدادات العامة (تطبق على المجموعات غير المخصصة)</h3>
-                    
-                    <div class="switch-container" style="border-color: #d32f2f; background: rgba(211, 47, 47, 0.05);">
-                        <div class="switch-inner">
+                <div class="card warning" style="max-width:700px;">
+                    <!-- Master toggle -->
+                    <div class="toggle-row warning" style="margin-bottom:0; border-radius:10px;">
+                        <div class="toggle-left">
                             <label class="switch">
-                                <input type="checkbox" id="enableBlacklist" ${config.enableBlacklist ? 'checked' : ''}>
-                                <span class="slider" style="background-color: #ccc;"></span>
-                            </label>
-                            <span style="font-size: 14px; font-weight: bold; color: #d32f2f;">تفعيل نظام القائمة السوداء للمجموعات العامة (طرد من الدخول والإضافة)</span>
-                        </div>
-                    </div>
-
-                    <div class="media-settings">
-                        <h4 style="margin: 0 0 10px 0; color: #d32f2f;">🛑 المنع القطعي لأنواع الملفات (حذف فوري دائماً):</h4>
-                        <div class="cb-group" id="globalBlockedTypes">
-                            ${mediaTypesMeta.map(t => `<label><input type="checkbox" value="${t.id}" ${config.blockedTypes.includes(t.id) ? 'checked' : ''}> ${t.icon} ${t.name}</label>`).join('')}
-                        </div>
-                        <label style="font-size: 13px; margin-top: 10px;">الإجراء عند إرسال نوع ممنوع:</label>
-                        <select id="globalBlockedAction" style="padding: 5px;">
-                            <option value="delete" ${config.blockedAction === 'delete' ? 'selected' : ''}>حذف الرسالة فقط (بصمت)</option>
-                            <option value="poll" ${config.blockedAction === 'poll' ? 'selected' : ''}>حذف + فتح تصويت للإدارة</option>
-                            <option value="auto" ${config.blockedAction === 'auto' ? 'selected' : ''}>حذف + طرد تلقائي وحظر</option>
-                        </select>
-                    </div>
-
-                    <div class="switch-container" style="border-color: #ff9800; margin-top: 15px;">
-                        <div class="switch-inner">
-                            <label class="switch">
-                                <input type="checkbox" id="enableAntiSpam" ${config.enableAntiSpam ? 'checked' : ''}>
+                                <input type="checkbox" id="enableAntiSpam" ${config.enableAntiSpam ? 'checked' : ''}
+                                    onchange="toggleSpamOptions(this.checked)">
                                 <span class="slider"></span>
                             </label>
-                            <span style="font-size: 14px; font-weight: bold; color: #ff9800;">تفعيل الحماية من الإزعاج السريع (Anti-Spam)</span>
+                            <div class="toggle-label warning">
+                                تفعيل نظام Anti-Spam
+                                <small>مراقبة معدل إرسال كل مستخدم خلال نافذة 15 ثانية</small>
+                            </div>
                         </div>
                     </div>
-                    <div class="spam-settings">
-                        <h4 style="margin: 0 0 10px 0; color: #ff9800;">تحديد حدود الإزعاج لكل نوع (خلال 15 ثانية):</h4>
-                        <p style="font-size:12px; margin-top:-5px; color:var(--text-main);">حدد (صح) ليتم مراقبة النوع، ثم ضع الحد الأقصى المسموح به.</p>
-                        
-                        <div class="limit-grid">
+
+                    <!-- Collapsible options -->
+                    <div id="spamOptionsPanel" style="
+                        overflow: hidden;
+                        max-height: ${config.enableAntiSpam ? '800px' : '0px'};
+                        opacity: ${config.enableAntiSpam ? '1' : '0'};
+                        transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease;
+                        margin-top: ${config.enableAntiSpam ? '20px' : '0px'};
+                    ">
+                        <div style="border-top: 1px dashed rgba(255,171,64,0.3); padding-top: 20px;">
+
+                            <!-- Action + duplicate limit -->
+                            <div class="field-row" style="margin-bottom:20px;">
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">الإجراء عند الرصد</label>
+                                    <select id="spamAction">
+                                        <option value="poll" ${config.spamAction === 'poll' ? 'selected' : ''}>🗳️ تصويت للإدارة</option>
+                                        <option value="auto" ${config.spamAction === 'auto' ? 'selected' : ''}>🔨 طرد تلقائي وحظر</option>
+                                    </select>
+                                </div>
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">حد تكرار نفس النص</label>
+                                    <input type="number" id="spamDuplicateLimit" value="${config.spamDuplicateLimit}" min="2" max="15" placeholder="3">
+                                </div>
+                            </div>
+
+                            <!-- Per-type limits -->
+                            <label class="field-label" style="margin-bottom:12px;">⏱️ حدود كل نوع خلال 15 ثانية</label>
+                            <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">فعّل ✓ النوع المراد مراقبته، ثم حدد الحد الأقصى للرسائل المسموح بها</p>
+                            <div class="limit-grid">
+                                ${mediaTypesMeta.map(t => `
+                                <div class="limit-item">
+                                    <input type="checkbox" id="global_spam_check_${t.id}" value="${t.id}" ${config.spamTypes.includes(t.id) ? 'checked' : ''}>
+                                    <span>${t.icon} ${t.name}</span>
+                                    <input type="number" id="global_spam_limit_${t.id}" value="${config.spamLimits[t.id] || 5}" min="1">
+                                </div>`).join('')}
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PAGE: Media Filter -->
+            <div class="page" id="page-media">
+                <div class="page-header">
+                    <h2>🛑 فلتر الوسائط</h2>
+                    <p>منع قطعي لأنواع محددة — الحذف يحدث فوراً بغض النظر عن أي إعداد آخر</p>
+                </div>
+                <div class="card-grid">
+                    <div class="card danger">
+                        <div class="card-header"><h3 style="color:var(--red);">📁 اختر الأنواع الممنوعة</h3></div>
+                        <p style="font-size:14px; color:var(--text-muted); margin-bottom:18px;">أي رسالة من هذه الأنواع ستُحذف تلقائياً ودون استثناء.</p>
+                        <div class="cb-group" id="globalBlockedTypes" style="gap:12px;">
                             ${mediaTypesMeta.map(t => `
-                            <div class="limit-item">
-                                <input type="checkbox" id="global_spam_check_${t.id}" value="${t.id}" ${config.spamTypes.includes(t.id) ? 'checked' : ''}>
-                                <span style="font-size:13px; width:70px;">${t.icon} ${t.name}</span>
-                                <input type="number" id="global_spam_limit_${t.id}" value="${config.spamLimits[t.id] || 5}" min="1">
+                            <label class="cb-label" style="flex:1; min-width:120px; justify-content:center; padding:12px;">
+                                <input type="checkbox" value="${t.id}" ${config.blockedTypes.includes(t.id) ? 'checked' : ''}> ${t.icon} ${t.name}
+                            </label>`).join('')}
+                        </div>
+                    </div>
+                    <div class="card danger">
+                        <div class="card-header"><h3 style="color:var(--red);">⚡ الإجراء عند الرصد</h3></div>
+                        <div class="field-group">
+                            <label class="field-label">ماذا يفعل البوت عند إرسال نوع ممنوع؟</label>
+                            <select id="globalBlockedAction" style="font-size:15px; padding:14px;">
+                                <option value="delete" ${config.blockedAction === 'delete' ? 'selected' : ''}>🗑️ حذف الرسالة فقط (بصمت)</option>
+                                <option value="poll" ${config.blockedAction === 'poll' ? 'selected' : ''}>🗳️ حذف + فتح تصويت للإدارة</option>
+                                <option value="auto" ${config.blockedAction === 'auto' ? 'selected' : ''}>🔨 حذف + طرد تلقائي وحظر</option>
+                            </select>
+                        </div>
+                        <div style="margin-top:16px; padding:16px; background:var(--red-dim); border-radius:10px; border:1px solid rgba(255,82,82,0.2);">
+                            <div style="font-size:13px; color:var(--text-muted); line-height:2.2;">
+                                <div>🗑️ <strong style="color:var(--text);">حذف فقط:</strong> صامت، لا يعلم المرسل</div>
+                                <div>🗳️ <strong style="color:var(--text);">تصويت:</strong> تنبيه الإدارة لاتخاذ قرار</div>
+                                <div>🔨 <strong style="color:var(--text);">طرد تلقائي:</strong> أقوى إجراء، حظر فوري</div>
                             </div>
-                            `).join('')}
-                        </div>
-
-                        <div style="display:flex; gap: 15px; border-top: 1px dashed #ff9800; padding-top: 15px;">
-                            <div style="flex:1;">
-                                <label style="font-size: 13px; margin-top:0;">حد تكرار نفس النص (نسخ لصق):</label>
-                                <input type="number" id="spamDuplicateLimit" value="${config.spamDuplicateLimit}" min="2" max="15">
-                            </div>
-                            <div style="flex:1;">
-                                <label style="font-size: 13px; margin-top:0;">الإجراء عند الرصد (الحذف مؤكد):</label>
-                                <select id="spamAction" style="padding: 5px;">
-                                    <option value="poll" ${config.spamAction === 'poll' ? 'selected' : ''}>تصويت للإدارة</option>
-                                    <option value="auto" ${config.spamAction === 'auto' ? 'selected' : ''}>طرد تلقائي وحظر</option>
-                                </select>
-                            </div>
                         </div>
                     </div>
-
-                    <div class="switch-container">
-                        <div class="switch-inner">
-                            <label class="switch">
-                                <input type="checkbox" id="enableWordFilter" ${config.enableWordFilter ? 'checked' : ''}>
-                                <span class="slider"></span>
-                            </label>
-                            <span style="font-size: 14px; font-weight: bold;">تفعيل فلتر الكلمات الممنوعة</span>
-                        </div>
-                    </div>
-
-                    <div class="switch-container" style="border-color: var(--status-text);">
-                        <div class="switch-inner">
-                            <label class="switch">
-                                <input type="checkbox" id="enableAIFilter" ${config.enableAIFilter ? 'checked' : ''}>
-                                <span class="slider"></span>
-                            </label>
-                            <span style="font-size: 14px; font-weight: bold; color: var(--status-text);">تفعيل المشرف الذكي (AI) للنصوص</span>
-                        </div>
-                        <button type="button" class="add-btn" style="background: #0277bd; padding: 8px 15px;" onclick="openOllamaModal()">⚙️ إعدادات خادم AI</button>
-                    </div>
-
-                    <div class="switch-container" style="border-color: #9c27b0; background: rgba(156, 39, 176, 0.05);">
-                        <div class="switch-inner">
-                            <label class="switch">
-                                <input type="checkbox" id="enableAIMedia" ${config.enableAIMedia ? 'checked' : ''}>
-                                <span class="slider" style="background-color: #ccc;"></span>
-                            </label>
-                            <span style="font-size: 14px; font-weight: bold; color: #9c27b0;">تفعيل تحليل الصور للمشرف الذكي (يتطلب نموذج Vision)</span>
-                        </div>
-                    </div>
-
-                    <div class="switch-container" style="border-color: #e91e63; background: rgba(233, 30, 99, 0.05);">
-                        <div class="switch-inner">
-                            <label class="switch">
-                                <input type="checkbox" id="autoAction" ${config.autoAction ? 'checked' : ''}>
-                                <span class="slider" style="background-color: #ccc;"></span>
-                            </label>
-                            <span style="font-size: 14px; font-weight: bold; color: #e91e63;">تفعيل الحذف والإبلاغ المباشر للمخالفات الأخرى</span>
-                        </div>
-                    </div>
-
-                    <div id="aiPromptContainer" style="margin-top: 15px; padding: 15px; background: var(--status-bg); border-radius: 8px; border: 1px dashed var(--status-text);">
-                        <label style="margin-top:0; color: var(--status-text);">تعليمات الذكاء الاصطناعي (وصف المحتوى الممنوع):</label>
-                        <textarea id="aiPromptText" rows="3">${config.aiPrompt}</textarea>
-                    </div>
-
-                    <label style="border-top: 1px solid var(--card-border); padding-top: 15px;">معرّف (ID) مجموعة الإدارة (لتلقي التنبيهات):</label>
-                    <input type="text" id="defaultAdminGroup" value="${config.defaultAdminGroup}" dir="ltr" style="text-align: left;">
-
-                    <label>الكلمات الممنوعة الافتراضية:</label>
-                    <div class="flex-input">
-                        <input type="text" id="newDefaultWord" placeholder="أدخل الكلمة الممنوعة هنا..." onkeypress="if(event.key === 'Enter') { event.preventDefault(); addDefaultWord(); }">
-                        <button type="button" class="add-btn" onclick="addDefaultWord()">+ إضافة كلمة</button>
-                    </div>
-                    <div id="defaultWordsContainer" class="chip-container"></div>
                 </div>
+            </div>
 
-                <h3 style="margin-top: 30px; border-bottom: 2px solid var(--card-border); padding-bottom: 10px;">📋 المجموعات المخصصة (جدول Custom Groups)</h3>
+            <!-- PAGE: AI -->
+            <div class="page" id="page-ai">
+                <div class="page-header">
+                    <h2>🧠 المشرف الذكي (AI)</h2>
+                    <p>تحليل المحتوى باستخدام نموذج Ollama LLM محلي</p>
+                </div>
+                <div class="card-grid">
+                    <div class="card info">
+                        <div class="card-header">
+                            <h3 style="color:var(--blue);">🔌 تفعيل الذكاء الاصطناعي</h3>
+                            <button type="button" class="btn btn-blue btn-sm" onclick="openOllamaModal()">⚙️ إعداد الخادم</button>
+                        </div>
+                        <div class="toggle-row blue" style="margin-bottom:12px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableAIFilter" ${config.enableAIFilter ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label blue">تحليل النصوص بالـ AI<small>فحص كل رسالة نصية قبل السماح بها</small></div>
+                            </div>
+                        </div>
+                        <div class="toggle-row purple">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableAIMedia" ${config.enableAIMedia ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label purple">تحليل الصور (Vision AI)<small>يتطلب نموذجاً يدعم Vision مثل llava</small></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card" id="aiPromptContainer">
+                        <div class="card-header"><h3>📝 تعليمات الذكاء الاصطناعي</h3></div>
+                        <div class="field-group">
+                            <label class="field-label">صف المحتوى الممنوع للنموذج</label>
+                            <textarea id="aiPromptText" rows="6" style="font-size:14px; line-height:1.8;">${config.aiPrompt}</textarea>
+                        </div>
+                        <div style="font-size:12px; color:var(--text-muted); padding:10px; background:var(--input-bg); border-radius:8px; border:1px solid var(--card-border);">
+                            💡 مثال: "امنع أي رسالة تحتوي على إعلانات تجارية أو روابط مشبوهة أو محتوى مسيء"
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PAGE: Groups -->
+            <div class="page" id="page-groups">
+                <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
+                    <div>
+                        <h2>👥 المجموعات المخصصة</h2>
+                        <p>إعدادات مخصصة لكل مجموعة — تتجاوز الإعدادات العامة</p>
+                    </div>
+                    <button type="button" class="btn btn-blue" onclick="addGroup()">+ إضافة مجموعة</button>
+                </div>
                 <div id="groupsContainer"></div>
-                
-                <button type="button" class="add-btn" style="width:100%; padding:15px; margin-top:15px; background:#0277bd;" onclick="addGroup()">+ إضافة إعدادات لمجموعة جديدة</button>
+            </div>
 
-                <button type="submit" class="save-btn">💾 تطبيق وحفظ في الجداول (Commit to Database)</button>
-                <div id="msg" class="success">✅ تم تحديث جميع الجداول بنجاح.</div>
+            <!-- Save button (visible in all pages as floating) -->
+            <div id="saveMsgToast" class="toast">✅ تم الحفظ في قاعدة البيانات بنجاح!</div>
+
             </form>
-        </div>
+        </div><!-- /.main -->
 
+        <!-- Modal: Ollama -->
         <div id="ollamaModal" class="modal">
             <div class="modal-content">
-                <span class="close-modal" onclick="closeOllamaModal()">&times;</span>
-                <h3 style="margin-top: 0; color: var(--status-text); border-bottom: 1px solid var(--card-border); padding-bottom: 10px;">🔗 إعدادات محرك الذكاء الاصطناعي (جدول LLM)</h3>
-                <label>رابط الخادم (Endpoint URL):</label>
-                <input type="text" id="ollamaUrl" value="${config.ollamaUrl}" dir="ltr" style="text-align: left;">
-                <label>اسم النموذج (يجب أن يكون نموذج Vision إذا أردت تحليل الصور، مثل llava):</label>
-                <input type="text" id="ollamaModel" value="${config.ollamaModel}" dir="ltr" style="text-align: left;">
-                <button type="button" class="add-btn" style="width: 100%; margin-top: 20px; padding: 12px; background: var(--status-text);" onclick="closeOllamaModal()">إغلاق</button>
+                <div class="modal-header">
+                    <h3 style="color:var(--blue);">🔗 إعدادات خادم Ollama</h3>
+                    <button class="close-modal" onclick="closeOllamaModal()">×</button>
+                </div>
+                <div class="field-group">
+                    <label class="field-label">رابط الخادم (Endpoint URL)</label>
+                    <input type="text" id="ollamaUrl" value="${config.ollamaUrl}" dir="ltr" style="text-align:left; font-family:monospace;">
+                </div>
+                <div class="field-group">
+                    <label class="field-label">اسم النموذج</label>
+                    <input type="text" id="ollamaModel" value="${config.ollamaModel}" dir="ltr" style="text-align:left; font-family:monospace;" placeholder="مثال: llava">
+                    <div style="font-size:12px; color:var(--text-muted); margin-top:6px;">للصور استخدم نموذج Vision مثل <code>llava</code></div>
+                </div>
+                <button type="button" class="btn btn-primary btn-full" onclick="closeOllamaModal()">حفظ وإغلاق</button>
             </div>
         </div>
 
+        <!-- Modal: Debugger -->
         <div id="debuggerModal" class="modal">
-            <div class="modal-content" style="max-width: 800px; background: #1e1e1e; border-color: #333;">
-                <span class="close-modal" style="color: #fff;" onclick="closeDebuggerModal()">&times;</span>
-                <h3 style="margin-top: 0; color: #25d366; border-bottom: 1px solid #333; padding-bottom: 10px;">🐞 سجل الأحداث المباشر (Live Debugger)</h3>
+            <div class="modal-content" style="max-width:800px; background:#0d1117; border-color:#21262d;">
+                <div class="modal-header">
+                    <h3 style="color:var(--accent); font-family:monospace;">⬛ سجل الأحداث المباشر</h3>
+                    <button class="close-modal" onclick="closeDebuggerModal()">×</button>
+                </div>
                 <div id="terminalOutput"></div>
-                <button type="button" class="add-btn" style="width: 100%; margin-top: 20px; padding: 12px; background: #333; color: #fff;" onclick="closeDebuggerModal()">إغلاق السجل</button>
+                <button type="button" class="btn btn-ghost btn-full" style="margin-top:14px;" onclick="closeDebuggerModal()">إغلاق</button>
             </div>
         </div>
-        
+
         <script>
-            const themeBtn = document.getElementById('themeToggle');
-            const currentTheme = localStorage.getItem('theme') || 'light';
-            if (currentTheme === 'dark') {
-                document.documentElement.setAttribute('data-theme', 'dark');
-                themeBtn.textContent = '☀️';
-            }
-
-            function toggleTheme() {
-                let theme = document.documentElement.getAttribute('data-theme');
-                if (theme === 'dark') {
-                    document.documentElement.setAttribute('data-theme', 'light');
-                    localStorage.setItem('theme', 'light');
-                    themeBtn.textContent = '🌙';
-                } else {
-                    document.documentElement.setAttribute('data-theme', 'dark');
-                    localStorage.setItem('theme', 'dark');
-                    themeBtn.textContent = '☀️';
-                }
-            }
-
-            function openOllamaModal() { document.getElementById('ollamaModal').style.display = 'block'; }
-            function closeOllamaModal() { document.getElementById('ollamaModal').style.display = 'none'; }
+            function openOllamaModal() { document.getElementById('ollamaModal').classList.add('open'); }
+            function closeOllamaModal() { document.getElementById('ollamaModal').classList.remove('open'); }
             
             let debuggerInterval;
             function openDebuggerModal() { 
-                document.getElementById('debuggerModal').style.display = 'block'; 
+                document.getElementById('debuggerModal').classList.add('open'); 
                 fetchLogs();
                 debuggerInterval = setInterval(fetchLogs, 1500); 
             }
             function closeDebuggerModal() { 
-                document.getElementById('debuggerModal').style.display = 'none'; 
+                document.getElementById('debuggerModal').classList.remove('open'); 
                 clearInterval(debuggerInterval);
             }
 
             window.onclick = function(event) {
-                if (event.target == document.getElementById('ollamaModal')) closeOllamaModal();
-                if (event.target == document.getElementById('debuggerModal')) closeDebuggerModal();
+                if (event.target === document.getElementById('ollamaModal')) closeOllamaModal();
+                if (event.target === document.getElementById('debuggerModal')) closeDebuggerModal();
             }
 
             async function fetchLogs() {
@@ -523,6 +974,52 @@ app.get('/', (req, res) => {
                     document.getElementById('logoutBtn').style.display = 'none';
                     await fetch('/api/logout', { method: 'POST' });
                 }
+            }
+
+            function toggleSpamOptions(enabled) {
+                const panel = document.getElementById('spamOptionsPanel');
+                if (enabled) {
+                    panel.style.maxHeight = '800px';
+                    panel.style.opacity = '1';
+                    panel.style.marginTop = '20px';
+                } else {
+                    panel.style.maxHeight = '0px';
+                    panel.style.opacity = '0';
+                    panel.style.marginTop = '0px';
+                }
+            }
+
+            // Navigation
+            const pageTitles = {
+                'page-status': 'حالة الاتصال',
+                'page-blacklist': 'القائمة السوداء',
+                'page-general': 'الإعدادات العامة',
+                'page-spam': 'مكافحة الإزعاج',
+                'page-media': 'فلتر الوسائط',
+                'page-ai': 'الذكاء الاصطناعي',
+                'page-groups': 'المجموعات المخصصة'
+            };
+            function showPage(pageId, btn) {
+                document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+                document.getElementById(pageId).classList.add('active');
+                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+                if(btn) btn.classList.add('active');
+                document.getElementById('topbarTitle').textContent = pageTitles[pageId] || '';
+                closeSidebar();
+            }
+            function toggleSidebar() {
+                document.getElementById('sidebar').classList.toggle('open');
+                document.getElementById('sidebarOverlay').classList.toggle('open');
+            }
+            function closeSidebar() {
+                document.getElementById('sidebar').classList.remove('open');
+                document.getElementById('sidebarOverlay').classList.remove('open');
+            }
+            function showToast(msg) {
+                const t = document.getElementById('saveMsgToast');
+                if(msg) t.textContent = msg;
+                t.classList.add('show');
+                setTimeout(() => t.classList.remove('show'), 3000);
             }
 
             // المتغيرات
@@ -666,7 +1163,7 @@ app.get('/', (req, res) => {
 
                     // توليد واجهة الأنواع الممنوعة
                     const blockedChecks = metaTypes.map(t => 
-                        \`<label><input type="checkbox" value="\${t.id}" \${group.blockedTypes.includes(t.id)?'checked':''} onchange="updateGroupArray(\${groupIndex}, 'blockedTypes', '\${t.id}', this.checked)"> \${t.icon} \${t.name}</label>\`
+                        \`<label class="cb-label"><input type="checkbox" value="\${t.id}" \${group.blockedTypes.includes(t.id)?'checked':''} onchange="updateGroupArray(\${groupIndex}, 'blockedTypes', '\${t.id}', this.checked)"> \${t.icon} \${t.name}</label>\`
                     ).join('');
 
                     // توليد واجهة حدود الإزعاج
@@ -684,136 +1181,149 @@ app.get('/', (req, res) => {
                     container.innerHTML += \`
                     <div class="group-card">
                         <div class="group-card-header">
-                            <h4 style="margin:0;">إعدادات المجموعة رقم \${groupIndex + 1}</h4>
-                            <button type="button" class="remove-btn" onclick="removeGroup(\${groupIndex})">حذف هذه المجموعة</button>
-                        </div>
-                        
-                        <label>معرّف (ID) المجموعة المستهدفة:</label>
-                        <input type="text" placeholder="مثال: 120363000000000000@g.us" dir="ltr" style="text-align: left;" value="\${group.id}" onchange="updateGroupData(\${groupIndex}, 'id', this.value)">
-
-                        <label>معرّف مجموعة الإدارة (لتلقي تنبيهات هذه المجموعة فقط):</label>
-                        <input type="text" placeholder="(اتركه فارغاً لاستخدام مجموعة الإدارة العامة)" dir="ltr" style="text-align: left;" value="\${group.adminGroup}" onchange="updateGroupData(\${groupIndex}, 'adminGroup', this.value)">
-
-                        <div class="media-settings">
-                            <h4 style="margin: 0 0 10px 0; color: #d32f2f;">🛑 المنع القطعي لأنواع الملفات لهذه المجموعة:</h4>
-                            <div class="cb-group">\${blockedChecks}</div>
-                            <label style="font-size: 13px; margin-top: 10px;">الإجراء عند الرصد:</label>
-                            <select style="padding: 5px;" onchange="updateGroupData(\${groupIndex}, 'blockedAction', this.value)">
-                                <option value="delete" \${group.blockedAction === 'delete' ? 'selected' : ''}>حذف الرسالة فقط</option>
-                                <option value="poll" \${group.blockedAction === 'poll' ? 'selected' : ''}>حذف + تصويت للإدارة</option>
-                                <option value="auto" \${group.blockedAction === 'auto' ? 'selected' : ''}>حذف + طرد تلقائي</option>
-                            </select>
-                        </div>
-
-                        <div class="switch-container" style="border-color: #ff9800; background: rgba(255, 152, 0, 0.05); margin-top: 15px;">
-                            <div class="switch-inner">
-                                <label class="switch">
-                                    <input type="checkbox" \${group.enableAntiSpam ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAntiSpam', this.checked)">
-                                    <span class="slider" style="background-color: #ccc;"></span>
-                                </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #ff9800;">تفعيل الحماية من الإزعاج السريع (Anti-Spam)</span>
+                            <div class="group-card-title">
+                                <span>👥</span>
+                                المجموعة \${groupIndex + 1}
+                                \${group.id ? \`<span class="group-id-badge">\${group.id.split('@')[0].slice(-8)}...</span>\` : '<span style="color:var(--orange);font-size:12px;">معرّف غير محدد</span>'}
                             </div>
+                            <button type="button" class="btn btn-danger btn-sm" onclick="removeGroup(\${groupIndex})">حذف</button>
                         </div>
-                        
-                        <div class="spam-settings">
-                            <h4 style="margin: 0 0 10px 0; color: #ff9800;">حدود الإزعاج لكل نوع (خلال 15 ثانية):</h4>
-                            <div class="limit-grid">\${spamLimitGrid}</div>
-                            
-                            <div style="display:flex; gap: 15px; border-top: 1px dashed #ff9800; padding-top: 15px;">
-                                <div style="flex:1;">
-                                    <label style="font-size: 13px; margin-top:0;">تكرار نفس النص:</label>
-                                    <input type="number" value="\${group.spamDuplicateLimit}" min="2" max="15" onchange="updateGroupData(\${groupIndex}, 'spamDuplicateLimit', parseInt(this.value))">
-                                </div>
-                                <div style="flex:1;">
-                                    <label style="font-size: 13px; margin-top:0;">الإجراء عند الرصد:</label>
-                                    <select style="padding: 5px;" onchange="updateGroupData(\${groupIndex}, 'spamAction', this.value)">
-                                        <option value="poll" \${group.spamAction === 'poll' ? 'selected' : ''}>تصويت للإدارة</option>
-                                        <option value="auto" \${group.spamAction === 'auto' ? 'selected' : ''}>طرد تلقائي</option>
-                                    </select>
+                        <div class="group-card-body">
+
+                            <div class="field-group">
+                                <label class="field-label">معرّف المجموعة المستهدفة</label>
+                                <input type="text" placeholder="مثال: 120363000000000000@g.us" dir="ltr" style="text-align:left;font-family:monospace;" value="\${group.id}" onchange="updateGroupData(\${groupIndex}, 'id', this.value)">
+                            </div>
+                            <div class="field-group">
+                                <label class="field-label">مجموعة الإدارة المخصصة (اتركه فارغاً للعامة)</label>
+                                <input type="text" dir="ltr" style="text-align:left;font-family:monospace;" value="\${group.adminGroup}" onchange="updateGroupData(\${groupIndex}, 'adminGroup', this.value)">
+                            </div>
+
+                            <!-- Blocked types -->
+                            <div class="sub-panel red" style="margin-bottom:12px;">
+                                <h4 style="color:var(--red);">🛑 الأنواع الممنوعة قطعياً</h4>
+                                <div class="cb-group" style="margin-bottom:10px;">\${blockedChecks}</div>
+                                <label class="field-label">إجراء المنع</label>
+                                <select onchange="updateGroupData(\${groupIndex}, 'blockedAction', this.value)">
+                                    <option value="delete" \${group.blockedAction === 'delete' ? 'selected' : ''}>حذف الرسالة فقط</option>
+                                    <option value="poll" \${group.blockedAction === 'poll' ? 'selected' : ''}>حذف + تصويت للإدارة</option>
+                                    <option value="auto" \${group.blockedAction === 'auto' ? 'selected' : ''}>حذف + طرد تلقائي</option>
+                                </select>
+                            </div>
+
+                            <!-- Anti-Spam toggle + slide panel -->
+                            <div class="toggle-row warning" style="margin-bottom:0; border-radius:\${group.enableAntiSpam ? '10px 10px 0 0' : '10px'};">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enableAntiSpam ? 'checked' : ''} onchange="toggleGroupPanel(\${groupIndex}, 'spam', this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label warning">مكافحة الإزعاج (Anti-Spam)<small>رصد الرسائل المتكررة خلال 15 ثانية</small></div>
                                 </div>
                             </div>
-                        </div>
-
-                        <div class="switch-container" style="border-color: #4caf50; background: rgba(76, 175, 80, 0.05); margin-top: 15px;">
-                            <div class="switch-inner">
-                                <label class="switch">
-                                    <input type="checkbox" \${group.enableWelcomeMessage ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableWelcomeMessage', this.checked)">
-                                    <span class="slider" style="background-color: #ccc;"></span>
-                                </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #4caf50;">تفعيل رسالة ترحيبية عند الانضمام</span>
+                            <div id="group_spam_panel_\${groupIndex}" style="
+                                overflow:hidden;
+                                max-height:\${group.enableAntiSpam ? '600px' : '0px'};
+                                opacity:\${group.enableAntiSpam ? '1' : '0'};
+                                transition:max-height 0.45s ease, opacity 0.35s ease, margin-bottom 0.35s ease;
+                                margin-bottom:\${group.enableAntiSpam ? '12px' : '0px'};
+                            ">
+                                <div class="sub-panel orange" style="border-top:none; border-radius:0 0 10px 10px;">
+                                    <h4 style="color:var(--orange);">⏱️ حدود كل نوع (15 ثانية)</h4>
+                                    <div class="limit-grid">\${spamLimitGrid}</div>
+                                    <div class="field-row" style="border-top:1px dashed rgba(255,171,64,0.3);padding-top:12px;margin-top:4px;">
+                                        <div>
+                                            <label class="field-label">تكرار النص</label>
+                                            <input type="number" value="\${group.spamDuplicateLimit}" min="2" max="15" onchange="updateGroupData(\${groupIndex}, 'spamDuplicateLimit', parseInt(this.value))">
+                                        </div>
+                                        <div>
+                                            <label class="field-label">الإجراء</label>
+                                            <select onchange="updateGroupData(\${groupIndex}, 'spamAction', this.value)">
+                                                <option value="poll" \${group.spamAction === 'poll' ? 'selected' : ''}>🗳️ تصويت للإدارة</option>
+                                                <option value="auto" \${group.spamAction === 'auto' ? 'selected' : ''}>🔨 طرد تلقائي</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
-                        </div>
-                        <div style="margin-top: 10px; padding: 10px; background: var(--input-bg); border-radius: 5px; border: 1px dashed #4caf50;">
-                            <label style="margin-top:0; color: #4caf50; font-size: 13px;">نص الرسالة (استخدم {user} للمنشن):</label>
-                            <textarea rows="2" onchange="updateGroupData(\${groupIndex}, 'welcomeMessageText', this.value)">\${group.welcomeMessageText}</textarea>
-                        </div>
 
-                        <div class="switch-container" style="border-color: #d32f2f; background: rgba(211, 47, 47, 0.05);">
-                            <div class="switch-inner">
-                                <label class="switch">
-                                    <input type="checkbox" \${group.enableBlacklist ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableBlacklist', this.checked)">
-                                    <span class="slider" style="background-color: #ccc;"></span>
-                                </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #d32f2f;">تفعيل نظام القائمة السوداء لهذه المجموعة</span>
+                            <!-- Welcome message toggle + slide panel -->
+                            <div class="toggle-row green" style="margin-bottom:0; border-radius:\${group.enableWelcomeMessage ? '10px 10px 0 0' : '10px'};">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enableWelcomeMessage ? 'checked' : ''} onchange="toggleGroupPanel(\${groupIndex}, 'welcome', this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label green">رسالة ترحيبية عند الانضمام<small>يُرسلها البوت لكل عضو جديد</small></div>
+                                </div>
                             </div>
-                        </div>
-
-                        <div class="switch-container">
-                            <div class="switch-inner">
-                                <label class="switch">
-                                    <input type="checkbox" \${group.useDefaultWords ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'useDefaultWords', this.checked)">
-                                    <span class="slider"></span>
-                                </label>
-                                <span style="font-size: 14px; font-weight: bold;">تطبيق الكلمات الممنوعة العامة بالإضافة لكلمات المجموعة</span>
+                            <div id="group_welcome_panel_\${groupIndex}" style="
+                                overflow:hidden;
+                                max-height:\${group.enableWelcomeMessage ? '200px' : '0px'};
+                                opacity:\${group.enableWelcomeMessage ? '1' : '0'};
+                                transition:max-height 0.45s ease, opacity 0.35s ease, margin-bottom 0.35s ease;
+                                margin-bottom:\${group.enableWelcomeMessage ? '12px' : '0px'};
+                            ">
+                                <div class="sub-panel" style="border-top:none; border-radius:0 0 10px 10px; border-color:rgba(100,200,120,0.3);">
+                                    <label class="field-label">نص الرسالة ({user} للمنشن)</label>
+                                    <textarea rows="2" onchange="updateGroupData(\${groupIndex}, 'welcomeMessageText', this.value)">\${group.welcomeMessageText}</textarea>
+                                </div>
                             </div>
-                        </div>
 
-                        <div class="switch-container" style="border-color: #ff9800; background: rgba(255, 152, 0, 0.05);">
-                            <div class="switch-inner">
-                                <label class="switch">
-                                    <input type="checkbox" \${group.enableWordFilter ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableWordFilter', this.checked)">
-                                    <span class="slider" style="background-color: #ccc;"></span>
-                                </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #ff9800;">تفعيل الفلتر التقليدي (الكلمات الممنوعة)</span>
+                            <!-- Blacklist toggle (no sub-panel needed) -->
+                            <div class="toggle-row danger" style="margin-bottom:12px;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enableBlacklist ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableBlacklist', this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label danger">تفعيل القائمة السوداء<small>طرد فوري لأي رقم محظور</small></div>
+                                </div>
                             </div>
-                        </div>
 
-                        <div class="switch-container" style="border-color: #0277bd; background: rgba(2, 119, 189, 0.05);">
-                            <div class="switch-inner">
-                                <label class="switch">
-                                    <input type="checkbox" \${group.enableAIFilter ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAIFilter', this.checked)">
-                                    <span class="slider" style="background-color: #ccc;"></span>
-                                </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #0277bd;">تفعيل المشرف الذكي (AI) لهذه المجموعة</span>
+                            <!-- Word filter toggle + slide panel (includes useDefaultWords inside) -->
+                            <div class="toggle-row warning" style="margin-bottom:0; border-radius:\${group.enableWordFilter ? '10px 10px 0 0' : '10px'};">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enableWordFilter ? 'checked' : ''} onchange="toggleGroupPanel(\${groupIndex}, 'words', this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label warning">فلتر الكلمات الممنوعة<small>حذف فوري عند رصد كلمة ممنوعة</small></div>
+                                </div>
                             </div>
-                        </div>
-
-                        <div class="switch-container" style="border-color: #9c27b0; background: rgba(156, 39, 176, 0.05);">
-                            <div class="switch-inner">
-                                <label class="switch">
-                                    <input type="checkbox" \${group.enableAIMedia ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAIMedia', this.checked)">
-                                    <span class="slider" style="background-color: #ccc;"></span>
-                                </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #9c27b0;">تفعيل تحليل الصور للمشرف الذكي (Vision)</span>
+                            <div id="group_words_panel_\${groupIndex}" style="
+                                overflow:hidden;
+                                max-height:\${group.enableWordFilter ? '600px' : '0px'};
+                                opacity:\${group.enableWordFilter ? '1' : '0'};
+                                transition:max-height 0.45s ease, opacity 0.35s ease, margin-bottom 0.35s ease;
+                                margin-bottom:\${group.enableWordFilter ? '12px' : '0px'};
+                            ">
+                                <div class="sub-panel orange" style="border-top:none; border-radius:0 0 10px 10px;">
+                                    <!-- useDefaultWords nested inside word filter panel -->
+                                    <div class="toggle-row" style="margin-bottom:14px; background:rgba(255,255,255,0.04); border-color:rgba(255,171,64,0.25);">
+                                        <div class="toggle-left">
+                                            <label class="switch"><input type="checkbox" \${group.useDefaultWords ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'useDefaultWords', this.checked)"><span class="slider"></span></label>
+                                            <div class="toggle-label">تطبيق الكلمات العامة أيضاً<small>إضافة قائمة الكلمات العامة لهذه المجموعة</small></div>
+                                        </div>
+                                    </div>
+                                    <label class="field-label">كلمات ممنوعة مخصصة لهذه المجموعة</label>
+                                    <div class="input-with-btn" style="margin-bottom:10px;">
+                                        <input type="text" id="newGroupWord_\${groupIndex}" placeholder="أدخل الكلمة..." onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupWord(\${groupIndex});}">
+                                        <button type="button" class="btn btn-primary btn-sm" onclick="addGroupWord(\${groupIndex})">+ إضافة</button>
+                                    </div>
+                                    <div class="chip-container">\${wordsHtml}</div>
+                                </div>
                             </div>
-                        </div>
 
-                        <div class="switch-container" style="border-color: #e91e63; background: rgba(233, 30, 99, 0.05);">
-                            <div class="switch-inner">
-                                <label class="switch">
-                                    <input type="checkbox" \${group.autoAction ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'autoAction', this.checked)">
-                                    <span class="slider" style="background-color: #ccc;"></span>
-                                </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #e91e63;">تفعيل الحذف المباشر (تخطي تصويت الإدارة) للمخالفات الأخرى</span>
+                            <!-- AI toggles -->
+                            <div class="toggle-row blue" style="margin-bottom:12px;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enableAIFilter ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAIFilter', this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label blue">المشرف الذكي (AI) للنصوص</div>
+                                </div>
                             </div>
-                        </div>
+                            <div class="toggle-row purple" style="margin-bottom:12px;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enableAIMedia ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAIMedia', this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label purple">تحليل الصور (Vision)</div>
+                                </div>
+                            </div>
+                            <div class="toggle-row pink">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.autoAction ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'autoAction', this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label pink">الحذف المباشر (تخطي التصويت)</div>
+                                </div>
+                            </div>
 
-                        <label>الكلمات الممنوعة المخصصة لهذه المجموعة فقط:</label>
-                        <div class="flex-input">
-                            <input type="text" id="newGroupWord_\${groupIndex}" placeholder="أدخل الكلمة..." onkeypress="if(event.key === 'Enter') { event.preventDefault(); addGroupWord(\${groupIndex}); }">
-                            <button type="button" class="add-btn" onclick="addGroupWord(\${groupIndex})">+ إضافة كلمة</button>
                         </div>
-                        <div class="chip-container">\${wordsHtml}</div>
                     </div>
                     \`;
                 });
@@ -843,6 +1353,30 @@ app.get('/', (req, res) => {
             function updateGroupData(index, field, value) { groupsArr[index][field] = value; }
             function updateGroupToggle(index, field, isChecked) { groupsArr[index][field] = isChecked; }
 
+            function toggleGroupPanel(groupIndex, type, enabled) {
+                const panelMap = { spam: 'spam', welcome: 'welcome', words: 'words' };
+                const fieldMap = { spam: 'enableAntiSpam', welcome: 'enableWelcomeMessage', words: 'enableWordFilter' };
+                const maxHeightMap = { spam: '600px', welcome: '200px', words: '600px' };
+
+                groupsArr[groupIndex][fieldMap[type]] = enabled;
+
+                const panel = document.getElementById(\`group_\${panelMap[type]}_panel_\${groupIndex}\`);
+                const toggle = panel.previousElementSibling;
+                if (!panel) return;
+
+                if (enabled) {
+                    panel.style.maxHeight = maxHeightMap[type];
+                    panel.style.opacity = '1';
+                    panel.style.marginBottom = '12px';
+                    if (toggle) toggle.style.borderRadius = '10px 10px 0 0';
+                } else {
+                    panel.style.maxHeight = '0px';
+                    panel.style.opacity = '0';
+                    panel.style.marginBottom = '0px';
+                    if (toggle) toggle.style.borderRadius = '10px';
+                }
+            }
+
             function addGroupWord(groupIndex) {
                 const input = document.getElementById(\`newGroupWord_\${groupIndex}\`);
                 const word = input.value.trim();
@@ -866,39 +1400,43 @@ app.get('/', (req, res) => {
                     let res = await fetch('/api/status');
                     let data = await res.json();
                     document.getElementById('status-text').innerText = data.status;
+                    const detailEl = document.getElementById('status-text-detail');
+                    if(detailEl) detailEl.innerText = data.status;
                     
+                    const dot = document.getElementById('statusDot');
                     if(data.status.includes('متصل وجاهز')) {
-                        document.getElementById('logoutBtn').style.display = 'inline-block';
+                        dot.className = 'status-dot online';
+                        document.getElementById('logoutBtn').style.display = 'block';
+                    } else if(data.status.includes('QR') || data.status.includes('انتظار')) {
+                        dot.className = 'status-dot waiting';
+                        document.getElementById('logoutBtn').style.display = 'none';
                     } else {
+                        dot.className = 'status-dot';
                         document.getElementById('logoutBtn').style.display = 'none';
                     }
 
+                    const qrImg = document.getElementById('qr-image');
+                    const qrPlaceholder = document.getElementById('qr-placeholder');
                     if(data.qr) {
-                        document.getElementById('qr-image').src = data.qr;
-                        document.getElementById('qr-image').style.display = 'block';
+                        qrImg.src = data.qr;
+                        qrImg.style.display = 'block';
+                        if(qrPlaceholder) qrPlaceholder.style.display = 'none';
                     } else {
-                        document.getElementById('qr-image').style.display = 'none';
+                        qrImg.style.display = 'none';
+                        if(qrPlaceholder) qrPlaceholder.style.display = 'block';
                     }
                 } catch(e) {}
             }, 2000);
 
-            document.getElementById('configForm').onsubmit = async (e) => {
-                e.preventDefault();
-                
+            async function saveConfig() {
                 let finalGroupsObj = {};
-                groupsArr.forEach(g => {
-                    if(g.id) {
-                        finalGroupsObj[g.id] = g;
-                    }
-                });
+                groupsArr.forEach(g => { if(g.id) finalGroupsObj[g.id] = g; });
 
-                // تجميع الإعدادات العامة للسبام
                 const gSpamTypes = [];
                 const gSpamLimits = {};
                 metaTypes.forEach(t => {
                     const cb = document.getElementById('global_spam_check_' + t.id);
                     if(cb && cb.checked) gSpamTypes.push(t.id);
-                    
                     const lim = document.getElementById('global_spam_limit_' + t.id);
                     gSpamLimits[t.id] = parseInt(lim ? lim.value : 5) || 5;
                 });
@@ -930,10 +1468,13 @@ app.get('/', (req, res) => {
                     body: JSON.stringify(newConfig)
                 });
                 
-                if(res.ok) {
-                    document.getElementById('msg').style.display = 'block';
-                    setTimeout(() => document.getElementById('msg').style.display = 'none', 4000);
-                }
+                if(res.ok) showToast('✅ تم الحفظ في قاعدة البيانات بنجاح!');
+                else showToast('❌ فشل الحفظ، تحقق من السيرفر');
+            }
+
+            document.getElementById('configForm').onsubmit = async (e) => {
+                e.preventDefault();
+                await saveConfig();
             }
         </script>
     </body>
