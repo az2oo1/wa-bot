@@ -180,27 +180,35 @@ const userTrackers = new Map();
 const abortedMessages = new Set(); 
 const spamMutedUsers = new Map(); 
 
-// مصفوفة لأنواع الوسائط مع أسمائها لتوليد الواجهة
-const mediaTypesMeta = [
-    { id: 'text', icon: '📝', name: 'نصوص' },
-    { id: 'image', icon: '🖼️', name: 'صور' },
-    { id: 'video', icon: '🎥', name: 'فيديو' },
-    { id: 'audio', icon: '🎵', name: 'صوتيات' },
-    { id: 'document', icon: '📄', name: 'ملفات' },
-    { id: 'sticker', icon: '👾', name: 'ملصقات' }
-];
-
 app.get('/', (req, res) => {
+    // Language detection via cookie
+    let lang = 'ar';
+    if (req.headers.cookie && req.headers.cookie.includes('bot_lang=en')) lang = 'en';
+    
+    // Translation helper
+    const t = (ar, en) => lang === 'en' ? en : ar;
+    const dir = lang === 'en' ? 'ltr' : 'rtl';
+
+    // Media Types with Translation
+    const mediaTypesMeta = [
+        { id: 'text', icon: '📝', name: t('نصوص', 'Text') },
+        { id: 'image', icon: '🖼️', name: t('صور', 'Images') },
+        { id: 'video', icon: '🎥', name: t('فيديو', 'Videos') },
+        { id: 'audio', icon: '🎵', name: t('صوتيات', 'Audio') },
+        { id: 'document', icon: '📄', name: t('ملفات', 'Documents') },
+        { id: 'sticker', icon: '👾', name: t('ملصقات', 'Stickers') }
+    ];
+
     const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
     const blacklistArr = blacklistRows.map(r => r.number);
 
     const html = `
     <!DOCTYPE html>
-    <html dir="rtl" lang="ar">
+    <html dir="${dir}" lang="${lang}">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>لوحة تحكم المشرف الآلي</title>
+        <title>${t('لوحة تحكم المشرف الآلي', 'Auto Mod Dashboard')}</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
         <style>
@@ -231,6 +239,7 @@ app.get('/', (req, res) => {
                 --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
                 font-size: 16px;
             }
+            html[lang="ar"] { --font: 'IBM Plex Sans Arabic', sans-serif; }
 
             /* ── Light Mode ── */
             html.light {
@@ -270,6 +279,9 @@ app.get('/', (req, res) => {
             html.light input:checked + .slider:before { background: var(--accent); }
             html.light .sub-panel { background: rgba(0,0,0,0.03); }
             html.light #terminalOutput { background: #1a1a2e; }
+            html.light .card.danger, html.light .card.warning, html.light .card.info, html.light .card.success, html.light .card.purple {
+                background: linear-gradient(180deg, var(--accent-dim) 0%, var(--card-bg) 60%);
+            }
             html.light .card.danger { background: linear-gradient(180deg, rgba(229,57,53,0.04) 0%, var(--card-bg) 60%); }
             html.light .card.warning { background: linear-gradient(180deg, rgba(245,124,0,0.04) 0%, var(--card-bg) 60%); }
             html.light .card.info { background: linear-gradient(180deg, rgba(2,136,209,0.04) 0%, var(--card-bg) 60%); }
@@ -281,16 +293,15 @@ app.get('/', (req, res) => {
             html.light ::-webkit-scrollbar-track { background: var(--bg); }
             html.light ::-webkit-scrollbar-thumb { background: #c5d0db; }
 
-            /* Theme toggle button */
-            .theme-toggle {
+            /* Topbar icons */
+            .icon-btn {
                 width: 38px; height: 38px; border-radius: 10px; border: 1.5px solid var(--card-border);
                 background: var(--input-bg); color: var(--text-muted); cursor: pointer;
                 display: flex; align-items: center; justify-content: center; font-size: 17px;
                 transition: all 0.2s; flex-shrink: 0;
             }
-            .theme-toggle:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+            .icon-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
 
-            /* Smooth transitions for all theme-sensitive elements */
             body, .sidebar, .main, .topbar, .card, .toggle-row, input, textarea, select,
             .nav-item, .chip, .chip-container, .sub-panel, .modal-content, .qr-wrap,
             .group-card, .limit-item, .cb-label, .status-pill, .sidebar-footer button {
@@ -303,22 +314,20 @@ app.get('/', (req, res) => {
             /* ── Sidebar ── */
             .sidebar {
                 width: 260px; min-height: 100vh; background: var(--sidebar-bg);
-                border-left: 1px solid var(--card-border);
+                border-inline-end: 1px solid var(--card-border);
                 display: flex; flex-direction: column;
-                position: fixed; right: 0; top: 0; z-index: 100;
+                position: fixed; inset-inline-start: 0; top: 0; z-index: 100;
                 transition: transform 0.3s;
             }
             .sidebar-logo {
-                padding: 28px 22px 20px;
-                border-bottom: 1px solid var(--card-border);
+                padding: 28px 22px 20px; border-bottom: 1px solid var(--card-border);
                 display: flex; align-items: center; gap: 14px;
             }
             .logo-icon {
                 width: 46px; height: 46px; border-radius: 14px;
                 background: linear-gradient(135deg, #00e676, #00b0ff);
                 display: flex; align-items: center; justify-content: center;
-                font-size: 22px; flex-shrink: 0;
-                box-shadow: 0 0 20px rgba(0,230,118,0.3);
+                font-size: 22px; flex-shrink: 0; box-shadow: 0 0 20px rgba(0,230,118,0.3);
             }
             .logo-text { font-size: 15px; font-weight: 700; color: var(--text); line-height: 1.3; }
             .logo-text small { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; margin-top: 2px; }
@@ -329,13 +338,13 @@ app.get('/', (req, res) => {
                 padding: 12px 18px; margin: 2px 10px; border-radius: 10px;
                 cursor: pointer; color: var(--text-muted); font-size: 15px;
                 transition: all 0.2s; border: none; background: none; width: calc(100% - 20px);
-                text-align: right; font-family: var(--font);
+                text-align: start; font-family: var(--font);
             }
             .nav-item:hover { background: rgba(255,255,255,0.06); color: var(--text); }
             .nav-item.active { background: var(--accent-dim); color: var(--accent); font-weight: 600; border: 1px solid rgba(0,230,118,0.2); }
             .nav-item .nav-icon { font-size: 18px; width: 24px; text-align: center; flex-shrink: 0; }
             .nav-item .nav-badge {
-                margin-right: auto; background: var(--red); color: #fff;
+                margin-inline-start: auto; background: var(--red); color: #fff;
                 font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 20px; min-width: 22px; text-align: center;
             }
 
@@ -348,7 +357,7 @@ app.get('/', (req, res) => {
             .sidebar-footer button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
 
             /* ── Main ── */
-            .main { margin-right: 260px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; min-width: 0; }
+            .main { margin-inline-start: 260px; flex: 1; display: flex; flex-direction: column; min-height: 100vh; min-width: 0; }
 
             .topbar {
                 position: sticky; top: 0; z-index: 50;
@@ -378,14 +387,8 @@ app.get('/', (req, res) => {
             .page-header p { color: var(--text-muted); font-size: 15px; margin-top: 5px; }
 
             /* Cards */
-            .card {
-                background: var(--card-bg); border: 1px solid var(--card-border);
-                border-radius: var(--radius); padding: 24px; margin-bottom: 20px;
-            }
-            .card-header {
-                display: flex; justify-content: space-between; align-items: center;
-                margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--card-border);
-            }
+            .card { background: var(--card-bg); border: 1px solid var(--card-border); border-radius: var(--radius); padding: 24px; margin-bottom: 20px; }
+            .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--card-border); }
             .card-header h3 { font-size: 17px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
             .card.danger { border-color: rgba(255,82,82,0.35); background: linear-gradient(180deg, rgba(255,82,82,0.04) 0%, var(--card-bg) 60%); }
             .card.warning { border-color: rgba(255,171,64,0.35); background: linear-gradient(180deg, rgba(255,171,64,0.04) 0%, var(--card-bg) 60%); }
@@ -396,11 +399,9 @@ app.get('/', (req, res) => {
             /* Form elements */
             label.field-label { display: block; font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.8px; }
             input[type="text"], input[type="number"], textarea, select {
-                width: 100%; padding: 12px 16px;
-                background: var(--input-bg); border: 1.5px solid var(--input-border);
-                border-radius: 10px; color: var(--text); font-size: 15px;
-                font-family: var(--font); transition: border-color 0.2s, box-shadow 0.2s;
-                outline: none;
+                width: 100%; padding: 12px 16px; background: var(--input-bg); border: 1.5px solid var(--input-border);
+                border-radius: 10px; color: var(--text); font-size: 15px; font-family: var(--font);
+                transition: border-color 0.2s, box-shadow 0.2s; outline: none;
             }
             input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,230,118,0.12); }
             textarea { resize: vertical; }
@@ -414,10 +415,9 @@ app.get('/', (req, res) => {
 
             /* Buttons */
             .btn {
-                padding: 11px 22px; border-radius: 10px; border: none;
-                font-size: 15px; font-weight: 700; cursor: pointer;
-                font-family: var(--font); transition: all 0.2s; display: inline-flex; align-items: center; gap: 8px;
-                white-space: nowrap; letter-spacing: 0.2px;
+                padding: 11px 22px; border-radius: 10px; border: none; font-size: 15px; font-weight: 700;
+                cursor: pointer; font-family: var(--font); transition: all 0.2s; display: inline-flex;
+                align-items: center; gap: 8px; white-space: nowrap; letter-spacing: 0.2px;
             }
             .btn-primary { background: var(--accent); color: #000; }
             .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,230,118,0.4); }
@@ -432,13 +432,8 @@ app.get('/', (req, res) => {
             .btn-sm { padding: 7px 14px; font-size: 13px; }
             .btn-full { width: 100%; justify-content: center; padding: 15px; font-size: 16px; }
 
-            /* Toggle switch */
-            .toggle-row {
-                display: flex; align-items: center; justify-content: space-between;
-                padding: 16px 18px; border-radius: 10px;
-                background: rgba(255,255,255,0.03); border: 1.5px solid var(--card-border);
-                margin-bottom: 12px; gap: 14px;
-            }
+            /* Switch System */
+            .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; border-radius: 10px; background: rgba(255,255,255,0.03); border: 1.5px solid var(--card-border); margin-bottom: 12px; gap: 14px; }
             .toggle-row.danger { border-color: rgba(255,82,82,0.3); background: rgba(255,82,82,0.05); }
             .toggle-row.warning { border-color: rgba(255,171,64,0.3); background: rgba(255,171,64,0.05); }
             .toggle-row.blue { border-color: rgba(64,196,255,0.3); background: rgba(64,196,255,0.05); }
@@ -455,143 +450,86 @@ app.get('/', (req, res) => {
             .toggle-label.pink { color: #ff80ab; }
             .toggle-label.green { color: #69f0ae; }
 
-            /* Switch */
+            /* Slider Toggle UI */
             .switch { position: relative; display: inline-block; width: 50px; height: 28px; flex-shrink: 0; }
             .switch input { opacity: 0; width: 0; height: 0; }
             .slider { position: absolute; cursor: pointer; inset: 0; background: #1e2830; border: 1.5px solid #2a3a4a; transition: .3s; border-radius: 28px; }
-            .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background: #4a5a6a; transition: .3s; border-radius: 50%; }
+            .slider:before { position: absolute; content: ""; height: 20px; width: 20px; bottom: 2px; inset-inline-start: 2px; background: #4a5a6a; transition: .3s; border-radius: 50%; }
             input:checked + .slider { background: rgba(0,230,118,0.2); border-color: var(--accent); }
-            input:checked + .slider:before { transform: translateX(22px); background: var(--accent); box-shadow: 0 0 8px rgba(0,230,118,0.6); }
+            input:checked + .slider:before { background: var(--accent); box-shadow: 0 0 8px rgba(0,230,118,0.6); }
+            [dir="ltr"] input:checked + .slider:before { transform: translateX(22px); }
+            [dir="rtl"] input:checked + .slider:before { transform: translateX(-22px); }
+            
+            /* Smaller lang-slider specific rules */
+            .lang-slider:before { height: 14px; width: 14px; bottom: 1.5px; inset-inline-start: 1.5px; }
+            [dir="ltr"] input:checked + .lang-slider:before { transform: translateX(20px); }
+            [dir="rtl"] input:checked + .lang-slider:before { transform: translateX(-20px); }
 
-            /* Chips */
-            .chip-container {
-                display: flex; flex-wrap: wrap; gap: 10px;
-                padding: 14px; background: var(--input-bg); border-radius: 10px;
-                min-height: 52px; border: 1.5px dashed var(--card-border); margin-top: 10px;
-            }
-            .chip {
-                background: var(--accent-dim); color: var(--accent); padding: 6px 14px;
-                border-radius: 20px; font-size: 14px; display: flex; align-items: center;
-                gap: 8px; border: 1px solid rgba(0,230,118,0.3); font-weight: 500;
-            }
+            .chip-container { display: flex; flex-wrap: wrap; gap: 10px; padding: 14px; background: var(--input-bg); border-radius: 10px; min-height: 52px; border: 1.5px dashed var(--card-border); margin-top: 10px; }
+            .chip { background: var(--accent-dim); color: var(--accent); padding: 6px 14px; border-radius: 20px; font-size: 14px; display: flex; align-items: center; gap: 8px; border: 1px solid rgba(0,230,118,0.3); font-weight: 500; }
             .chip.red-chip { background: var(--red-dim); color: var(--red); border-color: rgba(255,82,82,0.3); }
             .chip-remove { cursor: pointer; font-size: 16px; font-weight: 700; opacity: 0.6; line-height: 1; }
             .chip-remove:hover { opacity: 1; }
 
-            /* Sub-settings panels */
-            .sub-panel {
-                background: rgba(0,0,0,0.2); border: 1.5px solid var(--card-border);
-                border-radius: 10px; padding: 18px; margin-top: 12px;
-            }
+            .sub-panel { background: rgba(0,0,0,0.2); border: 1.5px solid var(--card-border); border-radius: 10px; padding: 18px; margin-top: 12px; }
             .sub-panel.orange { border-color: rgba(255,171,64,0.3); }
             .sub-panel.red { border-color: rgba(255,82,82,0.3); }
             .sub-panel h4 { font-size: 14px; font-weight: 700; color: var(--text-muted); margin-bottom: 14px; display: flex; align-items: center; gap: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
 
-            /* Checkboxes row */
             .cb-group { display: flex; gap: 10px; flex-wrap: wrap; }
-            .cb-label {
-                display: flex; align-items: center; gap: 8px; padding: 8px 14px;
-                background: var(--card-bg); border: 1.5px solid var(--card-border);
-                border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--text-muted);
-                transition: all 0.2s; user-select: none;
-            }
+            .cb-label { display: flex; align-items: center; gap: 8px; padding: 8px 14px; background: var(--card-bg); border: 1.5px solid var(--card-border); border-radius: 8px; cursor: pointer; font-size: 14px; color: var(--text-muted); transition: all 0.2s; user-select: none; }
             .cb-label:hover { border-color: var(--accent); color: var(--text); }
             .cb-label input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
 
-            /* Limit grid */
             .limit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
-            .limit-item {
-                display: flex; align-items: center; gap: 10px;
-                background: var(--card-bg); padding: 10px 14px; border-radius: 9px;
-                border: 1.5px solid var(--card-border);
-            }
+            .limit-item { display: flex; align-items: center; gap: 10px; background: var(--card-bg); padding: 10px 14px; border-radius: 9px; border: 1.5px solid var(--card-border); }
             .limit-item input[type="checkbox"] { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; flex-shrink: 0; }
             .limit-item span { font-size: 14px; flex: 1; color: var(--text); }
             .limit-item input[type="number"] { width: 60px; padding: 6px 8px; font-size: 14px; margin: 0; text-align: center; }
 
-            /* Group card */
-            .group-card {
-                background: var(--card-bg); border: 1.5px solid var(--card-border);
-                border-radius: 14px; margin-bottom: 16px; overflow: hidden;
-                transition: border-color 0.2s;
-            }
+            .group-card { background: var(--card-bg); border: 1.5px solid var(--card-border); border-radius: 14px; margin-bottom: 16px; overflow: hidden; transition: border-color 0.2s; }
             .group-card:hover { border-color: rgba(64,196,255,0.3); }
-            .group-card-header {
-                display: flex; justify-content: space-between; align-items: center;
-                padding: 16px 20px; background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--card-border);
-            }
+            .group-card-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--card-border); }
             .group-card-title { font-size: 16px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
             .group-card-body { padding: 20px; }
-            .group-id-badge {
-                font-family: monospace; font-size: 12px; color: var(--text-muted);
-                background: var(--input-bg); padding: 3px 10px; border-radius: 6px;
-                border: 1px solid var(--card-border);
-            }
+            .group-id-badge { font-family: monospace; font-size: 12px; color: var(--text-muted); background: var(--input-bg); padding: 3px 10px; border-radius: 6px; border: 1px solid var(--card-border); }
 
-            /* QR section */
-            .qr-wrap {
-                display: flex; flex-direction: column; align-items: center; gap: 20px;
-                padding: 36px; background: var(--input-bg); border-radius: 12px;
-                border: 1.5px dashed var(--card-border);
-            }
+            .qr-wrap { display: flex; flex-direction: column; align-items: center; gap: 20px; padding: 36px; background: var(--input-bg); border-radius: 12px; border: 1.5px dashed var(--card-border); }
             #qr-image { max-width: 230px; border-radius: 12px; border: 10px solid #fff; box-shadow: 0 8px 30px rgba(0,0,0,0.5); display: none; }
 
-            /* Toast */
-            .toast {
-                position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%) translateY(24px);
-                background: var(--accent); color: #000; padding: 13px 28px; border-radius: 40px;
-                font-weight: 700; font-size: 15px; z-index: 9999;
-                opacity: 0; transition: all 0.35s; pointer-events: none;
-                box-shadow: 0 4px 20px rgba(0,230,118,0.5);
-            }
+            .toast { position: fixed; bottom: 32px; left: 50%; transform: translateX(-50%) translateY(24px); background: var(--accent); color: #000; padding: 13px 28px; border-radius: 40px; font-weight: 700; font-size: 15px; z-index: 9999; opacity: 0; transition: all 0.35s; pointer-events: none; box-shadow: 0 4px 20px rgba(0,230,118,0.5); }
             .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-            /* Modal */
             .modal { display: none; position: fixed; z-index: 1000; inset: 0; background: var(--modal-bg); backdrop-filter: blur(8px); align-items: center; justify-content: center; }
             .modal.open { display: flex; }
-            .modal-content {
-                background: var(--card-bg); border: 1.5px solid var(--card-border);
-                border-radius: 16px; padding: 32px; width: 90%; max-width: 640px;
-                box-shadow: 0 24px 80px rgba(0,0,0,0.7); animation: slideIn 0.25s ease;
-                max-height: 90vh; overflow-y: auto;
-            }
+            .modal-content { background: var(--card-bg); border: 1.5px solid var(--card-border); border-radius: 16px; padding: 32px; width: 90%; max-width: 640px; box-shadow: 0 24px 80px rgba(0,0,0,0.7); animation: slideIn 0.25s ease; max-height: 90vh; overflow-y: auto; }
             .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
             .modal-header h3 { font-size: 20px; font-weight: 700; }
             .close-modal { background: none; border: none; color: var(--text-muted); font-size: 26px; cursor: pointer; padding: 4px; line-height: 1; }
             .close-modal:hover { color: var(--red); }
             @keyframes slideIn { from { transform: translateY(-24px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
-            /* Terminal */
-            #terminalOutput {
-                background: #000; color: #00ff88; font-family: 'Courier New', monospace;
-                height: 400px; overflow-y: auto; padding: 16px; border-radius: 10px;
-                font-size: 13px; direction: ltr; text-align: left; border: 1px solid #0a1a0a;
-            }
+            #terminalOutput { background: #000; color: #00ff88; font-family: 'Courier New', monospace; height: 400px; overflow-y: auto; padding: 16px; border-radius: 10px; font-size: 13px; direction: ltr; text-align: start; border: 1px solid #0a1a0a; }
             #terminalOutput div { margin-bottom: 5px; border-bottom: 1px solid #0a1a0a; padding-bottom: 5px; word-wrap: break-word; line-height: 1.6; }
 
-            /* Two-column card grid for wide screens */
             .card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; align-items: start; }
             .card-grid .card { margin-bottom: 0; }
             .card-grid-full { grid-column: 1 / -1; }
             @media (max-width: 1100px) { .card-grid { grid-template-columns: 1fr; } }
-
-            /* Section divider */
             .section-sep { height: 1px; background: var(--card-border); margin: 20px 0; }
-
-            /* Scrollbar */
             ::-webkit-scrollbar { width: 7px; }
             ::-webkit-scrollbar-track { background: var(--bg); }
             ::-webkit-scrollbar-thumb { background: var(--card-border); border-radius: 4px; }
 
-            /* Mobile */
             .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 99; }
             .hamburger { display: none; background: none; border: none; color: var(--text); font-size: 24px; cursor: pointer; padding: 4px; }
 
             @media (max-width: 768px) {
                 .sidebar { transform: translateX(100%); }
+                [dir="ltr"] .sidebar { transform: translateX(-100%); }
                 .sidebar.open { transform: translateX(0); }
                 .sidebar-overlay.open { display: block; }
-                .main { margin-right: 0; }
+                .main { margin-inline-start: 0; }
                 .hamburger { display: block; }
                 .page { padding: 18px; }
                 .topbar { padding: 0 18px; }
@@ -602,137 +540,143 @@ app.get('/', (req, res) => {
         </style>
     </head>
     <body>
-        <!-- Sidebar -->
         <nav class="sidebar" id="sidebar">
             <div class="sidebar-logo">
                 <div class="logo-icon">🤖</div>
-                <div class="logo-text">المشرف الآلي <small>لوحة التحكم V6</small></div>
+                <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V6', 'Dashboard V6')}</small></div>
             </div>
 
-            <div class="nav-section">الرئيسية</div>
+            <div class="nav-section">${t('الرئيسية', 'Main')}</div>
             <button class="nav-item active" onclick="showPage('page-status', this)">
-                <span class="nav-icon">📡</span> حالة الاتصال
+                <span class="nav-icon">📡</span> ${t('حالة الاتصال', 'Connection Status')}
             </button>
             <button class="nav-item" onclick="showPage('page-blacklist', this)">
-                <span class="nav-icon">🚫</span> القائمة السوداء
+                <span class="nav-icon">🚫</span> ${t('القائمة السوداء', 'Blacklist')}
                 <span class="nav-badge" id="blacklist-count">0</span>
             </button>
 
-            <div class="nav-section">الإعدادات</div>
+            <div class="nav-section">${t('الإعدادات', 'Settings')}</div>
             <button class="nav-item" onclick="showPage('page-general', this)">
-                <span class="nav-icon">⚙️</span> الإعدادات العامة
+                <span class="nav-icon">⚙️</span> ${t('الإعدادات العامة', 'General Settings')}
             </button>
             <button class="nav-item" onclick="showPage('page-spam', this)">
-                <span class="nav-icon">🛡️</span> مكافحة الإزعاج
+                <span class="nav-icon">🛡️</span> ${t('مكافحة الإزعاج', 'Anti-Spam')}
             </button>
             <button class="nav-item" onclick="showPage('page-media', this)">
-                <span class="nav-icon">🛑</span> فلتر الوسائط
+                <span class="nav-icon">🛑</span> ${t('فلتر الوسائط', 'Media Filter')}
             </button>
             <button class="nav-item" onclick="showPage('page-ai', this)">
-                <span class="nav-icon">🧠</span> الذكاء الاصطناعي
+                <span class="nav-icon">🧠</span> ${t('الذكاء الاصطناعي', 'AI Moderator')}
             </button>
             <button class="nav-item" onclick="showPage('page-groups', this)">
-                <span class="nav-icon">👥</span> المجموعات المخصصة
+                <span class="nav-icon">👥</span> ${t('المجموعات المخصصة', 'Custom Groups')}
             </button>
 
-            <div class="nav-section">أدوات</div>
+            <div class="nav-section">${t('أدوات', 'Tools')}</div>
             <button class="nav-item" onclick="openDebuggerModal()">
-                <span class="nav-icon">🐞</span> سجل الأحداث
+                <span class="nav-icon">🐞</span> ${t('سجل الأحداث', 'Event Logs')}
             </button>
 
             <div class="sidebar-footer">
-                <button id="logoutBtn" onclick="logoutBot()" style="display:none; background: var(--red-dim); border-color: rgba(248,81,73,0.4); color: var(--red);">🚪 قطع الاتصال</button>
-                <button onclick="saveConfig()" style="background: var(--accent-dim); border-color: rgba(0,230,118,0.4); color: var(--accent); font-weight:700;">💾 حفظ</button>
+                <button id="logoutBtn" onclick="logoutBot()" style="display:none; background: var(--red-dim); border-color: rgba(248,81,73,0.4); color: var(--red);">🚪 ${t('قطع الاتصال', 'Disconnect')}</button>
+                <button onclick="saveConfig()" style="background: var(--accent-dim); border-color: rgba(0,230,118,0.4); color: var(--accent); font-weight:700;">💾 ${t('حفظ', 'Save')}</button>
             </div>
         </nav>
 
         <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
-        <!-- Main -->
         <div class="main">
             <div class="topbar">
                 <div style="display:flex;align-items:center;gap:12px;">
                     <button class="hamburger" onclick="toggleSidebar()">☰</button>
-                    <span class="topbar-title" id="topbarTitle">حالة الاتصال</span>
+                    <span class="topbar-title" id="topbarTitle">${t('حالة الاتصال', 'Connection Status')}</span>
                 </div>
                 <div class="topbar-right">
-                 <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode">🌙</button>    
+                    
+                    <div style="display: flex; align-items: center; gap: 6px; background: var(--input-bg); padding: 4px 10px; border-radius: 20px; border: 1.5px solid var(--card-border);">
+                        <span style="font-size: 11px; font-weight: 700; color: ${lang === 'ar' ? 'var(--accent)' : 'var(--text-muted)'}; transition: color 0.3s;">AR</span>
+                        <label class="switch" style="width: 36px; height: 20px;">
+                            <input type="checkbox" id="langToggle" onchange="switchLanguage(this)" ${lang === 'en' ? 'checked' : ''}>
+                            <span class="slider lang-slider" style="border-radius: 20px;"></span>
+                        </label>
+                        <span style="font-size: 11px; font-weight: 700; color: ${lang === 'en' ? 'var(--accent)' : 'var(--text-muted)'}; transition: color 0.3s;">EN</span>
+                    </div>
+
+                    <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode">🌙</button>    
                     <div class="status-pill">
                         <div class="status-dot" id="statusDot"></div>
-                        <span id="status-text">${botStatus}</span>
+                        <span id="status-text">${t('جاري تهيئة النظام وبدء التشغيل...', 'Initializing system...')}</span>
                     </div>
                 </div>
             </div>
 
             <form id="configForm">
 
-            <!-- PAGE: Status -->
             <div class="page active" id="page-status">
                 <div class="page-header">
-                    <h2>📡 حالة الاتصال بواتساب</h2>
-                    <p>اربط حساب واتساب بمسح رمز QR أو راقب الاتصال الحالي</p>
+                    <h2>📡 ${t('حالة الاتصال بواتساب', 'WhatsApp Connection Status')}</h2>
+                    <p>${t('اربط حساب واتساب بمسح رمز QR أو راقب الاتصال الحالي', 'Link WhatsApp account by scanning the QR code or monitor connection')}</p>
                 </div>
                 <div class="card-grid">
                     <div class="card" style="grid-column: 1;">
-                        <div class="card-header"><h3>📱 رمز QR</h3></div>
+                        <div class="card-header"><h3>📱 ${t('رمز QR', 'QR Code')}</h3></div>
                         <div class="qr-wrap">
                             <img id="qr-image" src="" alt="QR Code" />
                             <div id="qr-placeholder" style="text-align:center; color: var(--text-muted); padding: 20px 0;">
                                 <div style="font-size: 64px; margin-bottom: 16px;">📱</div>
-                                <div style="font-size: 18px; font-weight: 700; color: var(--text);">في انتظار رمز QR...</div>
-                                <div style="font-size: 14px; margin-top: 8px;">سيظهر الرمز هنا تلقائياً</div>
+                                <div style="font-size: 18px; font-weight: 700; color: var(--text);">${t('في انتظار رمز QR...', 'Waiting for QR code...')}</div>
+                                <div style="font-size: 14px; margin-top: 8px;">${t('سيظهر الرمز هنا تلقائياً', 'Code will appear here automatically')}</div>
                             </div>
                         </div>
                     </div>
                     <div style="display:flex; flex-direction:column; gap:20px;">
                         <div class="card success">
-                            <div class="card-header"><h3 style="color:var(--accent);">📊 حالة النظام</h3></div>
+                            <div class="card-header"><h3 style="color:var(--accent);">📊 ${t('حالة النظام', 'System Status')}</h3></div>
                             <div style="font-size:16px; color:var(--text-muted); line-height:2.2;">
-                                <div>🤖 <strong style="color:var(--text);">البوت:</strong> <span id="status-text-detail">${botStatus}</span></div>
-                                <div>🗄️ <strong style="color:var(--text);">قاعدة البيانات:</strong> <span style="color:var(--accent);">متصلة ✓</span></div>
-                                <div>🌐 <strong style="color:var(--text);">المنفذ:</strong> <span style="color:var(--accent);">3000 ✓</span></div>
+                                <div>🤖 <strong style="color:var(--text);">${t('البوت:', 'Bot:')}</strong> <span id="status-text-detail">...</span></div>
+                                <div>🗄️ <strong style="color:var(--text);">${t('قاعدة البيانات:', 'Database:')}</strong> <span style="color:var(--accent);">${t('متصلة ✓', 'Connected ✓')}</span></div>
+                                <div>🌐 <strong style="color:var(--text);">${t('المنفذ:', 'Port:')}</strong> <span style="color:var(--accent);">3000 ✓</span></div>
                             </div>
                         </div>
                         <div class="card">
-                            <div class="card-header"><h3>🔗 مجموعة الإدارة الافتراضية</h3></div>
+                            <div class="card-header"><h3>🔗 ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
                             <div class="field-group">
-                                <label class="field-label">معرّف المجموعة (لتلقي التنبيهات)</label>
+                                <label class="field-label">${t('معرّف المجموعة (لتلقي التنبيهات)', 'Group ID (for alerts)')}</label>
                                 <input type="text" id="defaultAdminGroup" value="${config.defaultAdminGroup}" dir="ltr" style="text-align:left; font-family: monospace; font-size:13px;">
                             </div>
                         </div>
                         <div class="card info">
-                            <div class="card-header"><h3 style="color:var(--blue);">ℹ️ تعليمات الاستخدام</h3></div>
+                            <div class="card-header"><h3 style="color:var(--blue);">ℹ️ ${t('تعليمات الاستخدام', 'Instructions')}</h3></div>
                             <div style="font-size:14px; color:var(--text-muted); line-height:2.2;">
-                                <div>1️⃣ امسح رمز QR بهاتفك من واتساب</div>
-                                <div>2️⃣ أضف البوت كمشرف في المجموعات</div>
-                                <div>3️⃣ افتح صفحة الإعدادات وخصّص القواعد</div>
-                                <div>4️⃣ اضغط <strong style="color:var(--accent);">💾 حفظ</strong> لتطبيق التغييرات</div>
+                                <div>1️⃣ ${t('امسح رمز QR بهاتفك من واتساب', 'Scan QR code with your phone')}</div>
+                                <div>2️⃣ ${t('أضف البوت كمشرف في المجموعات', 'Add bot as group admin')}</div>
+                                <div>3️⃣ ${t('افتح صفحة الإعدادات وخصّص القواعد', 'Customize rules in settings')}</div>
+                                <div>4️⃣ ${t('اضغط 💾 حفظ لتطبيق التغييرات', 'Click 💾 Save to apply')}</div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- PAGE: Blacklist -->
             <div class="page" id="page-blacklist">
                 <div class="page-header">
-                    <h2>🚫 القائمة السوداء العالمية</h2>
-                    <p>الأرقام المحظورة تُطرد فوراً من أي مجموعة يكون فيها البوت مشرفاً</p>
+                    <h2>🚫 ${t('القائمة السوداء العالمية', 'Global Blacklist')}</h2>
+                    <p>${t('الأرقام المحظورة تُطرد فوراً من أي مجموعة يكون فيها البوت مشرفاً', 'Banned numbers are immediately kicked from any group where the bot is admin')}</p>
                 </div>
                 <div class="card-grid">
                     <div class="card danger">
                         <div class="card-header">
-                            <h3 style="color:var(--red);">➕ إضافة رقم للحظر</h3>
-                            <span style="font-size: 13px; color: var(--text-muted); background:var(--red-dim); padding:4px 10px; border-radius:20px;">يُحفظ فوراً في DB</span>
+                            <h3 style="color:var(--red);">➕ ${t('إضافة رقم للحظر', 'Add to Blacklist')}</h3>
+                            <span style="font-size: 13px; color: var(--text-muted); background:var(--red-dim); padding:4px 10px; border-radius:20px;">${t('يُحفظ فوراً في DB', 'Saved instantly to DB')}</span>
                         </div>
                         <div class="field-group">
-                            <label class="field-label">رقم الهاتف (بدون +)</label>
+                            <label class="field-label">${t('رقم الهاتف (بدون +)', 'Phone Number (without +)')}</label>
                             <div class="input-with-btn">
-                                <input type="text" id="newBlacklistNumber" placeholder="مثال: 966582014941" onkeypress="if(event.key==='Enter'){event.preventDefault();addBlacklistNumber();}">
-                                <button type="button" class="btn btn-danger" onclick="addBlacklistNumber()">+ حظر</button>
+                                <input type="text" id="newBlacklistNumber" placeholder="Ex: 966582014941" onkeypress="if(event.key==='Enter'){event.preventDefault();addBlacklistNumber();}">
+                                <button type="button" class="btn btn-danger" onclick="addBlacklistNumber()">+ ${t('حظر', 'Ban')}</button>
                             </div>
                         </div>
-                        <label class="field-label">الأرقام المحظورة حالياً</label>
+                        <label class="field-label">${t('الأرقام المحظورة حالياً', 'Currently Banned Numbers')}</label>
                         <div id="blacklistContainer" class="chip-container"></div>
                     </div>
                     <div style="display:flex; flex-direction:column; gap:20px;">
@@ -741,260 +685,283 @@ app.get('/', (req, res) => {
                                 <div class="toggle-left">
                                     <label class="switch"><input type="checkbox" id="enableBlacklist" ${config.enableBlacklist ? 'checked' : ''}><span class="slider"></span></label>
                                     <div class="toggle-label danger">
-                                        تفعيل نظام القائمة السوداء
-                                        <small>طرد فوري عند محاولة الدخول أو الإضافة</small>
+                                        ${t('تفعيل نظام القائمة السوداء', 'Enable Blacklist System')}
+                                        <small>${t('طرد فوري عند محاولة الدخول أو الإضافة', 'Instant kick on entry or add attempt')}</small>
                                     </div>
                                 </div>
                             </div>
                         </div>
                         <div class="card warning">
-                            <div class="card-header"><h3 style="color:var(--orange);">🧹 طرد رجعي شامل</h3></div>
-                            <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.</p>
+                            <div class="card-header"><h3 style="color:var(--orange);">🧹 ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
+                            <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
                             <button type="button" id="purgeBtn" class="btn btn-warning btn-full" onclick="purgeBlacklisted()">
-                                🧹 تنفيذ الطرد الشامل الآن
+                                🧹 ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
                             </button>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- PAGE: General -->
             <div class="page" id="page-general">
                 <div class="page-header">
-                    <h2>⚙️ الإعدادات العامة</h2>
-                    <p>تطبّق على جميع المجموعات التي لا تملك إعدادات مخصصة</p>
+                    <h2>⚙️ ${t('الإعدادات العامة', 'General Settings')}</h2>
+                    <p>${t('تطبّق على جميع المجموعات التي لا تملك إعدادات مخصصة', 'Applies to all groups without custom settings')}</p>
                 </div>
                 <div class="card-grid">
                     <div class="card">
-                        <div class="card-header"><h3>🔤 فلتر الكلمات الممنوعة</h3></div>
+                        <div class="card-header"><h3>🔤 ${t('فلتر الكلمات الممنوعة', 'Forbidden Word Filter')}</h3></div>
                         <div class="toggle-row" style="margin-bottom:18px;">
                             <div class="toggle-left">
                                 <label class="switch"><input type="checkbox" id="enableWordFilter" ${config.enableWordFilter ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label">تفعيل فلتر الكلمات<small>حذف فوري عند رصد أي كلمة ممنوعة</small></div>
+                                <div class="toggle-label">${t('تفعيل فلتر الكلمات', 'Enable Word Filter')}<small>${t('حذف فوري عند رصد أي كلمة ممنوعة', 'Instant delete on detecting forbidden words')}</small></div>
                             </div>
                         </div>
                         <div class="field-group">
-                            <label class="field-label">الكلمات الممنوعة الافتراضية</label>
+                            <label class="field-label">${t('الكلمات الممنوعة الافتراضية', 'Default Forbidden Words')}</label>
                             <div class="input-with-btn">
-                                <input type="text" id="newDefaultWord" placeholder="أدخل الكلمة الممنوعة..." onkeypress="if(event.key==='Enter'){event.preventDefault();addDefaultWord();}">
-                                <button type="button" class="btn btn-primary" onclick="addDefaultWord()">+ إضافة</button>
+                                <input type="text" id="newDefaultWord" placeholder="${t('أدخل الكلمة الممنوعة...', 'Enter forbidden word...')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addDefaultWord();}">
+                                <button type="button" class="btn btn-primary" onclick="addDefaultWord()">+ ${t('إضافة', 'Add')}</button>
                             </div>
                             <div id="defaultWordsContainer" class="chip-container"></div>
                         </div>
                     </div>
                     <div class="card">
-                        <div class="card-header"><h3>🚦 الإجراء التلقائي</h3></div>
+                        <div class="card-header"><h3>🚦 ${t('الإجراء التلقائي', 'Automatic Action')}</h3></div>
                         <div class="toggle-row pink">
                             <div class="toggle-left">
                                 <label class="switch"><input type="checkbox" id="autoAction" ${config.autoAction ? 'checked' : ''}><span class="slider"></span></label>
                                 <div class="toggle-label pink">
-                                    الحذف والإبلاغ المباشر
-                                    <small>تخطي تصويت الإدارة عند رصد المخالفات</small>
+                                    ${t('الحذف والإبلاغ المباشر', 'Direct Delete & Report')}
+                                    <small>${t('تخطي تصويت الإدارة عند رصد المخالفات', 'Skip admin poll upon detecting violations')}</small>
                                 </div>
                             </div>
                         </div>
                         <div style="margin-top:20px; padding:16px; background:var(--input-bg); border-radius:10px; border:1px solid var(--card-border);">
                             <div style="font-size:13px; color:var(--text-muted); line-height:2;">
-                                <div>🔴 <strong style="color:var(--text);">مفعّل:</strong> حذف فوري + طرد تلقائي</div>
-                                <div>🟡 <strong style="color:var(--text);">معطّل:</strong> حذف + تصويت للإدارة</div>
+                                <div>🔴 <strong style="color:var(--text);">${t('مفعّل:', 'Enabled:')}</strong> ${t('حذف فوري + طرد تلقائي', 'Instant delete + auto kick')}</div>
+                                <div>🟡 <strong style="color:var(--text);">${t('معطّل:', 'Disabled:')}</strong> ${t('حذف + تصويت للإدارة', 'Delete + admin poll')}</div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- PAGE: Spam -->
             <div class="page" id="page-spam">
                 <div class="page-header">
-                    <h2>🛡️ مكافحة الإزعاج</h2>
-                    <p>Anti-Spam — رصد الرسائل المتكررة خلال نافذة 15 ثانية</p>
+                    <h2>🛡️ ${t('مكافحة الإزعاج', 'Anti-Spam')}</h2>
+                    <p>${t('رصد الرسائل المتكررة خلال نافذة 15 ثانية', 'Monitor repeated messages within a 15-second window')}</p>
                 </div>
 
                 <div class="card warning" style="max-width:700px;">
-                    <!-- Master toggle -->
                     <div class="toggle-row warning" style="margin-bottom:0; border-radius:10px;">
                         <div class="toggle-left">
                             <label class="switch">
-                                <input type="checkbox" id="enableAntiSpam" ${config.enableAntiSpam ? 'checked' : ''}
-                                    onchange="toggleSpamOptions(this.checked)">
+                                <input type="checkbox" id="enableAntiSpam" ${config.enableAntiSpam ? 'checked' : ''} onchange="toggleSpamOptions(this.checked)">
                                 <span class="slider"></span>
                             </label>
                             <div class="toggle-label warning">
-                                تفعيل نظام Anti-Spam
-                                <small>مراقبة معدل إرسال كل مستخدم خلال نافذة 15 ثانية</small>
+                                ${t('تفعيل نظام Anti-Spam', 'Enable Anti-Spam System')}
+                                <small>${t('مراقبة معدل إرسال كل مستخدم خلال نافذة 15 ثانية', 'Monitor per-user send rate within 15 secs')}</small>
                             </div>
                         </div>
                     </div>
 
-                    <!-- Collapsible options -->
-                    <div id="spamOptionsPanel" style="
-                        overflow: hidden;
-                        max-height: ${config.enableAntiSpam ? '800px' : '0px'};
-                        opacity: ${config.enableAntiSpam ? '1' : '0'};
-                        transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease;
-                        margin-top: ${config.enableAntiSpam ? '20px' : '0px'};
-                    ">
+                    <div id="spamOptionsPanel" style="overflow: hidden; max-height: ${config.enableAntiSpam ? '800px' : '0px'}; opacity: ${config.enableAntiSpam ? '1' : '0'}; transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease; margin-top: ${config.enableAntiSpam ? '20px' : '0px'};">
                         <div style="border-top: 1px dashed rgba(255,171,64,0.3); padding-top: 20px;">
-
-                            <!-- Action + duplicate limit -->
                             <div class="field-row" style="margin-bottom:20px;">
                                 <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">الإجراء عند الرصد</label>
+                                    <label class="field-label">${t('الإجراء عند الرصد', 'Action on Detection')}</label>
                                     <select id="spamAction">
-                                        <option value="poll" ${config.spamAction === 'poll' ? 'selected' : ''}>🗳️ تصويت للإدارة</option>
-                                        <option value="auto" ${config.spamAction === 'auto' ? 'selected' : ''}>🔨 طرد تلقائي وحظر</option>
+                                        <option value="poll" ${config.spamAction === 'poll' ? 'selected' : ''}>🗳️ ${t('تصويت للإدارة', 'Admin Poll')}</option>
+                                        <option value="auto" ${config.spamAction === 'auto' ? 'selected' : ''}>🔨 ${t('طرد تلقائي وحظر', 'Auto Kick & Ban')}</option>
                                     </select>
                                 </div>
                                 <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">حد تكرار نفس النص</label>
+                                    <label class="field-label">${t('حد تكرار نفس النص', 'Duplicate Text Limit')}</label>
                                     <input type="number" id="spamDuplicateLimit" value="${config.spamDuplicateLimit}" min="2" max="15" placeholder="3">
                                 </div>
                             </div>
-
-                            <!-- Per-type limits -->
-                            <label class="field-label" style="margin-bottom:12px;">⏱️ حدود كل نوع خلال 15 ثانية</label>
-                            <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">فعّل ✓ النوع المراد مراقبته، ثم حدد الحد الأقصى للرسائل المسموح بها</p>
+                            <label class="field-label" style="margin-bottom:12px;">⏱️ ${t('حدود كل نوع خلال 15 ثانية', 'Limits per media type (15s)')}</label>
+                            <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">${t('فعّل ✓ النوع المراد مراقبته، ثم حدد الحد الأقصى للرسائل المسموح بها', 'Check ✓ the type to monitor, then set max allowed messages')}</p>
                             <div class="limit-grid">
-                                ${mediaTypesMeta.map(t => `
+                                ${mediaTypesMeta.map(tData => `
                                 <div class="limit-item">
-                                    <input type="checkbox" id="global_spam_check_${t.id}" value="${t.id}" ${config.spamTypes.includes(t.id) ? 'checked' : ''}>
-                                    <span>${t.icon} ${t.name}</span>
-                                    <input type="number" id="global_spam_limit_${t.id}" value="${config.spamLimits[t.id] || 5}" min="1">
+                                    <input type="checkbox" id="global_spam_check_${tData.id}" value="${tData.id}" ${config.spamTypes.includes(tData.id) ? 'checked' : ''}>
+                                    <span>${tData.icon} ${tData.name}</span>
+                                    <input type="number" id="global_spam_limit_${tData.id}" value="${config.spamLimits[tData.id] || 5}" min="1">
                                 </div>`).join('')}
                             </div>
-
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- PAGE: Media Filter -->
             <div class="page" id="page-media">
                 <div class="page-header">
-                    <h2>🛑 فلتر الوسائط</h2>
-                    <p>منع قطعي لأنواع محددة — الحذف يحدث فوراً بغض النظر عن أي إعداد آخر</p>
+                    <h2>🛑 ${t('فلتر الوسائط', 'Media Filter')}</h2>
+                    <p>${t('منع قطعي لأنواع محددة — الحذف يحدث فوراً بغض النظر عن أي إعداد آخر', 'Absolute ban for specific media types — deleted instantly regardless of other settings')}</p>
                 </div>
                 <div class="card-grid">
                     <div class="card danger">
-                        <div class="card-header"><h3 style="color:var(--red);">📁 اختر الأنواع الممنوعة</h3></div>
-                        <p style="font-size:14px; color:var(--text-muted); margin-bottom:18px;">أي رسالة من هذه الأنواع ستُحذف تلقائياً ودون استثناء.</p>
+                        <div class="card-header"><h3 style="color:var(--red);">📁 ${t('اختر الأنواع الممنوعة', 'Select Blocked Types')}</h3></div>
+                        <p style="font-size:14px; color:var(--text-muted); margin-bottom:18px;">${t('أي رسالة من هذه الأنواع ستُحذف تلقائياً ودون استثناء.', 'Any message of these types will be deleted automatically without exception.')}</p>
                         <div class="cb-group" id="globalBlockedTypes" style="gap:12px;">
-                            ${mediaTypesMeta.map(t => `
+                            ${mediaTypesMeta.map(tData => `
                             <label class="cb-label" style="flex:1; min-width:120px; justify-content:center; padding:12px;">
-                                <input type="checkbox" value="${t.id}" ${config.blockedTypes.includes(t.id) ? 'checked' : ''}> ${t.icon} ${t.name}
+                                <input type="checkbox" value="${tData.id}" ${config.blockedTypes.includes(tData.id) ? 'checked' : ''}> ${tData.icon} ${tData.name}
                             </label>`).join('')}
                         </div>
                     </div>
                     <div class="card danger">
-                        <div class="card-header"><h3 style="color:var(--red);">⚡ الإجراء عند الرصد</h3></div>
+                        <div class="card-header"><h3 style="color:var(--red);">⚡ ${t('الإجراء عند الرصد', 'Action on Detection')}</h3></div>
                         <div class="field-group">
-                            <label class="field-label">ماذا يفعل البوت عند إرسال نوع ممنوع؟</label>
+                            <label class="field-label">${t('ماذا يفعل البوت عند إرسال نوع ممنوع؟', 'What should the bot do when a blocked type is sent?')}</label>
                             <select id="globalBlockedAction" style="font-size:15px; padding:14px;">
-                                <option value="delete" ${config.blockedAction === 'delete' ? 'selected' : ''}>🗑️ حذف الرسالة فقط (بصمت)</option>
-                                <option value="poll" ${config.blockedAction === 'poll' ? 'selected' : ''}>🗳️ حذف + فتح تصويت للإدارة</option>
-                                <option value="auto" ${config.blockedAction === 'auto' ? 'selected' : ''}>🔨 حذف + طرد تلقائي وحظر</option>
+                                <option value="delete" ${config.blockedAction === 'delete' ? 'selected' : ''}>🗑️ ${t('حذف الرسالة فقط (بصمت)', 'Delete Message Only (Silent)')}</option>
+                                <option value="poll" ${config.blockedAction === 'poll' ? 'selected' : ''}>🗳️ ${t('حذف + فتح تصويت للإدارة', 'Delete + Open Admin Poll')}</option>
+                                <option value="auto" ${config.blockedAction === 'auto' ? 'selected' : ''}>🔨 ${t('حذف + طرد تلقائي وحظر', 'Delete + Auto Kick & Ban')}</option>
                             </select>
                         </div>
                         <div style="margin-top:16px; padding:16px; background:var(--red-dim); border-radius:10px; border:1px solid rgba(255,82,82,0.2);">
                             <div style="font-size:13px; color:var(--text-muted); line-height:2.2;">
-                                <div>🗑️ <strong style="color:var(--text);">حذف فقط:</strong> صامت، لا يعلم المرسل</div>
-                                <div>🗳️ <strong style="color:var(--text);">تصويت:</strong> تنبيه الإدارة لاتخاذ قرار</div>
-                                <div>🔨 <strong style="color:var(--text);">طرد تلقائي:</strong> أقوى إجراء، حظر فوري</div>
+                                <div>🗑️ <strong style="color:var(--text);">${t('حذف فقط:', 'Delete Only:')}</strong> ${t('صامت، لا يعلم المرسل', 'Silent, sender is unaware')}</div>
+                                <div>🗳️ <strong style="color:var(--text);">${t('تصويت:', 'Poll:')}</strong> ${t('تنبيه الإدارة لاتخاذ قرار', 'Alert admins to decide')}</div>
+                                <div>🔨 <strong style="color:var(--text);">${t('طرد تلقائي:', 'Auto Kick:')}</strong> ${t('أقوى إجراء، حظر فوري', 'Strictest action, instant ban')}</div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- PAGE: AI -->
             <div class="page" id="page-ai">
                 <div class="page-header">
-                    <h2>🧠 المشرف الذكي (AI)</h2>
-                    <p>تحليل المحتوى باستخدام نموذج Ollama LLM محلي</p>
+                    <h2>🧠 ${t('المشرف الذكي (AI)', 'AI Moderator')}</h2>
+                    <p>${t('تحليل المحتوى باستخدام نموذج Ollama LLM محلي', 'Analyze content using a local Ollama LLM model')}</p>
                 </div>
                 <div class="card-grid">
                     <div class="card info">
                         <div class="card-header">
-                            <h3 style="color:var(--blue);">🔌 تفعيل الذكاء الاصطناعي</h3>
-                            <button type="button" class="btn btn-blue btn-sm" onclick="openOllamaModal()">⚙️ إعداد الخادم</button>
+                            <h3 style="color:var(--blue);">🔌 ${t('تفعيل الذكاء الاصطناعي', 'Enable AI')}</h3>
+                            <button type="button" class="btn btn-blue btn-sm" onclick="openOllamaModal()">⚙️ ${t('إعداد الخادم', 'Server Setup')}</button>
                         </div>
                         <div class="toggle-row blue" style="margin-bottom:12px;">
                             <div class="toggle-left">
                                 <label class="switch"><input type="checkbox" id="enableAIFilter" ${config.enableAIFilter ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label blue">تحليل النصوص بالـ AI<small>فحص كل رسالة نصية قبل السماح بها</small></div>
+                                <div class="toggle-label blue">${t('تحليل النصوص بالـ AI', 'AI Text Analysis')}<small>${t('فحص كل رسالة نصية قبل السماح بها', 'Scan every text message before allowing')}</small></div>
                             </div>
                         </div>
                         <div class="toggle-row purple">
                             <div class="toggle-left">
                                 <label class="switch"><input type="checkbox" id="enableAIMedia" ${config.enableAIMedia ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label purple">تحليل الصور (Vision AI)<small>يتطلب نموذجاً يدعم Vision مثل llava</small></div>
+                                <div class="toggle-label purple">${t('تحليل الصور (Vision AI)', 'Image Analysis (Vision)')}<small>${t('يتطلب نموذجاً يدعم Vision مثل llava', 'Requires a vision-capable model like llava')}</small></div>
                             </div>
                         </div>
                     </div>
                     <div class="card" id="aiPromptContainer">
-                        <div class="card-header"><h3>📝 تعليمات الذكاء الاصطناعي</h3></div>
+                        <div class="card-header"><h3>📝 ${t('تعليمات الذكاء الاصطناعي', 'AI Prompt Instructions')}</h3></div>
                         <div class="field-group">
-                            <label class="field-label">صف المحتوى الممنوع للنموذج</label>
+                            <label class="field-label">${t('صف المحتوى الممنوع للنموذج', 'Describe forbidden content to the model')}</label>
                             <textarea id="aiPromptText" rows="6" style="font-size:14px; line-height:1.8;">${config.aiPrompt}</textarea>
-                        </div>
-                        <div style="font-size:12px; color:var(--text-muted); padding:10px; background:var(--input-bg); border-radius:8px; border:1px solid var(--card-border);">
-                            💡 مثال: "امنع أي رسالة تحتوي على إعلانات تجارية أو روابط مشبوهة أو محتوى مسيء"
                         </div>
                     </div>
                 </div>
             </div>
 
-            <!-- PAGE: Groups -->
             <div class="page" id="page-groups">
                 <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
                     <div>
-                        <h2>👥 المجموعات المخصصة</h2>
-                        <p>إعدادات مخصصة لكل مجموعة — تتجاوز الإعدادات العامة</p>
+                        <h2>👥 ${t('المجموعات المخصصة', 'Custom Groups')}</h2>
+                        <p>${t('إعدادات مخصصة لكل مجموعة — تتجاوز الإعدادات العامة', 'Custom settings per group — overrides global settings')}</p>
                     </div>
-                    <button type="button" class="btn btn-blue" onclick="addGroup()">+ إضافة مجموعة</button>
+                    <button type="button" class="btn btn-blue" onclick="addGroup()">+ ${t('إضافة مجموعة', 'Add Group')}</button>
                 </div>
                 <div id="groupsContainer"></div>
             </div>
 
-            <!-- Save button (visible in all pages as floating) -->
-            <div id="saveMsgToast" class="toast">✅ تم الحفظ في قاعدة البيانات بنجاح!</div>
+            <div id="saveMsgToast" class="toast">${t('✅ تم الحفظ في قاعدة البيانات بنجاح!', '✅ Saved to database successfully!')}</div>
 
             </form>
-        </div><!-- /.main -->
-
-        <!-- Modal: Ollama -->
-        <div id="ollamaModal" class="modal">
+        </div><div id="ollamaModal" class="modal">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3 style="color:var(--blue);">🔗 إعدادات خادم Ollama</h3>
+                    <h3 style="color:var(--blue);">🔗 ${t('إعدادات خادم Ollama', 'Ollama Server Settings')}</h3>
                     <button class="close-modal" onclick="closeOllamaModal()">×</button>
                 </div>
                 <div class="field-group">
-                    <label class="field-label">رابط الخادم (Endpoint URL)</label>
+                    <label class="field-label">${t('رابط الخادم (Endpoint URL)', 'Server URL (Endpoint)')}</label>
                     <input type="text" id="ollamaUrl" value="${config.ollamaUrl}" dir="ltr" style="text-align:left; font-family:monospace;">
                 </div>
                 <div class="field-group">
-                    <label class="field-label">اسم النموذج</label>
-                    <input type="text" id="ollamaModel" value="${config.ollamaModel}" dir="ltr" style="text-align:left; font-family:monospace;" placeholder="مثال: llava">
-                    <div style="font-size:12px; color:var(--text-muted); margin-top:6px;">للصور استخدم نموذج Vision مثل <code>llava</code></div>
+                    <label class="field-label">${t('اسم النموذج', 'Model Name')}</label>
+                    <input type="text" id="ollamaModel" value="${config.ollamaModel}" dir="ltr" style="text-align:left; font-family:monospace;" placeholder="Ex: llava">
                 </div>
-                <button type="button" class="btn btn-primary btn-full" onclick="closeOllamaModal()">حفظ وإغلاق</button>
+                <button type="button" class="btn btn-primary btn-full" onclick="closeOllamaModal()">${t('حفظ وإغلاق', 'Save & Close')}</button>
             </div>
         </div>
 
-        <!-- Modal: Debugger -->
         <div id="debuggerModal" class="modal">
             <div class="modal-content" style="max-width:800px; background:#0d1117; border-color:#21262d;">
                 <div class="modal-header">
-                    <h3 style="color:var(--accent); font-family:monospace;">⬛ سجل الأحداث المباشر</h3>
+                    <h3 style="color:var(--accent); font-family:monospace;">⬛ ${t('سجل الأحداث المباشر', 'Live Event Logs')}</h3>
                     <button class="close-modal" onclick="closeDebuggerModal()">×</button>
                 </div>
                 <div id="terminalOutput"></div>
-                <button type="button" class="btn btn-ghost btn-full" style="margin-top:14px;" onclick="closeDebuggerModal()">إغلاق</button>
+                <button type="button" class="btn btn-ghost btn-full" style="margin-top:14px;" onclick="closeDebuggerModal()">${t('إغلاق', 'Close')}</button>
             </div>
         </div>
 
         <script>
+            // Translation Dictionary accessible by JS
+            const currentLang = '${lang}';
+            const dict = {
+                'delete_confirm': '${t("هل أنت متأكد من رغبتك في حذف الإعدادات المخصصة لهذه المجموعة؟", "Are you sure you want to delete settings for this group?")}',
+                'logout_confirm': '${t("هل أنت متأكد من رغبتك في تسجيل الخروج من حساب واتساب؟ سيتم فصل البوت.", "Are you sure you want to log out of WhatsApp? The bot will disconnect.")}',
+                'logging_out': '${t("جاري تسجيل الخروج...", "Logging out...")}',
+                'purge_warn': '${t("⚠️ تحذير: هذا الخيار سيجعل البوت يبحث في جميع المجموعات، وسيطرد أي شخص موجود في القائمة السوداء فوراً. متأكد؟", "⚠️ Warning: The bot will scan all groups and instantly kick anyone in the blacklist. Sure?")}',
+                'purging': '${t("⏳ جاري المسح والطرد من المجموعات...", "⏳ Scanning and purging...")}',
+                'conn_err': '${t("حدث خطأ في الاتصال بالخادم.", "Connection error.")}',
+                'save_success': '${t("✅ تم الحفظ في قاعدة البيانات بنجاح!", "✅ Saved to database successfully!")}',
+                'save_fail': '${t("❌ فشل الحفظ، تحقق من السيرفر", "❌ Save failed, check server")}',
+                // Group strings
+                'group': '${t("المجموعة", "Group")}',
+                'no_id': '${t("معرّف غير محدد", "ID Not Set")}',
+                'delete': '${t("حذف", "Delete")}',
+                'target_group': '${t("معرّف المجموعة المستهدفة", "Target Group ID")}',
+                'admin_group': '${t("مجموعة الإدارة المخصصة (اتركه فارغاً للعامة)", "Custom Admin Group (leave empty for default)")}',
+                'blocked_types': '${t("🛑 الأنواع الممنوعة قطعياً", "🛑 Absolute Blocked Types")}',
+                'block_action': '${t("إجراء المنع", "Block Action")}',
+                'act_del': '${t("حذف الرسالة فقط", "Delete Message Only")}',
+                'act_poll': '${t("حذف + تصويت للإدارة", "Delete + Admin Poll")}',
+                'act_auto': '${t("حذف + طرد تلقائي", "Delete + Auto Kick")}',
+                'anti_spam': '${t("مكافحة الإزعاج (Anti-Spam)", "Anti-Spam")}',
+                'spam_desc': '${t("رصد الرسائل المتكررة خلال 15 ثانية", "Detect repeated messages within 15s")}',
+                'limits_15s': '${t("⏱️ حدود كل نوع (15 ثانية)", "⏱️ Type Limits (15s)")}',
+                'text_dup': '${t("تكرار النص", "Text Dup Limit")}',
+                'action': '${t("الإجراء", "Action")}',
+                'poll': '${t("🗳️ تصويت للإدارة", "🗳️ Admin Poll")}',
+                'auto_kick': '${t("🔨 طرد تلقائي", "🔨 Auto Kick")}',
+                'welcome_msg': '${t("رسالة ترحيبية عند الانضمام", "Welcome Message on Join")}',
+                'welcome_desc': '${t("يُرسلها البوت لكل عضو جديد", "Sent by bot to new members")}',
+                'msg_text': '${t("نص الرسالة ({user} للمنشن)", "Message Text ({user} for mention)")}',
+                'enable_bl': '${t("تفعيل القائمة السوداء", "Enable Blacklist")}',
+                'bl_desc': '${t("طرد فوري لأي رقم محظور", "Instant kick for banned numbers")}',
+                'word_filter': '${t("فلتر الكلمات الممنوعة", "Forbidden Word Filter")}',
+                'wf_desc': '${t("حذف فوري عند رصد كلمة ممنوعة", "Instant delete on forbidden word")}',
+                'use_global': '${t("تطبيق الكلمات العامة أيضاً", "Apply Global Words Too")}',
+                'ug_desc': '${t("إضافة قائمة الكلمات العامة لهذه المجموعة", "Include global words list")}',
+                'custom_words': '${t("كلمات ممنوعة مخصصة لهذه المجموعة", "Custom forbidden words for this group")}',
+                'add': '${t("+ إضافة", "+ Add")}',
+                'ai_text': '${t("المشرف الذكي (AI) للنصوص", "AI Moderator for Text")}',
+                'ai_vision': '${t("تحليل الصور (Vision)", "Image Analysis (Vision)")}',
+                'direct_del': '${t("الحذف المباشر (تخطي التصويت)", "Direct Delete (Skip Poll)")}'
+            };
+
+            function switchLanguage(checkbox) {
+                const newLang = checkbox.checked ? 'en' : 'ar';
+                document.cookie = "bot_lang=" + newLang + "; path=/; max-age=31536000";
+                window.location.reload();
+            }
+
             function openOllamaModal() { document.getElementById('ollamaModal').classList.add('open'); }
             function closeOllamaModal() { document.getElementById('ollamaModal').classList.remove('open'); }
             
@@ -1021,11 +988,11 @@ app.get('/', (req, res) => {
                     const term = document.getElementById('terminalOutput');
                     
                     let html = logs.map(l => {
-                        let styled = l.replace(/\\[خطأ\\]/g, '<span style="color:#ff3b30">[خطأ]</span>')
-                                      .replace(/\\[معلومة\\]/g, '<span style="color:#4fc3f7">[معلومة]</span>')
-                                      .replace(/\\[فحص\\]/g, '<span style="color:#ffeb3b">[فحص]</span>')
-                                      .replace(/\\[أمان\\]/g, '<span style="color:#ff9800">[أمان]</span>')
-                                      .replace(/\\[تنظيف\\]/g, '<span style="color:#9c27b0">[تنظيف]</span>');
+                        let styled = l.replace(/\\[خطأ\\]/g, '<span style="color:#ff3b30">[ERROR]</span>')
+                                      .replace(/\\[معلومة\\]/g, '<span style="color:#4fc3f7">[INFO]</span>')
+                                      .replace(/\\[فحص\\]/g, '<span style="color:#ffeb3b">[SCAN]</span>')
+                                      .replace(/\\[أمان\\]/g, '<span style="color:#ff9800">[SECURITY]</span>')
+                                      .replace(/\\[تنظيف\\]/g, '<span style="color:#9c27b0">[PURGE]</span>');
                         return \`<div>\${styled}</div>\`;
                     }).join('');
                     
@@ -1037,8 +1004,8 @@ app.get('/', (req, res) => {
             }
 
             async function logoutBot() {
-                if(confirm('هل أنت متأكد من رغبتك في تسجيل الخروج من حساب واتساب؟ سيتم فصل البوت.')) {
-                    document.getElementById('status-text').innerText = 'جاري تسجيل الخروج...';
+                if(confirm(dict.logout_confirm)) {
+                    document.getElementById('status-text').innerText = dict.logging_out;
                     document.getElementById('logoutBtn').style.display = 'none';
                     await fetch('/api/logout', { method: 'POST' });
                 }
@@ -1057,15 +1024,14 @@ app.get('/', (req, res) => {
                 }
             }
 
-            // Navigation
             const pageTitles = {
-                'page-status': 'حالة الاتصال',
-                'page-blacklist': 'القائمة السوداء',
-                'page-general': 'الإعدادات العامة',
-                'page-spam': 'مكافحة الإزعاج',
-                'page-media': 'فلتر الوسائط',
-                'page-ai': 'الذكاء الاصطناعي',
-                'page-groups': 'المجموعات المخصصة'
+                'page-status': '${t("حالة الاتصال", "Connection Status")}',
+                'page-blacklist': '${t("القائمة السوداء", "Blacklist")}',
+                'page-general': '${t("الإعدادات العامة", "General Settings")}',
+                'page-spam': '${t("مكافحة الإزعاج", "Anti-Spam")}',
+                'page-media': '${t("فلتر الوسائط", "Media Filter")}',
+                'page-ai': '${t("الذكاء الاصطناعي", "AI Moderator")}',
+                'page-groups': '${t("المجموعات المخصصة", "Custom Groups")}'
             };
             function showPage(pageId, btn) {
                 document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -1090,7 +1056,6 @@ app.get('/', (req, res) => {
                 setTimeout(() => t.classList.remove('show'), 3000);
             }
 
-            // المتغيرات
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
             let blacklistArr = ${JSON.stringify(blacklistArr)}; 
             let groupsConfigObj = ${JSON.stringify(config.groupsConfig)};
@@ -1110,14 +1075,13 @@ app.get('/', (req, res) => {
                 spamDuplicateLimit: groupsConfigObj[key].spamDuplicateLimit || 3,
                 spamAction: groupsConfigObj[key].spamAction || 'poll',
                 enableWelcomeMessage: groupsConfigObj[key].enableWelcomeMessage || false, 
-                welcomeMessageText: groupsConfigObj[key].welcomeMessageText || 'مرحباً بك يا {user} في مجموعتنا!',
+                welcomeMessageText: groupsConfigObj[key].welcomeMessageText || '${t("مرحباً بك يا {user} في مجموعتنا!", "Welcome {user} to our group!")}',
                 blockedTypes: groupsConfigObj[key].blockedTypes || [],
                 blockedAction: groupsConfigObj[key].blockedAction || 'delete',
                 spamTypes: groupsConfigObj[key].spamTypes || ['text', 'image', 'video', 'audio', 'document', 'sticker'],
                 spamLimits: groupsConfigObj[key].spamLimits || {text:7, image:3, video:2, audio:3, document:3, sticker:3}
             }));
 
-            // دوال مساعدة للواجهة
             function updateGroupArray(gIndex, arrName, val, isChecked) {
                 let arr = groupsArr[gIndex][arrName];
                 if (isChecked && !arr.includes(val)) arr.push(val);
@@ -1137,13 +1101,13 @@ app.get('/', (req, res) => {
                 return Array.from(checkboxes).map(cb => cb.value);
             }
 
-            // القائمة السوداء
             function renderBlacklist() {
                 const container = document.getElementById('blacklistContainer');
                 container.innerHTML = '';
                 blacklistArr.forEach((number, index) => {
-                    container.innerHTML += \`<div class="chip blacklist-chip">\${number} <span onclick="removeBlacklistNumber(\${index})">&times;</span></div>\`;
+                    container.innerHTML += \`<div class="chip blacklist-chip">\${number} <span class="chip-remove" onclick="removeBlacklistNumber(\${index})">&times;</span></div>\`;
                 });
+                document.getElementById('blacklist-count').innerText = blacklistArr.length;
             }
 
             async function addBlacklistNumber() {
@@ -1181,10 +1145,10 @@ app.get('/', (req, res) => {
             }
 
             async function purgeBlacklisted() {
-                if(!confirm('⚠️ تحذير: هذا الخيار سيجعل البوت يبحث في جميع المجموعات، وسيطرد أي شخص موجود في القائمة السوداء فوراً. متأكد؟')) return;
+                if(!confirm(dict.purge_warn)) return;
                 const btn = document.getElementById('purgeBtn');
                 const originalText = btn.innerText;
-                btn.innerText = '⏳ جاري المسح والطرد من المجموعات...';
+                btn.innerText = dict.purging;
                 btn.disabled = true;
                 try {
                     const res = await fetch('/api/blacklist/purge', { method: 'POST' });
@@ -1192,18 +1156,17 @@ app.get('/', (req, res) => {
                     if(data.error) alert('❌ ' + data.error);
                     else alert('✅ ' + data.message);
                 } catch(e) {
-                    alert('حدث خطأ في الاتصال بالخادم.');
+                    alert(dict.conn_err);
                 }
                 btn.innerText = originalText;
                 btn.disabled = false;
             }
 
-            // الفلتر التقليدي
             function renderDefaultWords() {
                 const container = document.getElementById('defaultWordsContainer');
                 container.innerHTML = '';
                 defaultWordsArr.forEach((word, index) => {
-                    container.innerHTML += \`<div class="chip">\${word} <span onclick="removeDefaultWord(\${index})">&times;</span></div>\`;
+                    container.innerHTML += \`<div class="chip">\${word} <span class="chip-remove" onclick="removeDefaultWord(\${index})">&times;</span></div>\`;
                 });
             }
             function addDefaultWord() {
@@ -1220,21 +1183,18 @@ app.get('/', (req, res) => {
                 renderDefaultWords();
             }
 
-            // المجموعات
             function renderGroups() {
                 const container = document.getElementById('groupsContainer');
                 container.innerHTML = '';
                 groupsArr.forEach((group, groupIndex) => {
                     let wordsHtml = group.words.map((word, wordIndex) => 
-                        \`<div class="chip">\${word} <span onclick="removeGroupWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`
+                        \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`
                     ).join('');
 
-                    // توليد واجهة الأنواع الممنوعة
                     const blockedChecks = metaTypes.map(t => 
                         \`<label class="cb-label"><input type="checkbox" value="\${t.id}" \${group.blockedTypes.includes(t.id)?'checked':''} onchange="updateGroupArray(\${groupIndex}, 'blockedTypes', '\${t.id}', this.checked)"> \${t.icon} \${t.name}</label>\`
                     ).join('');
 
-                    // توليد واجهة حدود الإزعاج
                     const spamLimitGrid = metaTypes.map(t => {
                         const isChecked = group.spamTypes.includes(t.id) ? 'checked' : '';
                         const limitVal = group.spamLimits[t.id] || 5;
@@ -1251,39 +1211,37 @@ app.get('/', (req, res) => {
                         <div class="group-card-header">
                             <div class="group-card-title">
                                 <span>👥</span>
-                                المجموعة \${groupIndex + 1}
-                                \${group.id ? \`<span class="group-id-badge">\${group.id.split('@')[0].slice(-8)}...</span>\` : '<span style="color:var(--orange);font-size:12px;">معرّف غير محدد</span>'}
+                                \${dict.group} \${groupIndex + 1}
+                                \${group.id ? \`<span class="group-id-badge">\${group.id.split('@')[0].slice(-8)}...</span>\` : \`<span style="color:var(--orange);font-size:12px;">\${dict.no_id}</span>\`}
                             </div>
-                            <button type="button" class="btn btn-danger btn-sm" onclick="removeGroup(\${groupIndex})">حذف</button>
+                            <button type="button" class="btn btn-danger btn-sm" onclick="removeGroup(\${groupIndex})">\${dict.delete}</button>
                         </div>
                         <div class="group-card-body">
 
                             <div class="field-group">
-                                <label class="field-label">معرّف المجموعة المستهدفة</label>
-                                <input type="text" placeholder="مثال: 120363000000000000@g.us" dir="ltr" style="text-align:left;font-family:monospace;" value="\${group.id}" onchange="updateGroupData(\${groupIndex}, 'id', this.value)">
+                                <label class="field-label">\${dict.target_group}</label>
+                                <input type="text" placeholder="Ex: 120363000000000000@g.us" dir="ltr" style="text-align:left;font-family:monospace;" value="\${group.id}" onchange="updateGroupData(\${groupIndex}, 'id', this.value)">
                             </div>
                             <div class="field-group">
-                                <label class="field-label">مجموعة الإدارة المخصصة (اتركه فارغاً للعامة)</label>
+                                <label class="field-label">\${dict.admin_group}</label>
                                 <input type="text" dir="ltr" style="text-align:left;font-family:monospace;" value="\${group.adminGroup}" onchange="updateGroupData(\${groupIndex}, 'adminGroup', this.value)">
                             </div>
 
-                            <!-- Blocked types -->
                             <div class="sub-panel red" style="margin-bottom:12px;">
-                                <h4 style="color:var(--red);">🛑 الأنواع الممنوعة قطعياً</h4>
+                                <h4 style="color:var(--red);">\${dict.blocked_types}</h4>
                                 <div class="cb-group" style="margin-bottom:10px;">\${blockedChecks}</div>
-                                <label class="field-label">إجراء المنع</label>
+                                <label class="field-label">\${dict.block_action}</label>
                                 <select onchange="updateGroupData(\${groupIndex}, 'blockedAction', this.value)">
-                                    <option value="delete" \${group.blockedAction === 'delete' ? 'selected' : ''}>حذف الرسالة فقط</option>
-                                    <option value="poll" \${group.blockedAction === 'poll' ? 'selected' : ''}>حذف + تصويت للإدارة</option>
-                                    <option value="auto" \${group.blockedAction === 'auto' ? 'selected' : ''}>حذف + طرد تلقائي</option>
+                                    <option value="delete" \${group.blockedAction === 'delete' ? 'selected' : ''}>\${dict.act_del}</option>
+                                    <option value="poll" \${group.blockedAction === 'poll' ? 'selected' : ''}>\${dict.act_poll}</option>
+                                    <option value="auto" \${group.blockedAction === 'auto' ? 'selected' : ''}>\${dict.act_auto}</option>
                                 </select>
                             </div>
 
-                            <!-- Anti-Spam toggle + slide panel -->
                             <div class="toggle-row warning" style="margin-bottom:0; border-radius:\${group.enableAntiSpam ? '10px 10px 0 0' : '10px'};">
                                 <div class="toggle-left">
                                     <label class="switch"><input type="checkbox" \${group.enableAntiSpam ? 'checked' : ''} onchange="toggleGroupPanel(\${groupIndex}, 'spam', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label warning">مكافحة الإزعاج (Anti-Spam)<small>رصد الرسائل المتكررة خلال 15 ثانية</small></div>
+                                    <div class="toggle-label warning">\${dict.anti_spam}<small>\${dict.spam_desc}</small></div>
                                 </div>
                             </div>
                             <div id="group_spam_panel_\${groupIndex}" style="
@@ -1294,29 +1252,28 @@ app.get('/', (req, res) => {
                                 margin-bottom:\${group.enableAntiSpam ? '12px' : '0px'};
                             ">
                                 <div class="sub-panel orange" style="border-top:none; border-radius:0 0 10px 10px;">
-                                    <h4 style="color:var(--orange);">⏱️ حدود كل نوع (15 ثانية)</h4>
+                                    <h4 style="color:var(--orange);">\${dict.limits_15s}</h4>
                                     <div class="limit-grid">\${spamLimitGrid}</div>
                                     <div class="field-row" style="border-top:1px dashed rgba(255,171,64,0.3);padding-top:12px;margin-top:4px;">
                                         <div>
-                                            <label class="field-label">تكرار النص</label>
+                                            <label class="field-label">\${dict.text_dup}</label>
                                             <input type="number" value="\${group.spamDuplicateLimit}" min="2" max="15" onchange="updateGroupData(\${groupIndex}, 'spamDuplicateLimit', parseInt(this.value))">
                                         </div>
                                         <div>
-                                            <label class="field-label">الإجراء</label>
+                                            <label class="field-label">\${dict.action}</label>
                                             <select onchange="updateGroupData(\${groupIndex}, 'spamAction', this.value)">
-                                                <option value="poll" \${group.spamAction === 'poll' ? 'selected' : ''}>🗳️ تصويت للإدارة</option>
-                                                <option value="auto" \${group.spamAction === 'auto' ? 'selected' : ''}>🔨 طرد تلقائي</option>
+                                                <option value="poll" \${group.spamAction === 'poll' ? 'selected' : ''}>\${dict.poll}</option>
+                                                <option value="auto" \${group.spamAction === 'auto' ? 'selected' : ''}>\${dict.auto_kick}</option>
                                             </select>
                                         </div>
                                     </div>
                                 </div>
                             </div>
 
-                            <!-- Welcome message toggle + slide panel -->
                             <div class="toggle-row green" style="margin-bottom:0; border-radius:\${group.enableWelcomeMessage ? '10px 10px 0 0' : '10px'};">
                                 <div class="toggle-left">
                                     <label class="switch"><input type="checkbox" \${group.enableWelcomeMessage ? 'checked' : ''} onchange="toggleGroupPanel(\${groupIndex}, 'welcome', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label green">رسالة ترحيبية عند الانضمام<small>يُرسلها البوت لكل عضو جديد</small></div>
+                                    <div class="toggle-label green">\${dict.welcome_msg}<small>\${dict.welcome_desc}</small></div>
                                 </div>
                             </div>
                             <div id="group_welcome_panel_\${groupIndex}" style="
@@ -1327,24 +1284,22 @@ app.get('/', (req, res) => {
                                 margin-bottom:\${group.enableWelcomeMessage ? '12px' : '0px'};
                             ">
                                 <div class="sub-panel" style="border-top:none; border-radius:0 0 10px 10px; border-color:rgba(100,200,120,0.3);">
-                                    <label class="field-label">نص الرسالة ({user} للمنشن)</label>
+                                    <label class="field-label">\${dict.msg_text}</label>
                                     <textarea rows="2" onchange="updateGroupData(\${groupIndex}, 'welcomeMessageText', this.value)">\${group.welcomeMessageText}</textarea>
                                 </div>
                             </div>
 
-                            <!-- Blacklist toggle (no sub-panel needed) -->
                             <div class="toggle-row danger" style="margin-bottom:12px;">
                                 <div class="toggle-left">
                                     <label class="switch"><input type="checkbox" \${group.enableBlacklist ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableBlacklist', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label danger">تفعيل القائمة السوداء<small>طرد فوري لأي رقم محظور</small></div>
+                                    <div class="toggle-label danger">\${dict.enable_bl}<small>\${dict.bl_desc}</small></div>
                                 </div>
                             </div>
 
-                            <!-- Word filter toggle + slide panel (includes useDefaultWords inside) -->
                             <div class="toggle-row warning" style="margin-bottom:0; border-radius:\${group.enableWordFilter ? '10px 10px 0 0' : '10px'};">
                                 <div class="toggle-left">
                                     <label class="switch"><input type="checkbox" \${group.enableWordFilter ? 'checked' : ''} onchange="toggleGroupPanel(\${groupIndex}, 'words', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label warning">فلتر الكلمات الممنوعة<small>حذف فوري عند رصد كلمة ممنوعة</small></div>
+                                    <div class="toggle-label warning">\${dict.word_filter}<small>\${dict.wf_desc}</small></div>
                                 </div>
                             </div>
                             <div id="group_words_panel_\${groupIndex}" style="
@@ -1355,39 +1310,37 @@ app.get('/', (req, res) => {
                                 margin-bottom:\${group.enableWordFilter ? '12px' : '0px'};
                             ">
                                 <div class="sub-panel orange" style="border-top:none; border-radius:0 0 10px 10px;">
-                                    <!-- useDefaultWords nested inside word filter panel -->
                                     <div class="toggle-row" style="margin-bottom:14px; background:rgba(255,255,255,0.04); border-color:rgba(255,171,64,0.25);">
                                         <div class="toggle-left">
                                             <label class="switch"><input type="checkbox" \${group.useDefaultWords ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'useDefaultWords', this.checked)"><span class="slider"></span></label>
-                                            <div class="toggle-label">تطبيق الكلمات العامة أيضاً<small>إضافة قائمة الكلمات العامة لهذه المجموعة</small></div>
+                                            <div class="toggle-label">\${dict.use_global}<small>\${dict.ug_desc}</small></div>
                                         </div>
                                     </div>
-                                    <label class="field-label">كلمات ممنوعة مخصصة لهذه المجموعة</label>
+                                    <label class="field-label">\${dict.custom_words}</label>
                                     <div class="input-with-btn" style="margin-bottom:10px;">
-                                        <input type="text" id="newGroupWord_\${groupIndex}" placeholder="أدخل الكلمة..." onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupWord(\${groupIndex});}">
-                                        <button type="button" class="btn btn-primary btn-sm" onclick="addGroupWord(\${groupIndex})">+ إضافة</button>
+                                        <input type="text" id="newGroupWord_\${groupIndex}" placeholder="..." onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupWord(\${groupIndex});}">
+                                        <button type="button" class="btn btn-primary btn-sm" onclick="addGroupWord(\${groupIndex})">\${dict.add}</button>
                                     </div>
                                     <div class="chip-container">\${wordsHtml}</div>
                                 </div>
                             </div>
 
-                            <!-- AI toggles -->
                             <div class="toggle-row blue" style="margin-bottom:12px;">
                                 <div class="toggle-left">
                                     <label class="switch"><input type="checkbox" \${group.enableAIFilter ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAIFilter', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label blue">المشرف الذكي (AI) للنصوص</div>
+                                    <div class="toggle-label blue">\${dict.ai_text}</div>
                                 </div>
                             </div>
                             <div class="toggle-row purple" style="margin-bottom:12px;">
                                 <div class="toggle-left">
                                     <label class="switch"><input type="checkbox" \${group.enableAIMedia ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAIMedia', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label purple">تحليل الصور (Vision)</div>
+                                    <div class="toggle-label purple">\${dict.ai_vision}</div>
                                 </div>
                             </div>
                             <div class="toggle-row pink">
                                 <div class="toggle-left">
                                     <label class="switch"><input type="checkbox" \${group.autoAction ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'autoAction', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label pink">الحذف المباشر (تخطي التصويت)</div>
+                                    <div class="toggle-label pink">\${dict.direct_del}</div>
                                 </div>
                             </div>
 
@@ -1403,7 +1356,7 @@ app.get('/', (req, res) => {
                     enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
                     autoAction: false, enableBlacklist: true,
                     enableAntiSpam: false, spamDuplicateLimit: 3, spamAction: 'poll',
-                    enableWelcomeMessage: false, welcomeMessageText: 'مرحباً بك يا {user} في مجموعتنا!',
+                    enableWelcomeMessage: false, welcomeMessageText: '${t("مرحباً بك يا {user} في مجموعتنا!", "Welcome {user} to our group!")}',
                     blockedTypes: [], blockedAction: 'delete', 
                     spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
                     spamLimits: {text:7, image:3, video:2, audio:3, document:3, sticker:3}
@@ -1412,7 +1365,7 @@ app.get('/', (req, res) => {
             }
 
             function removeGroup(index) {
-                if(confirm('هل أنت متأكد من رغبتك في حذف الإعدادات المخصصة لهذه المجموعة؟')) {
+                if(confirm(dict.delete_confirm)) {
                     groupsArr.splice(index, 1);
                     renderGroups();
                 }
@@ -1465,17 +1418,17 @@ app.get('/', (req, res) => {
 
             setInterval(async () => {
                 try {
-                    let res = await fetch('/api/status');
+                    let res = await fetch('/api/status?lang=' + currentLang);
                     let data = await res.json();
                     document.getElementById('status-text').innerText = data.status;
                     const detailEl = document.getElementById('status-text-detail');
                     if(detailEl) detailEl.innerText = data.status;
                     
                     const dot = document.getElementById('statusDot');
-                    if(data.status.includes('متصل وجاهز')) {
+                    if(data.status.includes('متصل') || data.status.includes('Connected')) {
                         dot.className = 'status-dot online';
                         document.getElementById('logoutBtn').style.display = 'block';
-                    } else if(data.status.includes('QR') || data.status.includes('انتظار')) {
+                    } else if(data.status.includes('QR') || data.status.includes('انتظار') || data.status.includes('Waiting')) {
                         dot.className = 'status-dot waiting';
                         document.getElementById('logoutBtn').style.display = 'none';
                     } else {
@@ -1536,8 +1489,8 @@ app.get('/', (req, res) => {
                     body: JSON.stringify(newConfig)
                 });
                 
-                if(res.ok) showToast('✅ تم الحفظ في قاعدة البيانات بنجاح!');
-                else showToast('❌ فشل الحفظ، تحقق من السيرفر');
+                if(res.ok) showToast(dict.save_success);
+                else showToast(dict.save_fail);
             }
 
             document.getElementById('configForm').onsubmit = async (e) => {
@@ -1552,7 +1505,6 @@ app.get('/', (req, res) => {
                 try { localStorage.setItem('theme', isLight ? 'light' : 'dark'); } catch(e) {}
             }
 
-            // Restore saved theme on load
             (function() {
                 try {
                     if (localStorage.getItem('theme') === 'light') {
@@ -1591,7 +1543,7 @@ app.post('/api/blacklist/remove', (req, res) => {
 
 app.post('/api/blacklist/purge', async (req, res) => {
     if (!client.info || !client.info.wid) {
-        return res.status(400).json({ error: 'البوت غير متصل حالياً، يرجى الانتظار.' });
+        return res.status(400).json({ error: 'البوت غير متصل حالياً، يرجى الانتظار. / Bot disconnected, please wait.' });
     }
 
     try {
@@ -1599,7 +1551,7 @@ app.post('/api/blacklist/purge', async (req, res) => {
         const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
         const blacklistArr = blacklistRows.map(r => r.number);
 
-        if (blacklistArr.length === 0) return res.json({ message: 'القائمة السوداء فارغة.' });
+        if (blacklistArr.length === 0) return res.json({ message: 'القائمة السوداء فارغة. / Blacklist is empty.' });
 
         const chats = await client.getChats();
         const botId = client.info.wid._serialized;
@@ -1630,13 +1582,29 @@ app.post('/api/blacklist/purge', async (req, res) => {
             }
         }
         console.log(`[تنظيف] انتهت عملية المسح. طرد ${kickedCount} شخص.`);
-        res.json({ message: `تمت عملية المسح بنجاح! تم طرد (${kickedCount}) عضو محظور.` });
+        res.json({ message: `تمت عملية المسح بنجاح! تم طرد (${kickedCount}) عضو محظور. / Purge complete! Kicked (${kickedCount}) banned users.` });
     } catch (error) {
-        res.status(500).json({ error: 'حدث خطأ في السيرفر أثناء عملية المسح.' });
+        res.status(500).json({ error: 'حدث خطأ في السيرفر أثناء عملية المسح. / Server error during purge.' });
     }
 });
 
-app.get('/api/status', (req, res) => res.json({ qr: currentQR, status: botStatus }));
+app.get('/api/status', (req, res) => {
+    const l = req.query.lang === 'en' ? 'en' : 'ar';
+    let translatedStatus = botStatus;
+    
+    // Auto-translate internal bot statuses if English is requested
+    if (l === 'en') {
+        translatedStatus = translatedStatus
+            .replace('جاري تهيئة النظام وبدء التشغيل...', 'Initializing system and starting...')
+            .replace('بانتظار مسح رمز الاستجابة السريعة (QR Code)...', 'Waiting for QR Code scan...')
+            .replace('متصل وجاهز للعمل ✅', 'Connected and ready ✅')
+            .replace('تم تسجيل الدخول بنجاح، جاري جلب البيانات...', 'Logged in successfully, fetching data...')
+            .replace('تم تسجيل الخروج من الحساب...', 'Logged out of account...')
+            .replace('جاري إنهاء الجلسة...', 'Terminating session...');
+    }
+    res.json({ qr: currentQR, status: translatedStatus });
+});
+
 app.get('/api/logs', (req, res) => res.json(logsHistory));
 
 app.post('/api/logout', async (req, res) => {
