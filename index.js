@@ -19,6 +19,7 @@ function saveLog(type, args) {
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
+// 🗄️ تهيئة قاعدة البيانات
 const db = new Database('./bot_data.sqlite');
 db.pragma('journal_mode = WAL'); 
 
@@ -45,11 +46,26 @@ db.exec(`
     );
 `);
 
+// 🔄 تحديث بنية الجداول لإضافة ميزة (تخصيص حدود كل نوع وسائط) تلقائياً
+const colsToAdd = [
+    'blocked_types TEXT',
+    'blocked_action TEXT',
+    'spam_types TEXT',
+    'spam_limits TEXT'
+];
+colsToAdd.forEach(col => {
+    try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch(e){}
+});
+
 function loadConfigFromDB() {
     let newConfig = {
         enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
         autoAction: false, enableBlacklist: true, enableAntiSpam: false, 
         spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll',
+        blockedTypes: [], blockedAction: 'delete', 
+        spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
+        // 🎛️ الحدود الافتراضية لكل نوع
+        spamLimits: { text: 7, image: 3, video: 2, audio: 3, document: 3, sticker: 3 },
         defaultAdminGroup: '120363424446982803@g.us', defaultWords: [],
         aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية.',
         ollamaUrl: 'http://localhost:11434', ollamaModel: 'llava',
@@ -58,7 +74,7 @@ function loadConfigFromDB() {
 
     const globals = db.prepare('SELECT * FROM global_settings').all();
     globals.forEach(row => {
-        if (row.key === 'defaultWords') newConfig.defaultWords = JSON.parse(row.value);
+        if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits'].includes(row.key)) newConfig[row.key] = JSON.parse(row.value);
         else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableAntiSpam'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
         } 
@@ -83,11 +99,15 @@ function loadConfigFromDB() {
             enableBlacklist: g.enable_blacklist === 1,
             enableAntiSpam: g.enable_anti_spam === 1,
             spamDuplicateLimit: g.spam_duplicate_limit,
-            spamFloodLimit: g.spam_flood_limit,
+            spamFloodLimit: g.spam_flood_limit, // متروك للتوافقية
             spamAction: g.spam_action,
             enableWelcomeMessage: g.enable_welcome_message === 1,
             welcomeMessageText: g.welcome_message_text,
-            words: JSON.parse(g.custom_words || '[]')
+            words: JSON.parse(g.custom_words || '[]'),
+            blockedTypes: JSON.parse(g.blocked_types || '[]'),
+            blockedAction: g.blocked_action || 'delete',
+            spamTypes: JSON.parse(g.spam_types || '["text", "image", "video", "audio", "document", "sticker"]'),
+            spamLimits: JSON.parse(g.spam_limits || '{"text":7,"image":3,"video":2,"audio":3,"document":3,"sticker":3}')
         };
     });
 
@@ -104,8 +124,11 @@ function saveConfigToDB(conf) {
         setGlobal.run('enableBlacklist', conf.enableBlacklist ? '1' : '0');
         setGlobal.run('enableAntiSpam', conf.enableAntiSpam ? '1' : '0');
         setGlobal.run('spamDuplicateLimit', conf.spamDuplicateLimit.toString());
-        setGlobal.run('spamFloodLimit', conf.spamFloodLimit.toString());
         setGlobal.run('spamAction', conf.spamAction);
+        setGlobal.run('blockedTypes', JSON.stringify(conf.blockedTypes));
+        setGlobal.run('blockedAction', conf.blockedAction);
+        setGlobal.run('spamTypes', JSON.stringify(conf.spamTypes));
+        setGlobal.run('spamLimits', JSON.stringify(conf.spamLimits));
         setGlobal.run('defaultAdminGroup', conf.defaultAdminGroup);
         setGlobal.run('defaultWords', JSON.stringify(conf.defaultWords));
 
@@ -119,8 +142,9 @@ function saveConfigToDB(conf) {
             INSERT INTO custom_groups (
                 group_id, admin_group, use_default_words, enable_word_filter, enable_ai_filter, 
                 enable_ai_media, auto_action, enable_blacklist, enable_anti_spam, spam_duplicate_limit, 
-                spam_flood_limit, spam_action, enable_welcome_message, welcome_message_text, custom_words
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                spam_action, enable_welcome_message, welcome_message_text, custom_words,
+                blocked_types, blocked_action, spam_types, spam_limits
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
@@ -128,8 +152,10 @@ function saveConfigToDB(conf) {
                 gId, gData.adminGroup, gData.useDefaultWords ? 1 : 0, gData.enableWordFilter ? 1 : 0,
                 gData.enableAIFilter ? 1 : 0, gData.enableAIMedia ? 1 : 0, gData.autoAction ? 1 : 0,
                 gData.enableBlacklist ? 1 : 0, gData.enableAntiSpam ? 1 : 0, gData.spamDuplicateLimit,
-                gData.spamFloodLimit, gData.spamAction, gData.enableWelcomeMessage ? 1 : 0, 
-                gData.welcomeMessageText, JSON.stringify(gData.words)
+                gData.spamAction, gData.enableWelcomeMessage ? 1 : 0, 
+                gData.welcomeMessageText, JSON.stringify(gData.words),
+                JSON.stringify(gData.blockedTypes || []), gData.blockedAction || 'delete', 
+                JSON.stringify(gData.spamTypes || []), JSON.stringify(gData.spamLimits || {})
             );
         }
     });
@@ -153,6 +179,16 @@ let botStatus = 'جاري تهيئة النظام وبدء التشغيل...';
 const userTrackers = new Map();
 const abortedMessages = new Set(); 
 const spamMutedUsers = new Map(); 
+
+// مصفوفة لأنواع الوسائط مع أسمائها لتوليد الواجهة
+const mediaTypesMeta = [
+    { id: 'text', icon: '📝', name: 'نصوص' },
+    { id: 'image', icon: '🖼️', name: 'صور' },
+    { id: 'video', icon: '🎥', name: 'فيديو' },
+    { id: 'audio', icon: '🎵', name: 'صوتيات' },
+    { id: 'document', icon: '📄', name: 'ملفات' },
+    { id: 'sticker', icon: '👾', name: 'ملصقات' }
+];
 
 app.get('/', (req, res) => {
     const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
@@ -216,8 +252,15 @@ app.get('/', (req, res) => {
             .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
             input:checked + .slider { background-color: #25d366; }
             input:checked + .slider:before { transform: translateX(20px); }
-            .spam-settings { background: rgba(255, 152, 0, 0.05); padding: 15px; border: 1px solid #ff9800; border-radius: 8px; margin-top: 10px; }
+            .spam-settings, .media-settings { background: rgba(255, 152, 0, 0.05); padding: 15px; border: 1px solid #ff9800; border-radius: 8px; margin-top: 10px; }
+            .media-settings { border-color: #f44336; background: rgba(244, 67, 54, 0.05); }
             
+            .cb-group { display: flex; gap: 15px; flex-wrap: wrap; margin-top: 8px; font-size: 14px;}
+            .cb-group label { margin: 0; font-weight: normal; cursor: pointer; display: flex; align-items: center; gap: 5px; }
+            .limit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+            .limit-item { display: flex; align-items: center; gap: 8px; background: var(--container-bg); padding: 6px 10px; border-radius: 5px; border: 1px solid var(--card-border); }
+            .limit-item input[type="number"] { width: 60px; padding: 4px; margin: 0; text-align: center;}
+
             .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: var(--modal-bg); backdrop-filter: blur(3px); }
             .modal-content { background-color: var(--container-bg); margin: 5% auto; padding: 25px; border: 1px solid var(--card-border); width: 90%; max-width: 600px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); animation: slideIn 0.3s; }
             .close-modal { color: #aaa; float: left; font-size: 28px; font-weight: bold; cursor: pointer; line-height: 20px; }
@@ -230,9 +273,9 @@ app.get('/', (req, res) => {
     </head>
     <body>
         <div class="container">
-            <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="تبديل المظهر (فاتح/داكن)">🌙</button>
+            <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="تبديل المظهر">🌙</button>
 
-            <h1>⚙️ إعدادات المشرف الآلي (قاعدة بيانات SQLite)</h1>
+            <h1>⚙️ إعدادات المشرف الآلي (V4)</h1>
             
             <div class="status-box">
                 <h2>حالة الربط مع واتساب: <span id="status-text">${botStatus}</span></h2>
@@ -261,7 +304,7 @@ app.get('/', (req, res) => {
                 </div>
 
                 <div class="group-card" style="border-color: var(--text-heading);">
-                    <h3 style="margin-top:0; color: var(--text-heading);">🔧 الإعدادات العامة (جدول Global Settings)</h3>
+                    <h3 style="margin-top:0; color: var(--text-heading);">🔧 الإعدادات العامة (تطبق على المجموعات غير المخصصة)</h3>
                     
                     <div class="switch-container" style="border-color: #d32f2f; background: rgba(211, 47, 47, 0.05);">
                         <div class="switch-inner">
@@ -273,31 +316,55 @@ app.get('/', (req, res) => {
                         </div>
                     </div>
 
-                    <div class="switch-container" style="border-color: #ff9800;">
+                    <div class="media-settings">
+                        <h4 style="margin: 0 0 10px 0; color: #d32f2f;">🛑 المنع القطعي لأنواع الملفات (حذف فوري دائماً):</h4>
+                        <div class="cb-group" id="globalBlockedTypes">
+                            ${mediaTypesMeta.map(t => `<label><input type="checkbox" value="${t.id}" ${config.blockedTypes.includes(t.id) ? 'checked' : ''}> ${t.icon} ${t.name}</label>`).join('')}
+                        </div>
+                        <label style="font-size: 13px; margin-top: 10px;">الإجراء عند إرسال نوع ممنوع:</label>
+                        <select id="globalBlockedAction" style="padding: 5px;">
+                            <option value="delete" ${config.blockedAction === 'delete' ? 'selected' : ''}>حذف الرسالة فقط (بصمت)</option>
+                            <option value="poll" ${config.blockedAction === 'poll' ? 'selected' : ''}>حذف + فتح تصويت للإدارة</option>
+                            <option value="auto" ${config.blockedAction === 'auto' ? 'selected' : ''}>حذف + طرد تلقائي وحظر</option>
+                        </select>
+                    </div>
+
+                    <div class="switch-container" style="border-color: #ff9800; margin-top: 15px;">
                         <div class="switch-inner">
                             <label class="switch">
                                 <input type="checkbox" id="enableAntiSpam" ${config.enableAntiSpam ? 'checked' : ''}>
                                 <span class="slider"></span>
                             </label>
-                            <span style="font-size: 14px; font-weight: bold; color: #ff9800;">تفعيل الحماية من الإزعاج (Anti-Spam / Anti-Flood)</span>
+                            <span style="font-size: 14px; font-weight: bold; color: #ff9800;">تفعيل الحماية من الإزعاج السريع (Anti-Spam)</span>
                         </div>
                     </div>
                     <div class="spam-settings">
-                        <div style="display:flex; gap: 15px;">
+                        <h4 style="margin: 0 0 10px 0; color: #ff9800;">تحديد حدود الإزعاج لكل نوع (خلال 15 ثانية):</h4>
+                        <p style="font-size:12px; margin-top:-5px; color:var(--text-main);">حدد (صح) ليتم مراقبة النوع، ثم ضع الحد الأقصى المسموح به.</p>
+                        
+                        <div class="limit-grid">
+                            ${mediaTypesMeta.map(t => `
+                            <div class="limit-item">
+                                <input type="checkbox" id="global_spam_check_${t.id}" value="${t.id}" ${config.spamTypes.includes(t.id) ? 'checked' : ''}>
+                                <span style="font-size:13px; width:70px;">${t.icon} ${t.name}</span>
+                                <input type="number" id="global_spam_limit_${t.id}" value="${config.spamLimits[t.id] || 5}" min="1">
+                            </div>
+                            `).join('')}
+                        </div>
+
+                        <div style="display:flex; gap: 15px; border-top: 1px dashed #ff9800; padding-top: 15px;">
                             <div style="flex:1;">
-                                <label>الحد الأقصى لتكرار نفس النص:</label>
+                                <label style="font-size: 13px; margin-top:0;">حد تكرار نفس النص (نسخ لصق):</label>
                                 <input type="number" id="spamDuplicateLimit" value="${config.spamDuplicateLimit}" min="2" max="15">
                             </div>
                             <div style="flex:1;">
-                                <label>الحد الأقصى للرسائل السريعة (خلال 15ث):</label>
-                                <input type="number" id="spamFloodLimit" value="${config.spamFloodLimit}" min="3" max="20">
+                                <label style="font-size: 13px; margin-top:0;">الإجراء عند الرصد (الحذف مؤكد):</label>
+                                <select id="spamAction" style="padding: 5px;">
+                                    <option value="poll" ${config.spamAction === 'poll' ? 'selected' : ''}>تصويت للإدارة</option>
+                                    <option value="auto" ${config.spamAction === 'auto' ? 'selected' : ''}>طرد تلقائي وحظر</option>
+                                </select>
                             </div>
                         </div>
-                        <label>الإجراء عند رصد المزعج (يتم الحذف الجذري للرسائل ووضعه بصندوق العقوبة لمدة دقيقة):</label>
-                        <select id="spamAction">
-                            <option value="poll" ${config.spamAction === 'poll' ? 'selected' : ''}>فتح تصويت للإدارة</option>
-                            <option value="auto" ${config.spamAction === 'auto' ? 'selected' : ''}>طرد تلقائي وإضافة للقائمة السوداء</option>
-                        </select>
                     </div>
 
                     <div class="switch-container">
@@ -337,13 +404,13 @@ app.get('/', (req, res) => {
                                 <input type="checkbox" id="autoAction" ${config.autoAction ? 'checked' : ''}>
                                 <span class="slider" style="background-color: #ccc;"></span>
                             </label>
-                            <span style="font-size: 14px; font-weight: bold; color: #e91e63;">تفعيل الحذف والإبلاغ المباشر (تخطي تصويت الإدارة) للمخالفات الأخرى</span>
+                            <span style="font-size: 14px; font-weight: bold; color: #e91e63;">تفعيل الحذف والإبلاغ المباشر للمخالفات الأخرى</span>
                         </div>
                     </div>
 
                     <div id="aiPromptContainer" style="margin-top: 15px; padding: 15px; background: var(--status-bg); border-radius: 8px; border: 1px dashed var(--status-text);">
                         <label style="margin-top:0; color: var(--status-text);">تعليمات الذكاء الاصطناعي (وصف المحتوى الممنوع):</label>
-                        <textarea id="aiPromptText" rows="3" placeholder="مثال: قم بمنع أي رسالة تروج للخدمات...">${config.aiPrompt}</textarea>
+                        <textarea id="aiPromptText" rows="3">${config.aiPrompt}</textarea>
                     </div>
 
                     <label style="border-top: 1px solid var(--card-border); padding-top: 15px;">معرّف (ID) مجموعة الإدارة (لتلقي التنبيهات):</label>
@@ -375,8 +442,6 @@ app.get('/', (req, res) => {
                 <input type="text" id="ollamaUrl" value="${config.ollamaUrl}" dir="ltr" style="text-align: left;">
                 <label>اسم النموذج (يجب أن يكون نموذج Vision إذا أردت تحليل الصور، مثل llava):</label>
                 <input type="text" id="ollamaModel" value="${config.ollamaModel}" dir="ltr" style="text-align: left;">
-                <label style="margin-top:20px;">البرومبت الأساسي (Prompt):</label>
-                <textarea id="aiPromptText" rows="3" placeholder="مثال: قم بمنع أي رسالة تروج للخدمات...">${config.aiPrompt}</textarea>
                 <button type="button" class="add-btn" style="width: 100%; margin-top: 20px; padding: 12px; background: var(--status-text);" onclick="closeOllamaModal()">إغلاق</button>
             </div>
         </div>
@@ -460,10 +525,11 @@ app.get('/', (req, res) => {
                 }
             }
 
-            // المتغيرات القادمة من السيرفر
+            // المتغيرات
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
             let blacklistArr = ${JSON.stringify(blacklistArr)}; 
             let groupsConfigObj = ${JSON.stringify(config.groupsConfig)};
+            const metaTypes = ${JSON.stringify(mediaTypesMeta)};
             
             let groupsArr = Object.keys(groupsConfigObj).map(key => ({
                 id: key,
@@ -477,13 +543,36 @@ app.get('/', (req, res) => {
                 enableBlacklist: groupsConfigObj[key].enableBlacklist !== false,
                 enableAntiSpam: groupsConfigObj[key].enableAntiSpam || false,
                 spamDuplicateLimit: groupsConfigObj[key].spamDuplicateLimit || 3,
-                spamFloodLimit: groupsConfigObj[key].spamFloodLimit || 5,
                 spamAction: groupsConfigObj[key].spamAction || 'poll',
                 enableWelcomeMessage: groupsConfigObj[key].enableWelcomeMessage || false, 
-                welcomeMessageText: groupsConfigObj[key].welcomeMessageText || 'مرحباً بك يا {user} في مجموعتنا!' 
+                welcomeMessageText: groupsConfigObj[key].welcomeMessageText || 'مرحباً بك يا {user} في مجموعتنا!',
+                blockedTypes: groupsConfigObj[key].blockedTypes || [],
+                blockedAction: groupsConfigObj[key].blockedAction || 'delete',
+                spamTypes: groupsConfigObj[key].spamTypes || ['text', 'image', 'video', 'audio', 'document', 'sticker'],
+                spamLimits: groupsConfigObj[key].spamLimits || {text:7, image:3, video:2, audio:3, document:3, sticker:3}
             }));
 
-            // 🟢 وظائف القائمة السوداء والتحديث المباشر للـ API
+            // دوال مساعدة للواجهة
+            function updateGroupArray(gIndex, arrName, val, isChecked) {
+                let arr = groupsArr[gIndex][arrName];
+                if (isChecked && !arr.includes(val)) arr.push(val);
+                if (!isChecked) {
+                    let idx = arr.indexOf(val);
+                    if (idx > -1) arr.splice(idx, 1);
+                }
+            }
+
+            function updateSpamLimit(gIndex, type, val) {
+                if (!groupsArr[gIndex].spamLimits) groupsArr[gIndex].spamLimits = {};
+                groupsArr[gIndex].spamLimits[type] = parseInt(val) || 5;
+            }
+
+            function getCheckedValues(containerId) {
+                const checkboxes = document.querySelectorAll(\`#\${containerId} input[type="checkbox"]:checked\`);
+                return Array.from(checkboxes).map(cb => cb.value);
+            }
+
+            // القائمة السوداء
             function renderBlacklist() {
                 const container = document.getElementById('blacklistContainer');
                 container.innerHTML = '';
@@ -496,13 +585,11 @@ app.get('/', (req, res) => {
                 const input = document.getElementById('newBlacklistNumber');
                 let rawValue = input.value;
                 let justNumbers = rawValue.replace(/\\D/g, ''); 
-                
                 if (justNumbers) {
                     let finalId = justNumbers + '@c.us';
                     if (!blacklistArr.includes(finalId)) {
                         blacklistArr.push(finalId);
                         renderBlacklist(); 
-                        
                         try {
                             await fetch('/api/blacklist/add', {
                                 method: 'POST',
@@ -519,7 +606,6 @@ app.get('/', (req, res) => {
                 const numberToRemove = blacklistArr[index];
                 blacklistArr.splice(index, 1);
                 renderBlacklist();
-                
                 try {
                     await fetch('/api/blacklist/remove', {
                         method: 'POST',
@@ -529,32 +615,25 @@ app.get('/', (req, res) => {
                 } catch(e) {}
             }
 
-            // 🧹 دالة المسح الشامل للمحظورين
             async function purgeBlacklisted() {
-                if(!confirm('⚠️ تحذير: هذا الخيار سيجعل البوت يبحث في جميع المجموعات، وسيطرد أي شخص موجود في القائمة السوداء فوراً (تطبيق بأثر رجعي). هل أنت متأكد من تنفيذ هذا الأمر؟')) return;
-
+                if(!confirm('⚠️ تحذير: هذا الخيار سيجعل البوت يبحث في جميع المجموعات، وسيطرد أي شخص موجود في القائمة السوداء فوراً. متأكد؟')) return;
                 const btn = document.getElementById('purgeBtn');
                 const originalText = btn.innerText;
-                btn.innerText = '⏳ جاري المسح والطرد من المجموعات... يرجى الانتظار';
+                btn.innerText = '⏳ جاري المسح والطرد من المجموعات...';
                 btn.disabled = true;
-
                 try {
                     const res = await fetch('/api/blacklist/purge', { method: 'POST' });
                     const data = await res.json();
-                    
-                    if(data.error) {
-                        alert('❌ ' + data.error);
-                    } else {
-                        alert('✅ ' + data.message);
-                    }
+                    if(data.error) alert('❌ ' + data.error);
+                    else alert('✅ ' + data.message);
                 } catch(e) {
                     alert('حدث خطأ في الاتصال بالخادم.');
                 }
-
                 btn.innerText = originalText;
                 btn.disabled = false;
             }
 
+            // الفلتر التقليدي
             function renderDefaultWords() {
                 const container = document.getElementById('defaultWordsContainer');
                 container.innerHTML = '';
@@ -562,7 +641,6 @@ app.get('/', (req, res) => {
                     container.innerHTML += \`<div class="chip">\${word} <span onclick="removeDefaultWord(\${index})">&times;</span></div>\`;
                 });
             }
-
             function addDefaultWord() {
                 const input = document.getElementById('newDefaultWord');
                 const word = input.value.trim();
@@ -572,12 +650,12 @@ app.get('/', (req, res) => {
                     renderDefaultWords();
                 }
             }
-
             function removeDefaultWord(index) {
                 defaultWordsArr.splice(index, 1);
                 renderDefaultWords();
             }
 
+            // المجموعات
             function renderGroups() {
                 const container = document.getElementById('groupsContainer');
                 container.innerHTML = '';
@@ -586,11 +664,28 @@ app.get('/', (req, res) => {
                         \`<div class="chip">\${word} <span onclick="removeGroupWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`
                     ).join('');
 
+                    // توليد واجهة الأنواع الممنوعة
+                    const blockedChecks = metaTypes.map(t => 
+                        \`<label><input type="checkbox" value="\${t.id}" \${group.blockedTypes.includes(t.id)?'checked':''} onchange="updateGroupArray(\${groupIndex}, 'blockedTypes', '\${t.id}', this.checked)"> \${t.icon} \${t.name}</label>\`
+                    ).join('');
+
+                    // توليد واجهة حدود الإزعاج
+                    const spamLimitGrid = metaTypes.map(t => {
+                        const isChecked = group.spamTypes.includes(t.id) ? 'checked' : '';
+                        const limitVal = group.spamLimits[t.id] || 5;
+                        return \`
+                        <div class="limit-item">
+                            <input type="checkbox" value="\${t.id}" \${isChecked} onchange="updateGroupArray(\${groupIndex}, 'spamTypes', '\${t.id}', this.checked)">
+                            <span style="font-size:13px; width:70px;">\${t.icon} \${t.name}</span>
+                            <input type="number" value="\${limitVal}" min="1" onchange="updateSpamLimit(\${groupIndex}, '\${t.id}', this.value)">
+                        </div>\`;
+                    }).join('');
+
                     container.innerHTML += \`
                     <div class="group-card">
                         <div class="group-card-header">
                             <h4 style="margin:0;">إعدادات المجموعة رقم \${groupIndex + 1}</h4>
-                            <button type="button" class="remove-btn" onclick="removeGroup(\${groupIndex})">حذف إعدادات هذه المجموعة</button>
+                            <button type="button" class="remove-btn" onclick="removeGroup(\${groupIndex})">حذف هذه المجموعة</button>
                         </div>
                         
                         <label>معرّف (ID) المجموعة المستهدفة:</label>
@@ -599,17 +694,57 @@ app.get('/', (req, res) => {
                         <label>معرّف مجموعة الإدارة (لتلقي تنبيهات هذه المجموعة فقط):</label>
                         <input type="text" placeholder="(اتركه فارغاً لاستخدام مجموعة الإدارة العامة)" dir="ltr" style="text-align: left;" value="\${group.adminGroup}" onchange="updateGroupData(\${groupIndex}, 'adminGroup', this.value)">
 
-                        <div class="switch-container" style="border-color: #4caf50; background: rgba(76, 175, 80, 0.05);">
+                        <div class="media-settings">
+                            <h4 style="margin: 0 0 10px 0; color: #d32f2f;">🛑 المنع القطعي لأنواع الملفات لهذه المجموعة:</h4>
+                            <div class="cb-group">\${blockedChecks}</div>
+                            <label style="font-size: 13px; margin-top: 10px;">الإجراء عند الرصد:</label>
+                            <select style="padding: 5px;" onchange="updateGroupData(\${groupIndex}, 'blockedAction', this.value)">
+                                <option value="delete" \${group.blockedAction === 'delete' ? 'selected' : ''}>حذف الرسالة فقط</option>
+                                <option value="poll" \${group.blockedAction === 'poll' ? 'selected' : ''}>حذف + تصويت للإدارة</option>
+                                <option value="auto" \${group.blockedAction === 'auto' ? 'selected' : ''}>حذف + طرد تلقائي</option>
+                            </select>
+                        </div>
+
+                        <div class="switch-container" style="border-color: #ff9800; background: rgba(255, 152, 0, 0.05); margin-top: 15px;">
+                            <div class="switch-inner">
+                                <label class="switch">
+                                    <input type="checkbox" \${group.enableAntiSpam ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAntiSpam', this.checked)">
+                                    <span class="slider" style="background-color: #ccc;"></span>
+                                </label>
+                                <span style="font-size: 14px; font-weight: bold; color: #ff9800;">تفعيل الحماية من الإزعاج السريع (Anti-Spam)</span>
+                            </div>
+                        </div>
+                        
+                        <div class="spam-settings">
+                            <h4 style="margin: 0 0 10px 0; color: #ff9800;">حدود الإزعاج لكل نوع (خلال 15 ثانية):</h4>
+                            <div class="limit-grid">\${spamLimitGrid}</div>
+                            
+                            <div style="display:flex; gap: 15px; border-top: 1px dashed #ff9800; padding-top: 15px;">
+                                <div style="flex:1;">
+                                    <label style="font-size: 13px; margin-top:0;">تكرار نفس النص:</label>
+                                    <input type="number" value="\${group.spamDuplicateLimit}" min="2" max="15" onchange="updateGroupData(\${groupIndex}, 'spamDuplicateLimit', parseInt(this.value))">
+                                </div>
+                                <div style="flex:1;">
+                                    <label style="font-size: 13px; margin-top:0;">الإجراء عند الرصد:</label>
+                                    <select style="padding: 5px;" onchange="updateGroupData(\${groupIndex}, 'spamAction', this.value)">
+                                        <option value="poll" \${group.spamAction === 'poll' ? 'selected' : ''}>تصويت للإدارة</option>
+                                        <option value="auto" \${group.spamAction === 'auto' ? 'selected' : ''}>طرد تلقائي</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="switch-container" style="border-color: #4caf50; background: rgba(76, 175, 80, 0.05); margin-top: 15px;">
                             <div class="switch-inner">
                                 <label class="switch">
                                     <input type="checkbox" \${group.enableWelcomeMessage ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableWelcomeMessage', this.checked)">
                                     <span class="slider" style="background-color: #ccc;"></span>
                                 </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #4caf50;">تفعيل إرسال رسالة ترحيبية عند الانضمام</span>
+                                <span style="font-size: 14px; font-weight: bold; color: #4caf50;">تفعيل رسالة ترحيبية عند الانضمام</span>
                             </div>
                         </div>
                         <div style="margin-top: 10px; padding: 10px; background: var(--input-bg); border-radius: 5px; border: 1px dashed #4caf50;">
-                            <label style="margin-top:0; color: #4caf50; font-size: 13px;">نص رسالة الترحيب (اكتب {user} لعمل منشن للعضو الجديد):</label>
+                            <label style="margin-top:0; color: #4caf50; font-size: 13px;">نص الرسالة (استخدم {user} للمنشن):</label>
                             <textarea rows="2" onchange="updateGroupData(\${groupIndex}, 'welcomeMessageText', this.value)">\${group.welcomeMessageText}</textarea>
                         </div>
 
@@ -623,41 +758,13 @@ app.get('/', (req, res) => {
                             </div>
                         </div>
 
-                        <div class="switch-container" style="border-color: #ff9800; background: rgba(255, 152, 0, 0.05);">
-                            <div class="switch-inner">
-                                <label class="switch">
-                                    <input type="checkbox" \${group.enableAntiSpam ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAntiSpam', this.checked)">
-                                    <span class="slider" style="background-color: #ccc;"></span>
-                                </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #ff9800;">تفعيل الحماية من الإزعاج السريع (Anti-Spam)</span>
-                            </div>
-                        </div>
-                        
-                        <div class="spam-settings">
-                            <div style="display:flex; gap: 15px;">
-                                <div style="flex:1;">
-                                    <label>الحد الأقصى للتكرار:</label>
-                                    <input type="number" value="\${group.spamDuplicateLimit}" min="2" max="15" onchange="updateGroupData(\${groupIndex}, 'spamDuplicateLimit', parseInt(this.value))">
-                                </div>
-                                <div style="flex:1;">
-                                    <label>حد السرعة (رسائل/15ث):</label>
-                                    <input type="number" value="\${group.spamFloodLimit}" min="3" max="20" onchange="updateGroupData(\${groupIndex}, 'spamFloodLimit', parseInt(this.value))">
-                                </div>
-                            </div>
-                            <label>الإجراء عند الرصد:</label>
-                            <select onchange="updateGroupData(\${groupIndex}, 'spamAction', this.value)">
-                                <option value="poll" \${group.spamAction === 'poll' ? 'selected' : ''}>تصويت للإدارة</option>
-                                <option value="auto" \${group.spamAction === 'auto' ? 'selected' : ''}>طرد تلقائي</option>
-                            </select>
-                        </div>
-
                         <div class="switch-container">
                             <div class="switch-inner">
                                 <label class="switch">
                                     <input type="checkbox" \${group.useDefaultWords ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'useDefaultWords', this.checked)">
                                     <span class="slider"></span>
                                 </label>
-                                <span style="font-size: 14px; font-weight: bold;">تطبيق الكلمات الممنوعة العامة بالإضافة لكلمات هذه المجموعة</span>
+                                <span style="font-size: 14px; font-weight: bold;">تطبيق الكلمات الممنوعة العامة بالإضافة لكلمات المجموعة</span>
                             </div>
                         </div>
 
@@ -667,7 +774,7 @@ app.get('/', (req, res) => {
                                     <input type="checkbox" \${group.enableWordFilter ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableWordFilter', this.checked)">
                                     <span class="slider" style="background-color: #ccc;"></span>
                                 </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #ff9800;">تفعيل الفلتر التقليدي (الكلمات الممنوعة) لهذه المجموعة</span>
+                                <span style="font-size: 14px; font-weight: bold; color: #ff9800;">تفعيل الفلتر التقليدي (الكلمات الممنوعة)</span>
                             </div>
                         </div>
 
@@ -687,7 +794,7 @@ app.get('/', (req, res) => {
                                     <input type="checkbox" \${group.enableAIMedia ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAIMedia', this.checked)">
                                     <span class="slider" style="background-color: #ccc;"></span>
                                 </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #9c27b0;">تفعيل تحليل الصور للمشرف الذكي في هذه المجموعة</span>
+                                <span style="font-size: 14px; font-weight: bold; color: #9c27b0;">تفعيل تحليل الصور للمشرف الذكي (Vision)</span>
                             </div>
                         </div>
 
@@ -697,7 +804,7 @@ app.get('/', (req, res) => {
                                     <input type="checkbox" \${group.autoAction ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'autoAction', this.checked)">
                                     <span class="slider" style="background-color: #ccc;"></span>
                                 </label>
-                                <span style="font-size: 14px; font-weight: bold; color: #e91e63;">تفعيل الحذف والإبلاغ المباشر (تخطي تصويت الإدارة) لهذه المجموعة</span>
+                                <span style="font-size: 14px; font-weight: bold; color: #e91e63;">تفعيل الحذف المباشر (تخطي تصويت الإدارة) للمخالفات الأخرى</span>
                             </div>
                         </div>
 
@@ -717,8 +824,11 @@ app.get('/', (req, res) => {
                     id: '', adminGroup: '', words: [], useDefaultWords: true, 
                     enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
                     autoAction: false, enableBlacklist: true,
-                    enableAntiSpam: false, spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll',
-                    enableWelcomeMessage: false, welcomeMessageText: 'مرحباً بك يا {user} في مجموعتنا!'
+                    enableAntiSpam: false, spamDuplicateLimit: 3, spamAction: 'poll',
+                    enableWelcomeMessage: false, welcomeMessageText: 'مرحباً بك يا {user} في مجموعتنا!',
+                    blockedTypes: [], blockedAction: 'delete', 
+                    spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
+                    spamLimits: {text:7, image:3, video:2, audio:3, document:3, sticker:3}
                 });
                 renderGroups();
             }
@@ -730,13 +840,8 @@ app.get('/', (req, res) => {
                 }
             }
 
-            function updateGroupData(index, field, value) {
-                groupsArr[index][field] = value; 
-            }
-
-            function updateGroupToggle(index, field, isChecked) {
-                groupsArr[index][field] = isChecked;
-            }
+            function updateGroupData(index, field, value) { groupsArr[index][field] = value; }
+            function updateGroupToggle(index, field, isChecked) { groupsArr[index][field] = isChecked; }
 
             function addGroupWord(groupIndex) {
                 const input = document.getElementById(\`newGroupWord_\${groupIndex}\`);
@@ -783,30 +888,29 @@ app.get('/', (req, res) => {
                 let finalGroupsObj = {};
                 groupsArr.forEach(g => {
                     if(g.id) {
-                        finalGroupsObj[g.id] = {
-                            adminGroup: g.adminGroup,
-                            words: g.words,
-                            useDefaultWords: g.useDefaultWords,
-                            enableWordFilter: g.enableWordFilter,
-                            enableAIFilter: g.enableAIFilter,
-                            enableAIMedia: g.enableAIMedia,
-                            autoAction: g.autoAction,
-                            enableBlacklist: g.enableBlacklist,
-                            enableAntiSpam: g.enableAntiSpam,
-                            spamDuplicateLimit: g.spamDuplicateLimit,
-                            spamFloodLimit: g.spamFloodLimit,
-                            spamAction: g.spamAction,
-                            enableWelcomeMessage: g.enableWelcomeMessage,
-                            welcomeMessageText: g.welcomeMessageText
-                        };
+                        finalGroupsObj[g.id] = g;
                     }
+                });
+
+                // تجميع الإعدادات العامة للسبام
+                const gSpamTypes = [];
+                const gSpamLimits = {};
+                metaTypes.forEach(t => {
+                    const cb = document.getElementById('global_spam_check_' + t.id);
+                    if(cb && cb.checked) gSpamTypes.push(t.id);
+                    
+                    const lim = document.getElementById('global_spam_limit_' + t.id);
+                    gSpamLimits[t.id] = parseInt(lim ? lim.value : 5) || 5;
                 });
 
                 const newConfig = {
                     enableAntiSpam: document.getElementById('enableAntiSpam').checked,
                     spamDuplicateLimit: parseInt(document.getElementById('spamDuplicateLimit').value) || 3,
-                    spamFloodLimit: parseInt(document.getElementById('spamFloodLimit').value) || 5,
                     spamAction: document.getElementById('spamAction').value,
+                    spamTypes: gSpamTypes,
+                    spamLimits: gSpamLimits,
+                    blockedTypes: getCheckedValues('globalBlockedTypes'),
+                    blockedAction: document.getElementById('globalBlockedAction').value,
                     enableBlacklist: document.getElementById('enableBlacklist').checked,
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
                     enableAIFilter: document.getElementById('enableAIFilter').checked,
@@ -838,7 +942,7 @@ app.get('/', (req, res) => {
     res.send(html);
 });
 
-// 🚀 API Endpoints القائمة السوداء
+// 🚀 API Endpoints
 app.post('/api/blacklist/add', (req, res) => {
     if(req.body.number) {
         try {
@@ -859,20 +963,17 @@ app.post('/api/blacklist/remove', (req, res) => {
     res.sendStatus(200);
 });
 
-// 🧹 مسار (API) جديد لمسح وطرد المزعجين من جميع المجموعات بأثر رجعي
 app.post('/api/blacklist/purge', async (req, res) => {
     if (!client.info || !client.info.wid) {
-        return res.status(400).json({ error: 'البوت غير متصل حالياً، يرجى الانتظار حتى يتصل بواتساب.' });
+        return res.status(400).json({ error: 'البوت غير متصل حالياً، يرجى الانتظار.' });
     }
 
     try {
-        console.log(`[تنظيف] بدأت عملية المسح الشامل للمجموعات للبحث عن محظورين...`);
+        console.log(`[تنظيف] بدأت عملية المسح الشامل للمجموعات...`);
         const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
         const blacklistArr = blacklistRows.map(r => r.number);
 
-        if (blacklistArr.length === 0) {
-            return res.json({ message: 'القائمة السوداء فارغة، لا يوجد شخص لطرده.' });
-        }
+        if (blacklistArr.length === 0) return res.json({ message: 'القائمة السوداء فارغة.' });
 
         const chats = await client.getChats();
         const botId = client.info.wid._serialized;
@@ -880,16 +981,14 @@ app.post('/api/blacklist/purge', async (req, res) => {
 
         for (const chat of chats) {
             if (chat.isGroup) {
-                // هل البوت أدمن في هذا القروب عشان يقدر يطرد؟
                 const botData = chat.participants.find(p => p.id._serialized === botId);
                 const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
 
                 if (botIsAdmin) {
-                    // تصفية الأعضاء الموجودين في القروب ومطابقتهم مع القائمة السوداء
                     const usersToKick = chat.participants
                         .map(p => p.id._serialized)
                         .filter(id => {
-                            const cleanId = id.replace(/:[0-9]+/, ''); // تنظيف المعرفات
+                            const cleanId = id.replace(/:[0-9]+/, ''); 
                             return blacklistArr.includes(cleanId) || blacklistArr.includes(id);
                         });
 
@@ -897,24 +996,19 @@ app.post('/api/blacklist/purge', async (req, res) => {
                         try {
                             await chat.removeParticipants(usersToKick);
                             kickedCount += usersToKick.length;
-                            console.log(`[أمان] 🧹 تم طرد ${usersToKick.length} محظورين من مجموعة: ${chat.name}`);
-                            // تأخير تكتيكي عشان واتساب ما يعطي بلوك سرعة
+                            console.log(`[أمان] 🧹 تم طرد ${usersToKick.length} محظورين من: ${chat.name}`);
                             await new Promise(resolve => setTimeout(resolve, 1500)); 
-                        } catch (e) {
-                            console.error(`[خطأ] فشل الطرد الجماعي في ${chat.name}:`, e.message);
-                        }
+                        } catch (e) {}
                     }
                 }
             }
         }
-        console.log(`[تنظيف] انتهت عملية المسح الشامل. تم طرد ${kickedCount} شخص.`);
-        res.json({ message: `تمت عملية المسح بنجاح! تم العثور على (${kickedCount}) عضو محظور وطردهم من المجموعات.` });
+        console.log(`[تنظيف] انتهت عملية المسح. طرد ${kickedCount} شخص.`);
+        res.json({ message: `تمت عملية المسح بنجاح! تم طرد (${kickedCount}) عضو محظور.` });
     } catch (error) {
-        console.error('[خطأ] حدث خطأ أثناء عملية المسح الشامل:', error);
         res.status(500).json({ error: 'حدث خطأ في السيرفر أثناء عملية المسح.' });
     }
 });
-
 
 app.get('/api/status', (req, res) => res.json({ qr: currentQR, status: botStatus }));
 app.get('/api/logs', (req, res) => res.json(logsHistory));
@@ -924,43 +1018,37 @@ app.post('/api/logout', async (req, res) => {
         botStatus = 'جاري إنهاء الجلسة...';
         await client.logout();
         res.sendStatus(200);
-    } catch (error) {
-        console.error('حدث خطأ أثناء إنهاء الجلسة:', error);
-        res.sendStatus(500);
-    }
+    } catch (error) { res.sendStatus(500); }
 });
 
 app.post('/save', (req, res) => {
     try {
         saveConfigToDB(req.body);
         config = loadConfigFromDB(); 
-        console.log('[فحص] 💾 تم حفظ الإعدادات في الجداول وتحديث النظام بنجاح.');
+        console.log('[فحص] 💾 تم حفظ الإعدادات بنجاح.');
         res.sendStatus(200);
     } catch(e) {
-        console.error('[خطأ] تعذر حفظ الإعدادات في قاعدة البيانات:', e.message);
+        console.error('[خطأ] تعذر الحفظ في قاعدة البيانات:', e.message);
         res.sendStatus(500);
     }
 });
 
-app.listen(3000, () => console.log('لوحة التحكم تعمل الآن عبر المنفذ 3000...'));
+app.listen(3000, () => console.log('لوحة التحكم تعمل عبر المنفذ 3000...'));
 
 const client = new Client({
     authStrategy: new LocalAuth(),
-    puppeteer: {
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
-    }
+    puppeteer: { args: ['--no-sandbox', '--disable-setuid-sandbox'] }
 });
 
 client.on('qr', async (qr) => {
     botStatus = 'بانتظار مسح رمز الاستجابة السريعة (QR Code)...';
     currentQR = await qrcode.toDataURL(qr);
-    console.log('تم إنشاء رمز الدخول. يرجى فتح لوحة التحكم في المتصفح لمسحه.');
 });
 
 client.on('ready', async () => {
     botStatus = 'متصل وجاهز للعمل ✅';
     currentQR = '';
-    console.log('تم ربط حساب واتساب بنجاح، البوت يعمل الآن!');
+    console.log('تم ربط حساب واتساب بنجاح!');
     
     try {
         const chats = await client.getChats();
@@ -978,25 +1066,16 @@ client.on('authenticated', () => {
 });
 
 client.on('disconnected', async (reason) => {
-    console.log('تم قطع الاتصال بالخادم الداخلي:', reason);
-    botStatus = 'تم تسجيل الخروج من الحساب. جاري إعادة تشغيل النظام...';
+    botStatus = 'تم تسجيل الخروج من الحساب...';
     currentQR = '';
-    
-    try {
-        await client.destroy();
-    } catch(e) {}
-    
-    setTimeout(() => {
-        client.initialize();
-    }, 3000);
+    try { await client.destroy(); } catch(e) {}
+    setTimeout(() => { client.initialize(); }, 3000);
 });
 
 const pendingBans = new Map();
 
 client.on('group_join', async (notification) => {
     try {
-        console.log(`[معلومة] 🔔 حدث انضمام جديد في مجموعة: ${notification.chatId}`);
-        
         const chat = await notification.getChat();
         const groupId = chat.id._serialized;
         const groupConfig = config.groupsConfig[groupId];
@@ -1012,14 +1091,9 @@ client.on('group_join', async (notification) => {
             if (cleanJoinedId.includes('@lid')) {
                 try {
                     const contact = await client.getContactById(participantId);
-                    if (contact && contact.number) {
-                        cleanJoinedId = `${contact.number}@c.us`;
-                    } else {
-                        cleanJoinedId = cleanJoinedId.replace('@lid', '@c.us');
-                    }
-                } catch(e) {
-                    cleanJoinedId = cleanJoinedId.replace('@lid', '@c.us');
-                }
+                    if (contact && contact.number) cleanJoinedId = `${contact.number}@c.us`;
+                    else cleanJoinedId = cleanJoinedId.replace('@lid', '@c.us');
+                } catch(e) { cleanJoinedId = cleanJoinedId.replace('@lid', '@c.us'); }
             }
 
             let isKicked = false;
@@ -1028,17 +1102,14 @@ client.on('group_join', async (notification) => {
                 const isBanned = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanJoinedId);
                 
                 if (isBanned) {
-                    console.log(`[أمان] 🛡️ تنبيه: محاولة دخول من رقم محظور (${cleanJoinedId}) في مجموعة (${chat.name}). جاري الطرد...`);
+                    console.log(`[أمان] 🛡️ محاولة دخول رقم محظور (${cleanJoinedId}). جاري الطرد...`);
                     isKicked = true;
                     
                     setTimeout(async () => {
                         try {
                             await chat.removeParticipants([participantId]);
-                            console.log(`[أمان] ✅ تم طرد الرقم المحظور بنجاح من مساحة: ${chat.name}`);
-                            
                             const targetAdminGroup = groupConfig?.adminGroup || config.defaultAdminGroup;
-                            const reportText = `🛡️ *تنبيه حماية (القائمة السوداء)*\nحاول رقم محظور مسبقاً الدخول (عبر رابط أو إضافة) إلى مجموعة "${chat.name}" وتم طرده فوراً.\n\nالرقم المحظور: @${cleanJoinedId.split('@')[0]}`;
-                            
+                            const reportText = `🛡️ *حماية (قائمة سوداء)*\nحاول رقم محظور الدخول لمجموعة "${chat.name}" وتم طرده.\nالرقم: @${cleanJoinedId.split('@')[0]}`;
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanJoinedId] });
                         } catch(err) {}
                     }, 2000);
@@ -1050,7 +1121,6 @@ client.on('group_join', async (notification) => {
                     try {
                         const welcomeText = groupConfig.welcomeMessageText.replace(/{user}/g, `@${cleanJoinedId.split('@')[0]}`);
                         await client.sendMessage(groupId, welcomeText, { mentions: [cleanJoinedId] });
-                        console.log(`[معلومة] 👋 تم إرسال رسالة ترحيبية للعضو الجديد: ${cleanJoinedId}`);
                     } catch (err) {}
                 }, 3500); 
             }
@@ -1072,70 +1142,98 @@ client.on('message', async msg => {
             if (cleanAuthorId.includes('@lid')) {
                 try {
                     const contact = await msg.getContact();
-                    if (contact && contact.number) {
-                        cleanAuthorId = `${contact.number}@c.us`;
-                    } else {
-                        cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us');
-                    }
-                } catch(e) {
-                    cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us');
-                }
+                    if (contact && contact.number) cleanAuthorId = `${contact.number}@c.us`;
+                    else cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us');
+                } catch(e) { cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us'); }
             }
+
+            // 🎯 تحديد نوع الرسالة الداخلي
+            let internalMsgType = 'text';
+            if (msg.type === 'image') internalMsgType = 'image';
+            else if (msg.type === 'video') internalMsgType = 'video';
+            else if (msg.type === 'audio' || msg.type === 'ptt') internalMsgType = 'audio';
+            else if (msg.type === 'document') internalMsgType = 'document';
+            else if (msg.type === 'sticker') internalMsgType = 'sticker';
 
             const groupId = chat.id._serialized;
             const groupConfig = config.groupsConfig[groupId];
             
-            let forbiddenWords = [];
             let targetAdminGroup = config.defaultAdminGroup;
-            let isWordFilterEnabledForThisGroup = config.enableWordFilter;
-            let isAIFilterEnabledForThisGroup = config.enableAIFilter; 
-            let isAIMediaEnabledForThisGroup = config.enableAIMedia; 
-            let isAutoActionEnabledForThisGroup = config.autoAction; 
-            let isBlacklistEnabledForThisGroup = config.enableBlacklist; 
+            let isWordFilterEnabled = config.enableWordFilter;
+            let isAIFilterEnabled = config.enableAIFilter; 
+            let isAIMediaEnabled = config.enableAIMedia; 
+            let isAutoActionEnabled = config.autoAction; 
+            let isBlacklistEnabled = config.enableBlacklist; 
             
             let isAntiSpamEnabled = config.enableAntiSpam;
             let spamDuplicateLimit = config.spamDuplicateLimit;
-            let spamFloodLimit = config.spamFloodLimit;
             let spamAction = config.spamAction;
+            let spamTypes = config.spamTypes;
+            let spamLimits = config.spamLimits;
+
+            let blockedTypes = config.blockedTypes;
+            let blockedAction = config.blockedAction;
+            let forbiddenWords = [...config.defaultWords];
 
             if (groupConfig) {
                 targetAdminGroup = groupConfig.adminGroup || config.defaultAdminGroup;
-                
-                if (typeof groupConfig.enableWordFilter !== 'undefined') isWordFilterEnabledForThisGroup = groupConfig.enableWordFilter;
-                if (typeof groupConfig.enableAIFilter !== 'undefined') isAIFilterEnabledForThisGroup = groupConfig.enableAIFilter;
-                if (typeof groupConfig.enableAIMedia !== 'undefined') isAIMediaEnabledForThisGroup = groupConfig.enableAIMedia;
-                if (typeof groupConfig.autoAction !== 'undefined') isAutoActionEnabledForThisGroup = groupConfig.autoAction;
-                if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabledForThisGroup = groupConfig.enableBlacklist;
+                if (typeof groupConfig.enableWordFilter !== 'undefined') isWordFilterEnabled = groupConfig.enableWordFilter;
+                if (typeof groupConfig.enableAIFilter !== 'undefined') isAIFilterEnabled = groupConfig.enableAIFilter;
+                if (typeof groupConfig.enableAIMedia !== 'undefined') isAIMediaEnabled = groupConfig.enableAIMedia;
+                if (typeof groupConfig.autoAction !== 'undefined') isAutoActionEnabled = groupConfig.autoAction;
+                if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabled = groupConfig.enableBlacklist;
                 
                 if (typeof groupConfig.enableAntiSpam !== 'undefined') {
                     isAntiSpamEnabled = groupConfig.enableAntiSpam;
                     spamDuplicateLimit = groupConfig.spamDuplicateLimit || 3;
-                    spamFloodLimit = groupConfig.spamFloodLimit || 5;
                     spamAction = groupConfig.spamAction || 'poll';
                 }
+                if (groupConfig.spamTypes) spamTypes = groupConfig.spamTypes;
+                if (groupConfig.spamLimits) spamLimits = groupConfig.spamLimits;
+                if (groupConfig.blockedTypes) blockedTypes = groupConfig.blockedTypes;
+                if (groupConfig.blockedAction) blockedAction = groupConfig.blockedAction;
 
-                if (groupConfig.useDefaultWords !== false) forbiddenWords = [...config.defaultWords];
+                if (groupConfig.useDefaultWords === false) forbiddenWords = [];
                 if (groupConfig.words && groupConfig.words.length > 0) forbiddenWords = [...forbiddenWords, ...groupConfig.words];
-            } else {
-                forbiddenWords = [...config.defaultWords];
             }
 
-            if (isBlacklistEnabledForThisGroup) {
+            if (isBlacklistEnabled) {
                 const isBanned = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanAuthorId);
                 if (isBanned) {
-                    console.log(`[أمان] 🛡️ رقم محظور أرسل رسالة. سيتم حذفه وطرده.`);
+                    console.log(`[أمان] 🛡️ رقم محظور أرسل رسالة. سيتم حذفه.`);
                     await msg.delete(true);
                     await chat.removeParticipants([rawAuthorId]);
                     return; 
                 }
             }
 
+            // 🛑 --- نظام المنع القطعي ---
+            if (blockedTypes.includes(internalMsgType)) {
+                console.log(`[أمان] 🛑 رصد نوع ممنوع قطعي (${internalMsgType}). يتم الحذف.`);
+                try { await msg.delete(true); } catch(e){}
+                
+                if (blockedAction === 'auto') {
+                    try {
+                        await chat.removeParticipants([rawAuthorId]);
+                        if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanAuthorId);
+                        const reportText = `🚨 *حظر تلقائي (نوع ممنوع)*\nأرسل العضو ملف (${internalMsgType}) في "${chat.name}" وتم طرده.\n👤 *المرسل:* @${cleanAuthorId.split('@')[0]}`;
+                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanAuthorId] });
+                    } catch(e){}
+                } else if (blockedAction === 'poll') {
+                    const pollTitle = `🚨 إشعار بمخالفة في "${chat.name}"\nالمرسل: @${cleanAuthorId.split('@')[0]}\nالسبب: إرسال نوع ممنوع (${internalMsgType})\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
+                    const poll = new Poll(pollTitle, isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا'] : ['نعم، طرد', 'لا']);
+                    const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [cleanAuthorId] });
+                    pendingBans.set(pollMsg.id._serialized, { senderId: cleanAuthorId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
+                }
+                return; 
+            }
+
+            // 🛡️ --- نظام مكافحة الإزعاج المخصص (Anti-Spam) ---
             if (isAntiSpamEnabled) {
                 const trackerKey = `${groupId}_${cleanAuthorId}`;
                 
                 if (spamMutedUsers.has(trackerKey)) {
                     if (Date.now() < spamMutedUsers.get(trackerKey)) {
-                        console.log(`[تنظيف] 🧹 مسح رسالة إضافية لمزعج (في فترة العقوبة - 60 ثانية).`);
                         try { await msg.delete(true); } catch(e) {}
                         return; 
                     } else {
@@ -1147,7 +1245,7 @@ client.on('message', async msg => {
                 let tracker = userTrackers.get(trackerKey);
 
                 const now = Date.now();
-                tracker.push({ text: msg.body, time: now, msgObj: msg, id: msgId });
+                tracker.push({ text: msg.body, time: now, msgObj: msg, id: msgId, type: internalMsgType });
 
                 tracker = tracker.filter(m => now - m.time < 15000); 
                 userTrackers.set(trackerKey, tracker);
@@ -1155,13 +1253,22 @@ client.on('message', async msg => {
                 let isSpamFlagged = false;
                 let spamFlagReason = '';
 
-                if (tracker.length >= spamFloodLimit) {
-                    isSpamFlagged = true;
-                    spamFlagReason = `إرسال رسائل سريعة جداً (${tracker.length} رسائل متتالية)`;
-                } else {
+                // فحص الحدود المخصصة لكل نوع
+                if (spamTypes.includes(internalMsgType)) {
+                    const typeCount = tracker.filter(m => m.type === internalMsgType).length;
+                    const typeLimit = spamLimits[internalMsgType] || 5; 
+                    if (typeCount >= typeLimit) {
+                        isSpamFlagged = true;
+                        const arNames = {text:'نصوص', image:'صور', video:'فيديو', audio:'صوتيات', document:'ملفات', sticker:'ملصقات'};
+                        spamFlagReason = `إرسال (${arNames[internalMsgType] || internalMsgType}) بسرعة تتجاوز الحد المسموح (${typeLimit} خلال 15ث)`;
+                    }
+                }
+
+                // فحص تكرار نفس النص
+                if (!isSpamFlagged && internalMsgType === 'text') {
                     const textCounts = {};
                     for (const m of tracker) {
-                        if (m.text && m.text.trim().length > 0) {
+                        if (m.type === 'text' && m.text && m.text.trim().length > 0) {
                             textCounts[m.text] = (textCounts[m.text] || 0) + 1;
                             if (textCounts[m.text] >= spamDuplicateLimit) {
                                 isSpamFlagged = true;
@@ -1173,12 +1280,10 @@ client.on('message', async msg => {
                 }
 
                 if (isSpamFlagged) {
-                    console.log(`[أمان] 🚨 تم رصد مزعج في (${chat.name}) السبب: ${spamFlagReason}`);
+                    console.log(`[أمان] 🚨 تم رصد مزعج في (${chat.name}): ${spamFlagReason}`);
                     spamMutedUsers.set(trackerKey, Date.now() + 60000);
 
                     for (const m of tracker) abortedMessages.add(m.id);
-
-                    console.log(`[تنظيف] جاري مسح جميع الرسائل السابقة المتراكمة...`);
                     
                     try { await msg.delete(true); } catch(e) {}
 
@@ -1207,67 +1312,61 @@ client.on('message', async msg => {
 
                     const contact = await msg.getContact();
                     let senderId = cleanAuthorId; 
-                    if (contact && contact.number) {
-                        senderId = `${contact.number}@c.us`;
-                    }
+                    if (contact && contact.number) senderId = `${contact.number}@c.us`;
 
                     if (spamAction === 'auto') {
                         try {
                             await chat.removeParticipants([rawAuthorId]);
-                            if (isBlacklistEnabledForThisGroup) {
+                            if (isBlacklistEnabled) {
                                 db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
                             }
-                            const reportText = `🚨 *حظر تلقائي (نظام مكافحة الإزعاج)*\nتم مسح رسائل مزعجة وطرد العضو من مجموعة "${chat.name}"${isBlacklistEnabledForThisGroup ? ' وإدراجه في القائمة السوداء' : ''}.\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${spamFlagReason}`;
+                            const reportText = `🚨 *حظر تلقائي (إزعاج)*\nتم طرد العضو من "${chat.name}"${isBlacklistEnabled ? ' وإدراجه في القائمة السوداء' : ''}.\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${spamFlagReason}`;
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
                         } catch(e) {}
                     } else {
-                        const pollOptions = isBlacklistEnabledForThisGroup ? ['نعم، طرد وحظر (للقائمة السوداء)', 'لا، اكتف بالحذف'] : ['نعم، طرد العضو', 'لا، اكتف بالحذف'];
-                        const pollTitle = `🚨 إشعار بوجود إزعاج (Spam) في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${spamFlagReason}\n\nهل ترغب في طرد هذا الرقم${isBlacklistEnabledForThisGroup ? ' وإضافته للقائمة السوداء' : ''}؟`;
+                        const pollOptions = isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا، اكتف بالحذف'] : ['نعم، طرد العضو', 'لا'];
+                        const pollTitle = `🚨 إشعار إزعاج في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${spamFlagReason}\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
                         const poll = new Poll(pollTitle, pollOptions);
                         const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
                         
                         pendingBans.set(pollMsg.id._serialized, {
                             senderId: senderId,
                             pollMsg: pollMsg,
-                            isBlacklistEnabled: isBlacklistEnabledForThisGroup
+                            isBlacklistEnabled: isBlacklistEnabled
                         });
                     }
                     return; 
                 }
             }
 
-            console.log(`[فحص] متابعة رسالة في (${chat.name}) | كلمات(${isWordFilterEnabledForThisGroup})، ذكي(${isAIFilterEnabledForThisGroup})`);
+            console.log(`[فحص] متابعة رسالة في (${chat.name}) | كلمات(${isWordFilterEnabled})، ذكي(${isAIFilterEnabled})`);
 
             let isViolating = false;
             let violationReason = '';
 
-            const isMediaContent = msg.hasMedia || msg.type === 'image' || msg.type === 'video' || msg.type === 'audio' || msg.type === 'ptt' || msg.type === 'sticker' || msg.type === 'document';
+            const isMediaContent = internalMsgType !== 'text';
 
-            if (isWordFilterEnabledForThisGroup && forbiddenWords.length > 0 && msg.body) {
+            if (isWordFilterEnabled && forbiddenWords.length > 0 && msg.body) {
                 const matchedWord = forbiddenWords.find(word => msg.body.includes(word));
                 if (matchedWord) {
                     isViolating = true;
                     violationReason = `تطابق تام مع الكلمة المحظورة: [${matchedWord}]`;
-                    console.log(`[فحص] تم اكتشاف مخالفة صريحة للكلمات.`);
                 }
             }
 
             let canSendToAI = false;
             let base64Image = null;
 
-            if (!isViolating && isAIFilterEnabledForThisGroup) {
+            if (!isViolating && isAIFilterEnabled) {
                 if (!isMediaContent) {
                     if (msg.body && msg.body.trim().length > 0) canSendToAI = true;
                 } else {
-                    if (isAIMediaEnabledForThisGroup) {
+                    if (isAIMediaEnabled) {
                         canSendToAI = true;
                         if (msg.type === 'image') {
                             try {
-                                console.log(`[معلومة] جاري تحميل الصورة لإرسالها لمحرك الرؤية (Vision)...`);
                                 const media = await msg.downloadMedia();
-                                if (media && media.data) {
-                                    base64Image = media.data;
-                                }
+                                if (media && media.data) base64Image = media.data;
                             } catch (err) {}
                         }
                     } else if (msg.body && msg.body.trim().length > 0) {
@@ -1277,82 +1376,53 @@ client.on('message', async msg => {
             }
 
             if (canSendToAI) {
-                console.log(`[فحص] يتم الآن عرض المحتوى على المشرف الذكي للتقييم...`);
                 try {
                     const msgText = msg.body || '[صورة بدون نص مرفق]';
-                    const aiPromptText = `أنت مشرف مجموعة صارم. تعليماتك هي: ${config.aiPrompt}\n\nبناء على التعليمات، هل هذا المحتوى (النص أو الصورة) يعتبر مخالف؟ أجب بكلمة "نعم" أو "لا" فقط وبدون أي إضافات.\nالمحتوى: "${msgText}"`;
+                    const aiPromptText = `أنت مشرف مجموعة صارم. تعليماتك هي: ${config.aiPrompt}\n\nبناء على التعليمات، هل هذا المحتوى يعتبر مخالف؟ أجب بكلمة "نعم" أو "لا" فقط.\nالمحتوى: "${msgText}"`;
                     
-                    const payload = {
-                        model: config.ollamaModel,
-                        prompt: aiPromptText,
-                        stream: false
-                    };
-
-                    if (base64Image) {
-                        payload.images = [base64Image];
-                    }
+                    const payload = { model: config.ollamaModel, prompt: aiPromptText, stream: false };
+                    if (base64Image) payload.images = [base64Image];
 
                     const response = await fetch(`${config.ollamaUrl}/api/generate`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
                     });
                     
                     if (abortedMessages.has(msgId)) {
-                        console.log(`[أمان] تم تجاهل الرد لأن الرسالة مُسحت مسبقاً (إزعاج).`);
                         abortedMessages.delete(msgId); 
                         return; 
                     }
 
                     const data = await response.json();
-                    console.log(`[فحص] الرد الوارد من المشرف الذكي: ${data.response}`);
-                    
                     if (data.response && data.response.includes('نعم')) {
                         isViolating = true;
-                        violationReason = 'تم التصنيف كمخالفة عبر التحليل الذكي (AI)';
+                        violationReason = 'تم التصنيف كمخالفة عبر الذكاء الاصطناعي';
                     }
-                } catch (error) {
-                    console.error('[خطأ] فشل في تمرير المحتوى إلى المعالج المستقل:', error.message);
-                }
+                } catch (error) {}
             }
 
             if (isViolating) {
                 const contact = await msg.getContact();
                 let senderId = cleanAuthorId; 
-                if (contact && contact.number) {
-                    senderId = `${contact.number}@c.us`;
-                }
+                if (contact && contact.number) senderId = `${contact.number}@c.us`;
 
                 const messageContent = msg.body || '[مرفق وسائط]';
                 await msg.delete(true); 
-                console.log(`[فحص] تم إزالة المحتوى المخالف بنجاح.`);
 
-                if (isAutoActionEnabledForThisGroup) {
+                if (isAutoActionEnabled) {
                     try {
                         await chat.removeParticipants([rawAuthorId]);
-                        
-                        if (isBlacklistEnabledForThisGroup) {
-                            db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
-                        }
+                        if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
 
-                        const reportText = `🚨 *تقرير إجراء وحظر تلقائي*\nتم مسح محتوى مخالف وطرد العضو من مجموعة "${chat.name}"${isBlacklistEnabledForThisGroup ? ' وإدراجه في القائمة السوداء' : ''}.\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *سبب الإزالة:* ${violationReason}\n📝 *النص الممسوح:*\n"${messageContent}"`;
+                        const reportText = `🚨 *تقرير إجراء وحظر تلقائي*\nتم مسح محتوى مخالف وطرد العضو من "${chat.name}".\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${violationReason}\n📝 *النص الممسوح:*\n"${messageContent}"`;
                         await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
-
                     } catch(e) {}
-
                 } else {
-                    const pollOptions = isBlacklistEnabledForThisGroup ? ['نعم، طرد وحظر (للقائمة السوداء)', 'لا، اكتف بالحذف'] : ['نعم، طرد العضو', 'لا، اكتف بالحذف'];
-                    
-                    const pollTitle = `🚨 إشعار بوجود محتوى مخالف في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${violationReason}\nالنص:\n"${messageContent}"\n\nهل ترغب في طرد هذا الرقم${isBlacklistEnabledForThisGroup ? ' وإضافته للقائمة السوداء' : ''}؟`;
+                    const pollOptions = isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا، اكتف بالحذف'] : ['نعم، طرد', 'لا'];
+                    const pollTitle = `🚨 إشعار بمحتوى مخالف في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${violationReason}\nالنص:\n"${messageContent}"\n\nهل ترغب في طرده؟`;
                     const poll = new Poll(pollTitle, pollOptions);
                     
                     const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
-
-                    pendingBans.set(pollMsg.id._serialized, {
-                        senderId: senderId,
-                        pollMsg: pollMsg,
-                        isBlacklistEnabled: isBlacklistEnabledForThisGroup
-                    });
+                    pendingBans.set(pollMsg.id._serialized, { senderId: senderId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
                 }
             }
         }
@@ -1368,14 +1438,9 @@ client.on('vote_update', async vote => {
             const data = pendingBans.get(pollId);
             const userToBan = data.senderId;
 
-            console.log(`[فحص] تم استلام قرار التدخل البشري: ${selectedOption}`);
-
             if (selectedOption.includes('نعم')) {
                 if (data.isBlacklistEnabled) {
-                    try {
-                        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan);
-                        console.log(`[أمان] 🚫 تم إضافة الرقم ${userToBan} إلى القائمة السوداء في Database.`);
-                    } catch(e) {}
+                    try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan); } catch(e) {}
                 }
 
                 const botId = client.info.wid._serialized;
@@ -1383,27 +1448,21 @@ client.on('vote_update', async vote => {
                 
                 for (const chat of chats) {
                     if (chat.isGroup) {
-                        let botIsAdmin = false;
                         const botData = chat.participants.find(p => p.id._serialized === botId);
-                        if (botData) botIsAdmin = botData.isAdmin || botData.isSuperAdmin;
-
-                        if (botIsAdmin) {
+                        if (botData && (botData.isAdmin || botData.isSuperAdmin)) {
                             try {
                                 await chat.removeParticipants([userToBan]);
-                                console.log(`[فحص] تم تنفيذ الإبعاد في مساحة: ${chat.name}`);
                                 await new Promise(resolve => setTimeout(resolve, 1000)); 
                             } catch(e) { }
                         }
                     }
                 }
-                
                 const replyText = data.isBlacklistEnabled ? '✅ *تم تطبيق الطرد وإدراج الرقم في القائمة السوداء بنجاح.*' : '✅ *تم تطبيق الطرد بنجاح.*';
                 await data.pollMsg.reply(replyText);
 
             } else if (selectedOption.includes('لا')) {
                 await data.pollMsg.reply('🛑 *تم إلغاء الطرد بناءً على تصويت الإدارة.*');
             }
-
             pendingBans.delete(pollId);
         }
     }
