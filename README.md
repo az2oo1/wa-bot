@@ -48,12 +48,38 @@
 ## 🛠 Installation & Setup
 
 ### 1. Clone & Install
-```bash
-for windows:
-extract the v6.zip file 
-run the (windows_installer-runner) as administrator for first launch to install dependencies
-it might ask you to reopen the installer after the install is completed to run the program
 
+for windows:
+```bash
+1-extract the v6.zip file.
+2-run the (windows_installer-runner) as administrator.
+for first launch to install dependencies.
+3-it might ask you to reopen the installer
+after theinstall is completed to run the program.
+```
 for linux/MacOS:
-change the (linux_installer-runner) proprties to run as an executuble
-after that just run it and it will install dependencies you wouldn't need to reopen it
+```bash
+1-extract the v6.zip file.
+2-change the (linux_installer-runner) proprties to run as an executuble.
+3-after that just run it and it will install dependencies you wouldn't need to reopen it.
+
+```
+arabic Preview:
+
+<img width="2559" height="1274" alt="Screenshot 2026-03-12 020936" src="https://github.com/user-attachments/assets/65139cc3-2e0b-4ef0-83b3-98472b52417a" />
+
+<img width="2559" height="1276" alt="Screenshot 2026-03-12 021033" src="https://github.com/user-attachments/assets/30494c9a-38bb-4e95-aeea-1ce0e0197723" />
+
+<img width="2559" height="1276" alt="Screenshot 2026-03-12 021052" src="https://github.com/user-attachments/assets/04cbb869-d2ae-4cd0-85be-90f564206147" />
+
+<img width="2559" height="1273" alt="Screenshot 2026-03-12 021113" src="https://github.com/user-attachments/assets/689e3219-02b7-49ed-b511-bf026344af27" />
+
+<img width="2559" height="1272" alt="Screenshot 2026-03-12 021125" src="https://github.com/user-attachments/assets/9e96ef34-0791-4c90-bc66-5c3fe5764e78" />
+
+<img width="2559" height="1271" alt="Screenshot 2026-03-12 021136" src="https://github.com/user-attachments/assets/834658cb-3157-4695-983f-bee55a3adb26" />
+
+<img width="2559" height="1275" alt="Screenshot 2026-03-12 021146" src="https://github.com/user-attachments/assets/15f46197-07c3-47b2-9d7a-1701eb353321" />
+
+<img width="2559" height="1270" alt="Screenshot 2026-03-12 021209" src="https://github.com/user-attachments/assets/aa4a5c0f-1fca-4ae1-8a2f-62e02e5c68d7" />
+
+<img width="2559" height="1272" alt="Screenshot 2026-03-12 021221" src="https://github.com/user-attachments/assets/68f21740-8c11-4043-bd9b-363c6becec53" />
