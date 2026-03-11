@@ -27,6 +27,7 @@ db.exec(`
     CREATE TABLE IF NOT EXISTS global_settings (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE IF NOT EXISTS llm_settings (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE IF NOT EXISTS blacklist (number TEXT PRIMARY KEY);
+    CREATE TABLE IF NOT EXISTS whatsapp_groups (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE IF NOT EXISTS custom_groups (
         group_id TEXT PRIMARY KEY,
         admin_group TEXT,
@@ -64,9 +65,8 @@ function loadConfigFromDB() {
         spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll',
         blockedTypes: [], blockedAction: 'delete', 
         spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
-        // الحدود الافتراضية لكل نوع
         spamLimits: { text: 7, image: 3, video: 2, audio: 3, document: 3, sticker: 3 },
-        defaultAdminGroup: '120363424446982803@g.us', defaultWords: [],
+        defaultAdminGroup: '', defaultWords: [],
         aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية.',
         ollamaUrl: 'http://localhost:11434', ollamaModel: 'llava',
         groupsConfig: {}
@@ -397,7 +397,7 @@ app.get('/', (req, res) => {
             }
             input:focus, textarea:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,230,118,0.12); }
             textarea { resize: vertical; }
-            select option { background: var(--card-bg); }
+            select option { background: var(--card-bg); color: var(--text); }
 
             .field-group { margin-bottom: 20px; }
             .field-row { display: flex; gap: 14px; }
@@ -633,10 +633,9 @@ app.get('/', (req, res) => {
                         </div>
                         <div class="card">
                             <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
-                            <div class="field-group">
-                                <label class="field-label">${t('معرّف المجموعة (لتلقي التنبيهات)', 'Group ID (for alerts)')}</label>
-                                <input type="text" id="defaultAdminGroup" value="${config.defaultAdminGroup}" dir="ltr" style="text-align:left; font-family: monospace; font-size:13px;">
-                            </div>
+                            <div class="field-group" id="defaultAdminGroupContainer">
+                                <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
+                                </div>
                         </div>
                         <div class="card info">
                             <div class="card-header"><h3 style="color:var(--blue);"><i class="fas fa-info-circle"></i> ${t('تعليمات الاستخدام', 'Instructions')}</h3></div>
@@ -904,8 +903,11 @@ app.get('/', (req, res) => {
         </div>
 
         <script>
-            // Translation Dictionary accessible by JS
+            // Fixing variable scoping for browser JS context
             const currentLang = '${lang}';
+            const currentDir = '${dir}';
+            let fetchedGroups = [];
+
             const dict = {
                 'delete_confirm': '${t("هل أنت متأكد من رغبتك في حذف الإعدادات المخصصة لهذه المجموعة؟", "Are you sure you want to delete settings for this group?")}',
                 'logout_confirm': '${t("هل أنت متأكد من رغبتك في تسجيل الخروج من حساب واتساب؟ سيتم فصل البوت.", "Are you sure you want to log out of WhatsApp? The bot will disconnect.")}',
@@ -915,12 +917,12 @@ app.get('/', (req, res) => {
                 'conn_err': '${t("حدث خطأ في الاتصال بالخادم.", "Connection error.")}',
                 'save_success': '<i class="fas fa-check-circle"></i> ${t("تم الحفظ في قاعدة البيانات بنجاح!", "Saved to database successfully!")}',
                 'save_fail': '<i class="fas fa-times-circle"></i> ${t("فشل الحفظ، تحقق من السيرفر", "Save failed, check server")}',
-                // Group strings
                 'group': '${t("المجموعة", "Group")}',
-                'no_id': '${t("معرّف غير محدد", "ID Not Set")}',
+                'no_id': '${t("لم يتم التحديد", "Not Selected")}',
                 'delete': '${t("حذف", "Delete")}',
-                'target_group': '${t("معرّف المجموعة المستهدفة", "Target Group ID")}',
-                'admin_group': '${t("مجموعة الإدارة المخصصة (اتركه فارغاً للعامة)", "Custom Admin Group (leave empty for default)")}',
+                'target_group': '${t("اختر المجموعة المستهدفة", "Select Target Group")}',
+                'admin_group': '${t("مجموعة الإدارة (اتركه فارغاً للافتراضي)", "Admin Group (leave empty for default)")}',
+                'admin_group_label': '${t("اختر المجموعة لتلقي التنبيهات", "Select Group for Alerts")}',
                 'blocked_types': '${t("الأنواع الممنوعة قطعياً", "Absolute Blocked Types")}',
                 'block_action': '${t("إجراء المنع", "Block Action")}',
                 'act_del': '${t("حذف الرسالة فقط", "Delete Message Only")}',
@@ -946,8 +948,66 @@ app.get('/', (req, res) => {
                 'add': '${t("إضافة", "Add")}',
                 'ai_text': '${t("المشرف الذكي (AI) للنصوص", "AI Moderator for Text")}',
                 'ai_vision': '${t("تحليل الصور (Vision)", "Image Analysis (Vision)")}',
-                'direct_del': '${t("الحذف المباشر (تخطي التصويت)", "Direct Delete (Skip Poll)")}'
+                'direct_del': '${t("الحذف المباشر (تخطي التصويت)", "Direct Delete (Skip Poll)")}',
+                'select_group': '${t("اختر مجموعة...", "Select a Group...")}',
+                'default_setting': '${t("الاختيار الافتراضي (عام)", "Default (Global)")}'
             };
+
+            // Fetch groups from database on load
+            async function loadKnownGroups() {
+                try {
+                    const res = await fetch('/api/groups');
+                    fetchedGroups = await res.json();
+                    
+                    // Populate default admin group dropdown
+                    const defAdminContainer = document.getElementById('defaultAdminGroupContainer');
+                    if (defAdminContainer) {
+                        let defHTML = \`
+                            <label class="field-label" style="display:flex; justify-content:space-between; align-items:center;">
+                                <span>\${dict.admin_group_label}</span>
+                                <span style="cursor:pointer; color:var(--accent); font-size:14px;" onclick="loadKnownGroups()" title="Refresh Groups"><i class="fas fa-sync"></i></span>
+                            </label>
+                            <select id="defaultAdminGroup" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">
+                        \`;
+                        defHTML += \`<option value="">-- \${dict.select_group} --</option>\`;
+                        
+                        let defFound = false;
+                        fetchedGroups.forEach(g => {
+                            const sel = g.id === '${config.defaultAdminGroup}' ? 'selected' : '';
+                            if(sel) defFound = true;
+                            defHTML += \`<option value="\${g.id}" \${sel}>\${g.name}</option>\`;
+                        });
+
+                        // Fallback for an ID not in the database yet
+                        if ('${config.defaultAdminGroup}' && !defFound) {
+                            defHTML += \`<option value="${config.defaultAdminGroup}" selected>${config.defaultAdminGroup} (Unknown)</option>\`;
+                        }
+                        defHTML += \`</select>\`;
+                        
+                        defAdminContainer.innerHTML = defHTML;
+                    }
+                    
+                    renderGroups(); // Re-render custom groups with new options
+
+                } catch(e) {}
+            }
+
+            // HTML Generator for Select elements
+            function createGroupSelectHTML(selectedValue, onchangeCode, allowEmpty = false) {
+                let html = \`<select onchange="\${onchangeCode}" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">\`;
+                html += \`<option value="">\${allowEmpty ? '-- ' + dict.default_setting + ' --' : '-- ' + dict.select_group + ' --'}</option>\`;
+                let found = false;
+                fetchedGroups.forEach(g => {
+                    let sel = g.id === selectedValue ? 'selected' : '';
+                    if(sel) found = true;
+                    html += \`<option value="\${g.id}" \${sel}>\${g.name}</option>\`;
+                });
+                if (selectedValue && !found) {
+                    html += \`<option value="\${selectedValue}" selected>\${selectedValue} (Unknown)</option>\`;
+                }
+                html += \`</select>\`;
+                return html;
+            }
 
             function switchLanguage(checkbox) {
                 const newLang = checkbox.checked ? 'en' : 'ar';
@@ -997,7 +1057,7 @@ app.get('/', (req, res) => {
             }
 
             async function logoutBot() {
-                if(confirm(dict.logout_confirm)) {
+                if(confirm(dict.logout_confirm.replace(/<[^>]*>?/gm, ''))) {
                     document.getElementById('status-text').innerHTML = dict.logging_out;
                     document.getElementById('logoutBtn').style.display = 'none';
                     await fetch('/api/logout', { method: 'POST' });
@@ -1255,17 +1315,17 @@ app.get('/', (req, res) => {
                                 \${dict.group} \${groupIndex + 1}
                                 \${group.id ? \`<span class="group-id-badge">\${group.id.split('@')[0].slice(-8)}...</span>\` : \`<span style="color:var(--orange);font-size:12px;">\${dict.no_id}</span>\`}
                             </div>
-                            <button type="button" class="btn btn-danger btn-sm" onclick="removeGroup(\${groupIndex})">\${dict.delete}</button>
+                            <button type="button" class="btn btn-danger btn-sm" onclick="removeGroup(\${groupIndex})"><i class="fas fa-trash"></i> \${dict.delete}</button>
                         </div>
                         <div class="group-card-body">
 
                             <div class="field-group">
                                 <label class="field-label">\${dict.target_group}</label>
-                                <input type="text" placeholder="Ex: 123456789012345678" dir="ltr" style="text-align:left;font-family:monospace;" value="\${group.id}" onchange="updateGroupData(\${groupIndex}, 'id', this.value)">
+                                \${createGroupSelectHTML(group.id, \`updateGroupData(\${groupIndex}, 'id', this.value)\`, false)}
                             </div>
                             <div class="field-group">
                                 <label class="field-label">\${dict.admin_group}</label>
-                                <input type="text" placeholder="Ex: 966500000000" dir="ltr" style="text-align:left;font-family:monospace;" value="\${group.adminGroup}" onchange="updateGroupData(\${groupIndex}, 'adminGroup', this.value)">
+                                \${createGroupSelectHTML(group.adminGroup, \`updateGroupData(\${groupIndex}, 'adminGroup', this.value)\`, true)}
                             </div>
 
                             <div class="sub-panel red" style="margin-bottom:12px;">
@@ -1464,7 +1524,7 @@ app.get('/', (req, res) => {
 
             renderBlacklist();
             renderDefaultWords();
-            renderGroups();
+            loadKnownGroups();
 
             setInterval(async () => {
                 try {
@@ -1500,22 +1560,9 @@ app.get('/', (req, res) => {
             }, 2000);
 
             async function saveConfig() {
-                // Smart ID Auto-formatter to prevent group linking failure
-                function sanitizeId(val) {
-                    if (!val) return '';
-                    val = val.trim();
-                    if (val && !val.includes('@')) {
-                        if (val.includes('-') || val.length > 14) val += '@g.us';
-                        else val += '@c.us';
-                    }
-                    return val;
-                }
-
                 let finalGroupsObj = {};
                 groupsArr.forEach(g => { 
                     if(g.id) {
-                        g.id = sanitizeId(g.id);
-                        if(g.adminGroup) g.adminGroup = sanitizeId(g.adminGroup);
                         finalGroupsObj[g.id] = g; 
                     } 
                 });
@@ -1528,6 +1575,10 @@ app.get('/', (req, res) => {
                     const lim = document.getElementById('global_spam_limit_' + t.id);
                     gSpamLimits[t.id] = parseInt(lim ? lim.value : 5) || 5;
                 });
+
+                let defAdmin = '';
+                const defAdminEl = document.getElementById('defaultAdminGroup');
+                if (defAdminEl) defAdmin = defAdminEl.value;
 
                 const newConfig = {
                     enableAntiSpam: document.getElementById('enableAntiSpam').checked,
@@ -1545,7 +1596,7 @@ app.get('/', (req, res) => {
                     aiPrompt: document.getElementById('aiPromptText').value.trim(),
                     ollamaUrl: document.getElementById('ollamaUrl').value.trim(),
                     ollamaModel: document.getElementById('ollamaModel').value.trim(),
-                    defaultAdminGroup: sanitizeId(document.getElementById('defaultAdminGroup').value),
+                    defaultAdminGroup: defAdmin,
                     defaultWords: defaultWordsArr,
                     groupsConfig: finalGroupsObj
                 };
@@ -1558,7 +1609,7 @@ app.get('/', (req, res) => {
                 
                 if(res.ok) {
                     showToast(dict.save_success);
-                    setTimeout(() => window.location.reload(), 800); // Reload so UI reflects the appended @g.us visually
+                    setTimeout(() => window.location.reload(), 800);
                 } else showToast(dict.save_fail);
             }
 
@@ -1592,6 +1643,15 @@ app.get('/', (req, res) => {
 });
 
 // 🚀 API Endpoints
+app.get('/api/groups', (req, res) => {
+    try {
+        const groups = db.prepare('SELECT * FROM whatsapp_groups').all();
+        res.json(groups);
+    } catch(e) {
+        res.json([]);
+    }
+});
+
 app.post('/api/blacklist/add', (req, res) => {
     if(req.body.number) {
         try {
@@ -1715,13 +1775,18 @@ client.on('ready', async () => {
     currentQR = '';
     console.log('تم ربط حساب واتساب بنجاح!');
     
+    // Sync groups to DB
     try {
         const chats = await client.getChats();
-        let groupsList = '--- قائمة المجموعات ---\n\n';
-        chats.filter(c => c.isGroup).forEach(c => {
-            groupsList += `الاسم: ${c.name}\nالمعرف: ${c.id._serialized}\n-----------------------\n`;
+        const insertGrp = db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)');
+        
+        const syncTx = db.transaction((chatList) => {
+            for (const c of chatList) {
+                if (c.isGroup) insertGrp.run(c.id._serialized, c.name);
+            }
         });
-        fs.writeFileSync('groups_list.txt', groupsList);
+        syncTx(chats);
+        console.log('[معلومة] تمت مزامنة المجموعات في قاعدة البيانات.');
     } catch (error) {}
 });
 
@@ -1737,16 +1802,21 @@ client.on('disconnected', async (reason) => {
     setTimeout(() => { client.initialize(); }, 3000);
 });
 
-const pendingBans = new Map();
-
+// Update group in DB when joining a new one
 client.on('group_join', async (notification) => {
     try {
         const chat = await notification.getChat();
         const groupId = chat.id._serialized;
+        
+        // Add newly joined group to the database
+        try {
+            db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)').run(groupId, chat.name);
+        } catch(e) {}
+
         const groupConfig = config.groupsConfig[groupId];
         
         let isBlacklistEnabledForGroup = config.enableBlacklist;
-        let targetAdminGroup = config.defaultAdminGroup; // BUG FIX
+        let targetAdminGroup = config.defaultAdminGroup;
         
         if (groupConfig) {
             if (typeof groupConfig.enableBlacklist !== 'undefined') {
@@ -1799,6 +1869,16 @@ client.on('group_join', async (notification) => {
     } catch (error) {}
 });
 
+// Sync group name changes to DB
+client.on('group_update', async (notification) => {
+    try {
+        const chat = await notification.getChat();
+        db.prepare('UPDATE whatsapp_groups SET name = ? WHERE id = ?').run(chat.name, chat.id._serialized);
+    } catch(e) {}
+});
+
+const pendingBans = new Map();
+
 client.on('message', async msg => {
     try {
         const chat = await msg.getChat();
@@ -1845,7 +1925,7 @@ client.on('message', async msg => {
             let blockedAction = config.blockedAction;
             let forbiddenWords = [...config.defaultWords];
 
-            // BUG FIX: Strictly ensure the admin group exists and has no spaces.
+            // Strictly ensure the admin group exists and has no spaces.
             if (groupConfig) {
                 targetAdminGroup = (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') ? groupConfig.adminGroup.trim() : config.defaultAdminGroup;
                 
