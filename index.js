@@ -1238,34 +1238,38 @@ app.get('/', (req, res) => {
                                 </select>
                             </div>
 
-                            <div class="toggle-row warning" style="margin-bottom:0; border-radius:\${group.enableAntiSpam ? '10px 10px 0 0' : '10px'};">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enableAntiSpam ? 'checked' : ''} onchange="toggleGroupPanel(\${groupIndex}, 'spam', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label warning">\${dict.anti_spam}<small>\${dict.spam_desc}</small></div>
+                            <div class="card warning">
+                                <div class="toggle-row warning" style="margin-bottom:0; border-radius:10px;">
+                                    <div class="toggle-left">
+                                        <label class="switch">
+                                            <input type="checkbox" \${group.enableAntiSpam ? 'checked' : ''} onchange="toggleGroupSpamOptions(\${groupIndex}, this.checked)">
+                                            <span class="slider"></span>
+                                        </label>
+                                        <div class="toggle-label warning">
+                                            \${dict.anti_spam}
+                                            <small>\${dict.spam_desc}</small>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                            <div id="group_spam_panel_\${groupIndex}" style="
-                                overflow:hidden;
-                                max-height:\${group.enableAntiSpam ? '600px' : '0px'};
-                                opacity:\${group.enableAntiSpam ? '1' : '0'};
-                                transition:max-height 0.45s ease, opacity 0.35s ease, margin-bottom 0.35s ease;
-                                margin-bottom:\${group.enableAntiSpam ? '12px' : '0px'};
-                            ">
-                                <div class="sub-panel orange" style="border-top:none; border-radius:0 0 10px 10px;">
-                                    <h4 style="color:var(--orange);">\${dict.limits_15s}</h4>
-                                    <div class="limit-grid">\${spamLimitGrid}</div>
-                                    <div class="field-row" style="border-top:1px dashed rgba(255,171,64,0.3);padding-top:12px;margin-top:4px;">
-                                        <div>
-                                            <label class="field-label">\${dict.text_dup}</label>
-                                            <input type="number" value="\${group.spamDuplicateLimit}" min="2" max="15" onchange="updateGroupData(\${groupIndex}, 'spamDuplicateLimit', parseInt(this.value))">
+
+                                <div id="group_spam_panel_\${groupIndex}" style="overflow: hidden; max-height: \${group.enableAntiSpam ? '800px' : '0px'}; opacity: \${group.enableAntiSpam ? '1' : '0'}; transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease; margin-top: \${group.enableAntiSpam ? '20px' : '0px'};">
+                                    <div style="border-top: 1px dashed rgba(255,171,64,0.3); padding-top: 20px;">
+                                        <div class="field-row" style="margin-bottom:20px;">
+                                            <div class="field-group" style="margin-bottom:0;">
+                                                <label class="field-label">\${dict.action}</label>
+                                                <select onchange="updateGroupData(\${groupIndex}, 'spamAction', this.value)">
+                                                    <option value="poll" \${group.spamAction === 'poll' ? 'selected' : ''}>\${dict.poll}</option>
+                                                    <option value="auto" \${group.spamAction === 'auto' ? 'selected' : ''}>\${dict.auto_kick}</option>
+                                                </select>
+                                            </div>
+                                            <div class="field-group" style="margin-bottom:0;">
+                                                <label class="field-label">\${dict.text_dup}</label>
+                                                <input type="number" value="\${group.spamDuplicateLimit}" min="2" max="15" onchange="updateGroupData(\${groupIndex}, 'spamDuplicateLimit', parseInt(this.value))">
+                                            </div>
                                         </div>
-                                        <div>
-                                            <label class="field-label">\${dict.action}</label>
-                                            <select onchange="updateGroupData(\${groupIndex}, 'spamAction', this.value)">
-                                                <option value="poll" \${group.spamAction === 'poll' ? 'selected' : ''}>\${dict.poll}</option>
-                                                <option value="auto" \${group.spamAction === 'auto' ? 'selected' : ''}>\${dict.auto_kick}</option>
-                                            </select>
-                                        </div>
+                                        <label class="field-label" style="margin-bottom:12px;">⏱️ \${dict.limits_15s}</label>
+                                        <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">\${dict.limit_notice}</p>
+                                        <div class="limit-grid">\${spamLimitGrid}</div>
                                     </div>
                                 </div>
                             </div>
