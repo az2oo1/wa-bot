@@ -19,7 +19,7 @@ function saveLog(type, args) {
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
-// 🗄️ تهيئة قاعدة البيانات
+// <i class="fas fa-database"></i> تهيئة قاعدة البيانات
 const db = new Database('./bot_data.sqlite');
 db.pragma('journal_mode = WAL'); 
 
@@ -191,12 +191,12 @@ app.get('/', (req, res) => {
 
     // Media Types with Translation
     const mediaTypesMeta = [
-        { id: 'text', icon: '📝', name: t('نصوص', 'Text') },
-        { id: 'image', icon: '🖼️', name: t('صور', 'Images') },
-        { id: 'video', icon: '🎥', name: t('فيديو', 'Videos') },
-        { id: 'audio', icon: '🎵', name: t('صوتيات', 'Audio') },
-        { id: 'document', icon: '📄', name: t('ملفات', 'Documents') },
-        { id: 'sticker', icon: '👾', name: t('ملصقات', 'Stickers') }
+        { id: 'text', icon: '<i class="fas fa-file-alt"></i>', name: t('نصوص', 'Text') },
+        { id: 'image', icon: '<i class="fas fa-image"></i>', name: t('صور', 'Images') },
+        { id: 'video', icon: '<i class="fas fa-video"></i>', name: t('فيديو', 'Videos') },
+        { id: 'audio', icon: '<i class="fas fa-music"></i>', name: t('صوتيات', 'Audio') },
+        { id: 'document', icon: '<i class="fas fa-file"></i>', name: t('ملفات', 'Documents') },
+        { id: 'sticker', icon: '<i class="fas fa-smile"></i>', name: t('ملصقات', 'Stickers') }
     ];
 
     const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
@@ -211,6 +211,7 @@ app.get('/', (req, res) => {
         <title>${t('لوحة تحكم المشرف الآلي', 'Auto Mod Dashboard')}</title>
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
         <style>
             * { box-sizing: border-box; margin: 0; padding: 0; }
             :root {
@@ -542,31 +543,31 @@ app.get('/', (req, res) => {
     <body>
         <nav class="sidebar" id="sidebar">
             <div class="sidebar-logo">
-                <div class="logo-icon">🤖</div>
+                <div class="logo-icon"><i class="fas fa-robot"></i></div>
                 <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V6', 'Dashboard V6')}</small></div>
             </div>
 
             <div class="nav-section">${t('الرئيسية', 'Main')}</div>
             <button class="nav-item active" onclick="showPage('page-status', this)">
-                <span class="nav-icon">📡</span> ${t('حالة الاتصال', 'Connection Status')}
+                <span class="nav-icon"><i class="fas fa-signal"></i></span> ${t('حالة الاتصال', 'Connection Status')}
             </button>
             <button class="nav-item" onclick="showPage('page-blacklist', this)">
-                <span class="nav-icon">🚫</span> ${t('القائمة السوداء', 'Blacklist')}
+                <span class="nav-icon"><i class="fas fa-ban"></i></span> ${t('القائمة السوداء', 'Blacklist')}
                 <span class="nav-badge" id="blacklist-count">0</span>
             </button>
 
             <div class="nav-section">${t('الإعدادات', 'Settings')}</div>
             <button class="nav-item" onclick="showPage('page-general', this)">
-                <span class="nav-icon">⚙️</span> ${t('الإعدادات العامة', 'General Settings')}
+                <span class="nav-icon"><i class="fas fa-cog"></i></span> ${t('الإعدادات العامة', 'General Settings')}
             </button>
             <button class="nav-item" onclick="showPage('page-spam', this)">
-                <span class="nav-icon">🛡️</span> ${t('مكافحة الإزعاج', 'Anti-Spam')}
+                <span class="nav-icon"><i class="fas fa-shield-alt"></i></span> ${t('مكافحة الإزعاج', 'Anti-Spam')}
             </button>
             <button class="nav-item" onclick="showPage('page-media', this)">
-                <span class="nav-icon">🛑</span> ${t('فلتر الوسائط', 'Media Filter')}
+                <span class="nav-icon"><i class="fas fa-stop-circle"></i></span> ${t('فلتر الوسائط', 'Media Filter')}
             </button>
             <button class="nav-item" onclick="showPage('page-ai', this)">
-                <span class="nav-icon">🧠</span> ${t('الذكاء الاصطناعي', 'AI Moderator')}
+                <span class="nav-icon"><i class="fas fa-brain"></i></span> ${t('الذكاء الاصطناعي', 'AI Moderator')}
             </button>
             <button class="nav-item" onclick="showPage('page-groups', this)">
                 <span class="nav-icon">👥</span> ${t('المجموعات المخصصة', 'Custom Groups')}
@@ -579,7 +580,7 @@ app.get('/', (req, res) => {
 
             <div class="sidebar-footer">
                 <button id="logoutBtn" onclick="logoutBot()" style="display:none; background: var(--red-dim); border-color: rgba(248,81,73,0.4); color: var(--red);">🚪 ${t('قطع الاتصال', 'Disconnect')}</button>
-                <button onclick="saveConfig()" style="background: var(--accent-dim); border-color: rgba(0,230,118,0.4); color: var(--accent); font-weight:700;">💾 ${t('حفظ', 'Save')}</button>
+                <button onclick="saveConfig()" style="background: var(--accent-dim); border-color: rgba(0,230,118,0.4); color: var(--accent); font-weight:700;"><i class="fas fa-save"></i> ${t('حفظ', 'Save')}</button>
             </div>
         </nav>
 
@@ -633,13 +634,13 @@ app.get('/', (req, res) => {
                         <div class="card success">
                             <div class="card-header"><h3 style="color:var(--accent);">📊 ${t('حالة النظام', 'System Status')}</h3></div>
                             <div style="font-size:16px; color:var(--text-muted); line-height:2.2;">
-                                <div>🤖 <strong style="color:var(--text);">${t('البوت:', 'Bot:')}</strong> <span id="status-text-detail">...</span></div>
-                                <div>🗄️ <strong style="color:var(--text);">${t('قاعدة البيانات:', 'Database:')}</strong> <span style="color:var(--accent);">${t('متصلة ✓', 'Connected ✓')}</span></div>
-                                <div>🌐 <strong style="color:var(--text);">${t('المنفذ:', 'Port:')}</strong> <span style="color:var(--accent);">3000 ✓</span></div>
+                                <div><i class="fas fa-robot"></i> <strong style="color:var(--text);">${t('البوت:', 'Bot:')}</strong> <span id="status-text-detail">...</span></div>
+                                <div><i class="fas fa-database"></i> <strong style="color:var(--text);">${t('قاعدة البيانات:', 'Database:')}</strong> <span style="color:var(--accent);">${t('متصلة ✓', 'Connected ✓')}</span></div>
+                                <div><i class="fas fa-globe"></i> <strong style="color:var(--text);">${t('المنفذ:', 'Port:')}</strong> <span style="color:var(--accent);">3000 ✓</span></div>
                             </div>
                         </div>
                         <div class="card">
-                            <div class="card-header"><h3>🔗 ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
+                            <div class="card-header"><h3><i class="fas fa-link"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
                             <div class="field-group">
                                 <label class="field-label">${t('معرّف المجموعة (لتلقي التنبيهات)', 'Group ID (for alerts)')}</label>
                                 <input type="text" id="defaultAdminGroup" value="${config.defaultAdminGroup}" dir="ltr" style="text-align:left; font-family: monospace; font-size:13px;">
@@ -704,7 +705,7 @@ app.get('/', (req, res) => {
 
             <div class="page" id="page-general">
                 <div class="page-header">
-                    <h2>⚙️ ${t('الإعدادات العامة', 'General Settings')}</h2>
+                    <h2><i class="fas fa-cog"></i> ${t('الإعدادات العامة', 'General Settings')}</h2>
                     <p>${t('تطبّق على جميع المجموعات التي لا تملك إعدادات مخصصة', 'Applies to all groups without custom settings')}</p>
                 </div>
                 <div class="card-grid">
@@ -748,7 +749,7 @@ app.get('/', (req, res) => {
 
             <div class="page" id="page-spam">
                 <div class="page-header">
-                    <h2>🛡️ ${t('مكافحة الإزعاج', 'Anti-Spam')}</h2>
+                    <h2><i class="fas fa-shield-alt"></i> ${t('مكافحة الإزعاج', 'Anti-Spam')}</h2>
                     <p>${t('رصد الرسائل المتكررة خلال نافذة 15 ثانية', 'Monitor repeated messages within a 15-second window')}</p>
                 </div>
 
@@ -772,8 +773,8 @@ app.get('/', (req, res) => {
                                 <div class="field-group" style="margin-bottom:0;">
                                     <label class="field-label">${t('الإجراء عند الرصد', 'Action on Detection')}</label>
                                     <select id="spamAction">
-                                        <option value="poll" ${config.spamAction === 'poll' ? 'selected' : ''}>🗳️ ${t('تصويت للإدارة', 'Admin Poll')}</option>
-                                        <option value="auto" ${config.spamAction === 'auto' ? 'selected' : ''}>🔨 ${t('طرد تلقائي وحظر', 'Auto Kick & Ban')}</option>
+                                        <option value="poll" ${config.spamAction === 'poll' ? 'selected' : ''}><i class="fas fa-poll"></i> ${t('تصويت للإدارة', 'Admin Poll')}</option>
+                                        <option value="auto" ${config.spamAction === 'auto' ? 'selected' : ''}><i class="fas fa-hammer"></i> ${t('طرد تلقائي وحظر', 'Auto Kick & Ban')}</option>
                                     </select>
                                 </div>
                                 <div class="field-group" style="margin-bottom:0;">
@@ -781,7 +782,7 @@ app.get('/', (req, res) => {
                                     <input type="number" id="spamDuplicateLimit" value="${config.spamDuplicateLimit}" min="2" max="15" placeholder="3">
                                 </div>
                             </div>
-                            <label class="field-label" style="margin-bottom:12px;">⏱️ ${t('حدود كل نوع خلال 15 ثانية', 'Limits per media type (15s)')}</label>
+                            <label class="field-label" style="margin-bottom:12px;"><i class="fas fa-hourglass-end"></i> ${t('حدود كل نوع خلال 15 ثانية', 'Limits per media type (15s)')}</label>
                             <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">${t('فعّل ✓ النوع المراد مراقبته، ثم حدد الحد الأقصى للرسائل المسموح بها', 'Check ✓ the type to monitor, then set max allowed messages')}</p>
                             <div class="limit-grid">
                                 ${mediaTypesMeta.map(tData => `
@@ -798,7 +799,7 @@ app.get('/', (req, res) => {
 
             <div class="page" id="page-media">
                 <div class="page-header">
-                    <h2>🛑 ${t('فلتر الوسائط', 'Media Filter')}</h2>
+                    <h2><i class="fas fa-stop-circle"></i> ${t('فلتر الوسائط', 'Media Filter')}</h2>
                     <p>${t('منع قطعي لأنواع محددة — الحذف يحدث فوراً بغض النظر عن أي إعداد آخر', 'Absolute ban for specific media types — deleted instantly regardless of other settings')}</p>
                 </div>
                 <div class="card-grid">
@@ -817,16 +818,16 @@ app.get('/', (req, res) => {
                         <div class="field-group">
                             <label class="field-label">${t('ماذا يفعل البوت عند إرسال نوع ممنوع؟', 'What should the bot do when a blocked type is sent?')}</label>
                             <select id="globalBlockedAction" style="font-size:15px; padding:14px;">
-                                <option value="delete" ${config.blockedAction === 'delete' ? 'selected' : ''}>🗑️ ${t('حذف الرسالة فقط (بصمت)', 'Delete Message Only (Silent)')}</option>
-                                <option value="poll" ${config.blockedAction === 'poll' ? 'selected' : ''}>🗳️ ${t('حذف + فتح تصويت للإدارة', 'Delete + Open Admin Poll')}</option>
-                                <option value="auto" ${config.blockedAction === 'auto' ? 'selected' : ''}>🔨 ${t('حذف + طرد تلقائي وحظر', 'Delete + Auto Kick & Ban')}</option>
+                                <option value="delete" ${config.blockedAction === 'delete' ? 'selected' : ''}><i class="fas fa-trash"></i> ${t('حذف الرسالة فقط (بصمت)', 'Delete Message Only (Silent)')}</option>
+                                <option value="poll" ${config.blockedAction === 'poll' ? 'selected' : ''}><i class="fas fa-poll"></i> ${t('حذف + فتح تصويت للإدارة', 'Delete + Open Admin Poll')}</option>
+                                <option value="auto" ${config.blockedAction === 'auto' ? 'selected' : ''}><i class="fas fa-hammer"></i> ${t('حذف + طرد تلقائي وحظر', 'Delete + Auto Kick & Ban')}</option>
                             </select>
                         </div>
                         <div style="margin-top:16px; padding:16px; background:var(--red-dim); border-radius:10px; border:1px solid rgba(255,82,82,0.2);">
                             <div style="font-size:13px; color:var(--text-muted); line-height:2.2;">
-                                <div>🗑️ <strong style="color:var(--text);">${t('حذف فقط:', 'Delete Only:')}</strong> ${t('صامت، لا يعلم المرسل', 'Silent, sender is unaware')}</div>
-                                <div>🗳️ <strong style="color:var(--text);">${t('تصويت:', 'Poll:')}</strong> ${t('تنبيه الإدارة لاتخاذ قرار', 'Alert admins to decide')}</div>
-                                <div>🔨 <strong style="color:var(--text);">${t('طرد تلقائي:', 'Auto Kick:')}</strong> ${t('أقوى إجراء، حظر فوري', 'Strictest action, instant ban')}</div>
+                                <div><i class="fas fa-trash"></i> <strong style="color:var(--text);">${t('حذف فقط:', 'Delete Only:')}</strong> ${t('صامت، لا يعلم المرسل', 'Silent, sender is unaware')}</div>
+                                <div><i class="fas fa-poll"></i> <strong style="color:var(--text);">${t('تصويت:', 'Poll:')}</strong> ${t('تنبيه الإدارة لاتخاذ قرار', 'Alert admins to decide')}</div>
+                                <div><i class="fas fa-hammer"></i> <strong style="color:var(--text);">${t('طرد تلقائي:', 'Auto Kick:')}</strong> ${t('أقوى إجراء، حظر فوري', 'Strictest action, instant ban')}</div>
                             </div>
                         </div>
                     </div>
@@ -841,8 +842,8 @@ app.get('/', (req, res) => {
                 <div class="card-grid">
                     <div class="card info">
                         <div class="card-header">
-                            <h3 style="color:var(--blue);">🔌 ${t('تفعيل الذكاء الاصطناعي', 'Enable AI')}</h3>
-                            <button type="button" class="btn btn-blue btn-sm" onclick="openOllamaModal()">⚙️ ${t('إعداد الخادم', 'Server Setup')}</button>
+                            <h3 style="color:var(--blue);"><i class="fas fa-plug"></i> ${t('تفعيل الذكاء الاصطناعي', 'Enable AI')}</h3>
+                            <button type="button" class="btn btn-blue btn-sm" onclick="openOllamaModal()"><i class="fas fa-cog"></i> ${t('إعداد الخادم', 'Server Setup')}</button>
                         </div>
                         <div class="toggle-row blue" style="margin-bottom:12px;">
                             <div class="toggle-left">
@@ -884,7 +885,7 @@ app.get('/', (req, res) => {
         </div><div id="ollamaModal" class="modal">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3 style="color:var(--blue);">🔗 ${t('إعدادات خادم Ollama', 'Ollama Server Settings')}</h3>
+                    <h3 style="color:var(--blue);"><i class="fas fa-link"></i> ${t('إعدادات خادم Ollama', 'Ollama Server Settings')}</h3>
                     <button class="close-modal" onclick="closeOllamaModal()">×</button>
                 </div>
                 <div class="field-group">
@@ -928,18 +929,18 @@ app.get('/', (req, res) => {
                 'delete': '${t("حذف", "Delete")}',
                 'target_group': '${t("معرّف المجموعة المستهدفة", "Target Group ID")}',
                 'admin_group': '${t("مجموعة الإدارة المخصصة (اتركه فارغاً للعامة)", "Custom Admin Group (leave empty for default)")}',
-                'blocked_types': '${t("🛑 الأنواع الممنوعة قطعياً", "🛑 Absolute Blocked Types")}',
+                'blocked_types': '${t("الأنواع الممنوعة قطعياً", "Absolute Blocked Types")}',
                 'block_action': '${t("إجراء المنع", "Block Action")}',
                 'act_del': '${t("حذف الرسالة فقط", "Delete Message Only")}',
                 'act_poll': '${t("حذف + تصويت للإدارة", "Delete + Admin Poll")}',
                 'act_auto': '${t("حذف + طرد تلقائي", "Delete + Auto Kick")}',
                 'anti_spam': '${t("مكافحة الإزعاج (Anti-Spam)", "Anti-Spam")}',
                 'spam_desc': '${t("رصد الرسائل المتكررة خلال 15 ثانية", "Detect repeated messages within 15s")}',
-                'limits_15s': '${t("⏱️ حدود كل نوع (15 ثانية)", "⏱️ Type Limits (15s)")}',
+                'limits_15s': '${t("حدود كل نوع (15 ثانية)", "Type Limits (15s)")}',
                 'text_dup': '${t("تكرار النص", "Text Dup Limit")}',
                 'action': '${t("الإجراء", "Action")}',
-                'poll': '${t("🗳️ تصويت للإدارة", "🗳️ Admin Poll")}',
-                'auto_kick': '${t("🔨 طرد تلقائي", "🔨 Auto Kick")}',
+                'poll': '${t("تصويت للإدارة", "Admin Poll")}',
+                'auto_kick': '${t("طرد تلقائي", "Auto Kick")}',
                 'welcome_msg': '${t("رسالة ترحيبية عند الانضمام", "Welcome Message on Join")}',
                 'welcome_desc': '${t("يُرسلها البوت لكل عضو جديد", "Sent by bot to new members")}',
                 'msg_text': '${t("نص الرسالة ({user} للمنشن)", "Message Text ({user} for mention)")}',
