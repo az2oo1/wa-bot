@@ -1186,7 +1186,7 @@ app.get('/', (req, res) => {
             }
 
             async function purgeBlacklisted() {
-                if(!confirm(dict.purge_warn.replace(/<[^>]*>?/gm, ''))) return; // Strip HTML for confirm dialog
+                if(!confirm(dict.purge_warn.replace(/<[^>]*>?/gm, ''))) return;
                 const btn = document.getElementById('purgeBtn');
                 const originalHTML = btn.innerHTML;
                 btn.innerHTML = dict.purging;
@@ -1261,11 +1261,11 @@ app.get('/', (req, res) => {
 
                             <div class="field-group">
                                 <label class="field-label">\${dict.target_group}</label>
-                                <input type="text" placeholder="Ex: 120363000000000000@g.us" dir="ltr" style="text-align:left;font-family:monospace;" value="\${group.id}" onchange="updateGroupData(\${groupIndex}, 'id', this.value)">
+                                <input type="text" placeholder="Ex: 123456789012345678" dir="ltr" style="text-align:left;font-family:monospace;" value="\${group.id}" onchange="updateGroupData(\${groupIndex}, 'id', this.value)">
                             </div>
                             <div class="field-group">
                                 <label class="field-label">\${dict.admin_group}</label>
-                                <input type="text" dir="ltr" style="text-align:left;font-family:monospace;" value="\${group.adminGroup}" onchange="updateGroupData(\${groupIndex}, 'adminGroup', this.value)">
+                                <input type="text" placeholder="Ex: 966500000000" dir="ltr" style="text-align:left;font-family:monospace;" value="\${group.adminGroup}" onchange="updateGroupData(\${groupIndex}, 'adminGroup', this.value)">
                             </div>
 
                             <div class="sub-panel red" style="margin-bottom:12px;">
@@ -1500,8 +1500,25 @@ app.get('/', (req, res) => {
             }, 2000);
 
             async function saveConfig() {
+                // Smart ID Auto-formatter to prevent group linking failure
+                function sanitizeId(val) {
+                    if (!val) return '';
+                    val = val.trim();
+                    if (val && !val.includes('@')) {
+                        if (val.includes('-') || val.length > 14) val += '@g.us';
+                        else val += '@c.us';
+                    }
+                    return val;
+                }
+
                 let finalGroupsObj = {};
-                groupsArr.forEach(g => { if(g.id) finalGroupsObj[g.id] = g; });
+                groupsArr.forEach(g => { 
+                    if(g.id) {
+                        g.id = sanitizeId(g.id);
+                        if(g.adminGroup) g.adminGroup = sanitizeId(g.adminGroup);
+                        finalGroupsObj[g.id] = g; 
+                    } 
+                });
 
                 const gSpamTypes = [];
                 const gSpamLimits = {};
@@ -1528,7 +1545,7 @@ app.get('/', (req, res) => {
                     aiPrompt: document.getElementById('aiPromptText').value.trim(),
                     ollamaUrl: document.getElementById('ollamaUrl').value.trim(),
                     ollamaModel: document.getElementById('ollamaModel').value.trim(),
-                    defaultAdminGroup: document.getElementById('defaultAdminGroup').value.trim(),
+                    defaultAdminGroup: sanitizeId(document.getElementById('defaultAdminGroup').value),
                     defaultWords: defaultWordsArr,
                     groupsConfig: finalGroupsObj
                 };
@@ -1539,8 +1556,10 @@ app.get('/', (req, res) => {
                     body: JSON.stringify(newConfig)
                 });
                 
-                if(res.ok) showToast(dict.save_success);
-                else showToast(dict.save_fail);
+                if(res.ok) {
+                    showToast(dict.save_success);
+                    setTimeout(() => window.location.reload(), 800); // Reload so UI reflects the appended @g.us visually
+                } else showToast(dict.save_fail);
             }
 
             document.getElementById('configForm').onsubmit = async (e) => {
@@ -1727,8 +1746,15 @@ client.on('group_join', async (notification) => {
         const groupConfig = config.groupsConfig[groupId];
         
         let isBlacklistEnabledForGroup = config.enableBlacklist;
-        if (groupConfig && typeof groupConfig.enableBlacklist !== 'undefined') {
-            isBlacklistEnabledForGroup = groupConfig.enableBlacklist;
+        let targetAdminGroup = config.defaultAdminGroup; // BUG FIX
+        
+        if (groupConfig) {
+            if (typeof groupConfig.enableBlacklist !== 'undefined') {
+                isBlacklistEnabledForGroup = groupConfig.enableBlacklist;
+            }
+            if (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') {
+                targetAdminGroup = groupConfig.adminGroup.trim();
+            }
         }
 
         for (const participantId of notification.recipientIds) {
@@ -1754,7 +1780,6 @@ client.on('group_join', async (notification) => {
                     setTimeout(async () => {
                         try {
                             await chat.removeParticipants([participantId]);
-                            const targetAdminGroup = groupConfig?.adminGroup || config.defaultAdminGroup;
                             const reportText = `🛡️ *حماية (قائمة سوداء)*\nحاول رقم محظور الدخول لمجموعة "${chat.name}" وتم طرده.\nالرقم: @${cleanJoinedId.split('@')[0]}`;
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanJoinedId] });
                         } catch(err) {}
@@ -1820,8 +1845,10 @@ client.on('message', async msg => {
             let blockedAction = config.blockedAction;
             let forbiddenWords = [...config.defaultWords];
 
+            // BUG FIX: Strictly ensure the admin group exists and has no spaces.
             if (groupConfig) {
-                targetAdminGroup = groupConfig.adminGroup || config.defaultAdminGroup;
+                targetAdminGroup = (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') ? groupConfig.adminGroup.trim() : config.defaultAdminGroup;
+                
                 if (typeof groupConfig.enableWordFilter !== 'undefined') isWordFilterEnabled = groupConfig.enableWordFilter;
                 if (typeof groupConfig.enableAIFilter !== 'undefined') isAIFilterEnabled = groupConfig.enableAIFilter;
                 if (typeof groupConfig.enableAIMedia !== 'undefined') isAIMediaEnabled = groupConfig.enableAIMedia;
