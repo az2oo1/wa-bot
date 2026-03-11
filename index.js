@@ -1024,6 +1024,54 @@ app.get('/', (req, res) => {
                 }
             }
 
+            function toggleGroupSpamOptions(groupIndex, enabled) {
+                groupsArr[groupIndex].enableAntiSpam = enabled;
+                const panel = document.getElementById(\`group_spam_panel_\${groupIndex}\`);
+                if (!panel) return;
+
+                if (enabled) {
+                    panel.style.maxHeight = '800px';
+                    panel.style.opacity = '1';
+                    panel.style.marginTop = '20px';
+                } else {
+                    panel.style.maxHeight = '0px';
+                    panel.style.opacity = '0';
+                    panel.style.marginTop = '0px';
+                }
+            }
+
+            function toggleGroupWelcomeOptions(groupIndex, enabled) {
+                groupsArr[groupIndex].enableWelcomeMessage = enabled;
+                const panel = document.getElementById(\`group_welcome_panel_\${groupIndex}\`);
+                if (!panel) return;
+
+                if (enabled) {
+                    panel.style.maxHeight = '200px';
+                    panel.style.opacity = '1';
+                    panel.style.marginTop = '20px';
+                } else {
+                    panel.style.maxHeight = '0px';
+                    panel.style.opacity = '0';
+                    panel.style.marginTop = '0px';
+                }
+            }
+
+            function toggleGroupWordFilterOptions(groupIndex, enabled) {
+                groupsArr[groupIndex].enableWordFilter = enabled;
+                const panel = document.getElementById(\`group_words_panel_\${groupIndex}\`);
+                if (!panel) return;
+
+                if (enabled) {
+                    panel.style.maxHeight = '600px';
+                    panel.style.opacity = '1';
+                    panel.style.marginTop = '20px';
+                } else {
+                    panel.style.maxHeight = '0px';
+                    panel.style.opacity = '0';
+                    panel.style.marginTop = '0px';
+                }
+            }
+
             const pageTitles = {
                 'page-status': '${t("حالة الاتصال", "Connection Status")}',
                 'page-blacklist': '${t("القائمة السوداء", "Blacklist")}',
@@ -1274,22 +1322,25 @@ app.get('/', (req, res) => {
                                 </div>
                             </div>
 
-                            <div class="toggle-row green" style="margin-bottom:0; border-radius:\${group.enableWelcomeMessage ? '10px 10px 0 0' : '10px'};">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enableWelcomeMessage ? 'checked' : ''} onchange="toggleGroupPanel(\${groupIndex}, 'welcome', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label green">\${dict.welcome_msg}<small>\${dict.welcome_desc}</small></div>
+                            <div class="card green">
+                                <div class="toggle-row green" style="margin-bottom:0; border-radius:10px;">
+                                    <div class="toggle-left">
+                                        <label class="switch">
+                                            <input type="checkbox" \${group.enableWelcomeMessage ? 'checked' : ''} onchange="toggleGroupWelcomeOptions(\${groupIndex}, this.checked)">
+                                            <span class="slider"></span>
+                                        </label>
+                                        <div class="toggle-label green">
+                                            \${dict.welcome_msg}
+                                            <small>\${dict.welcome_desc}</small>
+                                        </div>
+                                    </div>
                                 </div>
-                            </div>
-                            <div id="group_welcome_panel_\${groupIndex}" style="
-                                overflow:hidden;
-                                max-height:\${group.enableWelcomeMessage ? '200px' : '0px'};
-                                opacity:\${group.enableWelcomeMessage ? '1' : '0'};
-                                transition:max-height 0.45s ease, opacity 0.35s ease, margin-bottom 0.35s ease;
-                                margin-bottom:\${group.enableWelcomeMessage ? '12px' : '0px'};
-                            ">
-                                <div class="sub-panel" style="border-top:none; border-radius:0 0 10px 10px; border-color:rgba(100,200,120,0.3);">
-                                    <label class="field-label">\${dict.msg_text}</label>
-                                    <textarea rows="2" onchange="updateGroupData(\${groupIndex}, 'welcomeMessageText', this.value)">\${group.welcomeMessageText}</textarea>
+
+                                <div id="group_welcome_panel_\${groupIndex}" style="overflow: hidden; max-height: \${group.enableWelcomeMessage ? '200px' : '0px'}; opacity: \${group.enableWelcomeMessage ? '1' : '0'}; transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease; margin-top: \${group.enableWelcomeMessage ? '20px' : '0px'};">
+                                    <div style="border-color:rgba(100,200,120,0.3);">
+                                        <label class="field-label">\${dict.msg_text}</label>
+                                        <textarea rows="2" onchange="updateGroupData(\${groupIndex}, 'welcomeMessageText', this.value)">\${group.welcomeMessageText}</textarea>
+                                    </div>
                                 </div>
                             </div>
 
@@ -1300,32 +1351,35 @@ app.get('/', (req, res) => {
                                 </div>
                             </div>
 
-                            <div class="toggle-row warning" style="margin-bottom:0; border-radius:\${group.enableWordFilter ? '10px 10px 0 0' : '10px'};">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enableWordFilter ? 'checked' : ''} onchange="toggleGroupPanel(\${groupIndex}, 'words', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label warning">\${dict.word_filter}<small>\${dict.wf_desc}</small></div>
-                                </div>
-                            </div>
-                            <div id="group_words_panel_\${groupIndex}" style="
-                                overflow:hidden;
-                                max-height:\${group.enableWordFilter ? '600px' : '0px'};
-                                opacity:\${group.enableWordFilter ? '1' : '0'};
-                                transition:max-height 0.45s ease, opacity 0.35s ease, margin-bottom 0.35s ease;
-                                margin-bottom:\${group.enableWordFilter ? '12px' : '0px'};
-                            ">
-                                <div class="sub-panel orange" style="border-top:none; border-radius:0 0 10px 10px;">
-                                    <div class="toggle-row" style="margin-bottom:14px; background:rgba(255,255,255,0.04); border-color:rgba(255,171,64,0.25);">
-                                        <div class="toggle-left">
-                                            <label class="switch"><input type="checkbox" \${group.useDefaultWords ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'useDefaultWords', this.checked)"><span class="slider"></span></label>
-                                            <div class="toggle-label">\${dict.use_global}<small>\${dict.ug_desc}</small></div>
+                            <div class="card warning">
+                                <div class="toggle-row warning" style="margin-bottom:0; border-radius:10px;">
+                                    <div class="toggle-left">
+                                        <label class="switch">
+                                            <input type="checkbox" \${group.enableWordFilter ? 'checked' : ''} onchange="toggleGroupWordFilterOptions(\${groupIndex}, this.checked)">
+                                            <span class="slider"></span>
+                                        </label>
+                                        <div class="toggle-label warning">
+                                            \${dict.word_filter}
+                                            <small>\${dict.wf_desc}</small>
                                         </div>
                                     </div>
-                                    <label class="field-label">\${dict.custom_words}</label>
-                                    <div class="input-with-btn" style="margin-bottom:10px;">
-                                        <input type="text" id="newGroupWord_\${groupIndex}" placeholder="..." onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupWord(\${groupIndex});}">
-                                        <button type="button" class="btn btn-primary btn-sm" onclick="addGroupWord(\${groupIndex})">\${dict.add}</button>
+                                </div>
+
+                                <div id="group_words_panel_\${groupIndex}" style="overflow: hidden; max-height: \${group.enableWordFilter ? '600px' : '0px'}; opacity: \${group.enableWordFilter ? '1' : '0'}; transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease; margin-top: \${group.enableWordFilter ? '20px' : '0px'};">
+                                    <div style="border-top: 0;">
+                                        <div class="toggle-row" style="margin-bottom:14px; background:rgba(255,255,255,0.04); border-color:rgba(255,171,64,0.25);">
+                                            <div class="toggle-left">
+                                                <label class="switch"><input type="checkbox" \${group.useDefaultWords ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'useDefaultWords', this.checked)"><span class="slider"></span></label>
+                                                <div class="toggle-label">\${dict.use_global}<small>\${dict.ug_desc}</small></div>
+                                            </div>
+                                        </div>
+                                        <label class="field-label">\${dict.custom_words}</label>
+                                        <div class="input-with-btn" style="margin-bottom:10px;">
+                                            <input type="text" id="newGroupWord_\${groupIndex}" placeholder="..." onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupWord(\${groupIndex});}">
+                                            <button type="button" class="btn btn-primary btn-sm" onclick="addGroupWord(\${groupIndex})">\${dict.add}</button>
+                                        </div>
+                                        <div class="chip-container">\${wordsHtml}</div>
                                     </div>
-                                    <div class="chip-container">\${wordsHtml}</div>
                                 </div>
                             </div>
 
