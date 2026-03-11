@@ -1,53 +1,59 @@
-# 🛡️ واتساب المنسق (WhatsApp Moderator Bot)
+# 🛡️ WhatsApp Auto Mod (v6.0.0)
 
-بوت واتساب متقدم مبرمج ببيئة **Node.js** ومكتبة `whatsapp-web.js`. يهدف إلى حماية المجموعات (القروبات) من الرسائل المزعجة وبوتات الإعلانات (مثل إعلانات الإجازات المرضية، التقارير الطبية، وغيرها) عبر نظام رصد تلقائي وتصويت تفاعلي للمشرفين.
-
----
-
-## ✨ المميزات الرئيسية
-
-* **👀 الرصد والحذف التلقائي:** مراقبة جميع المجموعات وحذف أي رسالة تحتوي على كلمات ممنوعة مسبقاً فور إرسالها.
-* **🗳️ نظام التصويت الذكي (Polls):** إرسال تنبيه فوري لمجموعة الإدارة مدمج في عنوان التصويت (لتقليل الإزعاج) يحتوي على:
-  * اسم المجموعة التي وقعت فيها المخالفة.
-  * منشن (Mention) لرقم المرسل.
-  * النص المحذوف بالكامل.
-* **🔨 الطرد الشامل (Global Ban):** عند تصويت المشرفين بـ "ايه (طرد من كل القروبات)"، يقوم البوت بطرد المخالف من **جميع المجموعات** التي يمتلك البوت صلاحية الإشراف فيها دفعة واحدة.
-* **✅ تأكيد الإجراءات وإغلاق الطلب:** بمجرد انتهاء التصويت (سواء بالطرد أو التجاهل)، يقوم البوت بالرد على التصويت برسالة تأكيد ليعلم جميع المشرفين أنه تم إنهاء هذا الطلب.
-* **💾 حفظ الجلسة (LocalAuth):** حفظ بيانات تسجيل الدخول محلياً لتجنب الحاجة لمسح رمز الـ QR في كل مرة يتم فيها تشغيل البوت.
-* **📂 استخراج مُعرفات المجموعات (Group IDs):** عند تشغيل البوت للمرة الأولى، يقوم تلقائياً بإنشاء ملف `groups_list.txt` يحتوي على قائمة بأسماء جميع المجموعات ومعرفاتها لتسهيل عملية الإعداد.
+**Auto Mod V6** is a high-performance, self-hosted WhatsApp moderation suite. It combines traditional rule-based filtering with **Local AI (Ollama)** and a robust **SQLite** backend to provide near-instant group protection without relying on external cloud processing.
 
 ---
 
-## 🛠️ المتطلبات الأساسية
+## 🚀 Core Features (v6)
 
-1. تثبيت [Node.js](https://nodejs.org/en/blog/release/v20.20.0) على جهازك (يُنصح بالإصدار 18 أو أحدث).
-2. رقم واتساب ثانوي (مخصص للبوت).
+### 1. 🧠 Intelligent AI Moderation
+* **Local LLM Integration:** Powered by **Ollama**, the bot uses models like `llava` to understand context, avoiding the limitations of simple keyword matching.
+* **Vision AI:** Capable of analyzing images (requires a vision-capable model) to detect prohibited visual content.
+* **Custom AI Instructions:** Define specific moderation personalities or "forbidden themes" (e.g., "Remove commercial ads") via the dashboard.
+
+### 2. ⚡ Advanced Anti-Spam System
+* **15-Second Window Tracking:** Real-time monitoring of message frequency per user.
+* **Granular Media Limits:** Set independent thresholds for:
+    * **Text** (Repeated/Duplicate text detection).
+    * **Images, Videos, & Audio**.
+    * **Documents & Stickers**.
+* **Spam Actions:** Automatically delete spam or trigger an **Admin Poll** to let moderators decide the outcome.
+
+### 3. 🚫 Global & Group-Specific Blacklisting
+* **Zero-Hour Protection:** Numbers in the Global Blacklist are kicked instantly upon joining or sending a message.
+* **Global Purge:** A powerful "Sweep" feature that scans all managed groups and removes blacklisted entities in one click.
+* **LID Handling:** Advanced mapping for WhatsApp's latest ID systems to prevent users from bypassing bans.
+
+### 4. 📂 Absolute Media Filtering
+* **Type Blocking:** Instantly ban specific media formats (e.g., "No Stickers allowed").
+* **Enforcement Levels:** Choose between silent deletion, Admin Polls, or instant Auto-Kicking.
+
+### 5. 🛠️ Modern Management Dashboard
+* **Bi-lingual Interface:** Fully localized in **Arabic (ar-SA)** and **English (en)**.
+* **Dark/Light Mode:** Full UI customization for late-night server monitoring.
+* **Live Event Logs:** Built-in terminal emulator to monitor bot logic and connection status in real-time.
+* **Dynamic Sync:** Automatically detects and imports all groups where the bot is present.
 
 ---
 
-## 🚀 طريقة التثبيت والتشغيل
+## 🏗️ Technical Stack
 
-### 1. إعداد البوت (Configuration)
-قبل تشغيل البوت بشكل نهائي، يجب تحديد "مجموعة الإدارة" التي ستصل إليها التنبيهات والتصويتات:
-1. قم بتشغيل البوت للمرة الأولى عبر الأمر `node index.js` وامسح كود الـ QR.
-2. سيقوم البوت بإنشاء ملف باسم `groups_list.txt` في نفس المجلد.
-3. افتح الملف، وابحث عن اسم "مجموعة الإدارة" الخاصة بك، وانسخ الـ ID الخاص بها (سيكون بصيغة تشبه `120363000000000000@g.us`).
-4. افتح ملف `index.js` واستبدل المتغير `ADMIN_GROUP_ID` بالـ ID الذي نسخته.
-*(اختياري)*: يمكنك تعديل قائمة الكلمات الممنوعة من خلال التعديل على مصفوفة `forbiddenWords` داخل ملف `index.js`.
+* **Engine:** `whatsapp-web.js` (latest)
+* **Database:** `better-sqlite3` with **WAL (Write-Ahead Logging)** for high performance.
+* **AI Backend:** `Ollama` (Local API).
+* **Web Interface:** Express.js with a responsive CSS/JS dashboard.
 
+---
 
+## 🛠 Installation & Setup
 
-⚠️ تنبيهات هامة (إخلاء مسؤولية)
-صلاحيات الإشراف: لن يتمكن البوت من حذف الرسائل أو طرد الأعضاء إلا إذا تمت ترقيته إلى مشرف (Admin) في المجموعات المستهدفة.
-
-سياسة واتساب: استخدام مكتبات واتساب غير الرسمية وتفعيل البوتات قد يخالف شروط خدمة واتساب، مما قد يعرض الرقم للحظر. استخدم رقماً ثانوياً دائماً ولا تستخدم رقمك الشخصي الأساسي لربط البوت.
-
-### 2. التشغيل النهائي
-افتح موجه الأوامر (Terminal أو CMD) داخل مجلد المشروع ونفذ الأمر التالي لتثبيت المكتبات:
+### 1. Clone & Install
 ```bash
-npm install
+for windows:
+extract the v6.zip file 
+run the (windows_installer-runner) as administrator for first launch to install dependencies
+it might ask you to reopen the installer after the install is completed to run the program
 
-ثم قم بتشغيل البوت:
-node index.js
-
-بمجرد ظهور رسالة Moderator Bot is online and ready!، فإن البوت يعمل الآن ويحمي مجموعاتك.
+for linux/MacOS:
+change the (linux_installer-runner) proprties to run as an executuble
+after that just run it and it will install dependencies you wouldn't need to reopen it
