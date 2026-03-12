@@ -64,6 +64,7 @@ for linux/MacOS:
 3-after that just run it and it will install dependencies you wouldn't need to reopen it.
 
 ```
+---
 arabic Preview:
 
 <img width="2559" height="1274" alt="Screenshot 2026-03-12 020936" src="https://github.com/user-attachments/assets/65139cc3-2e0b-4ef0-83b3-98472b52417a" />
