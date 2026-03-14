@@ -27,7 +27,8 @@ db.exec(`
     CREATE TABLE IF NOT EXISTS global_settings (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE IF NOT EXISTS llm_settings (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE IF NOT EXISTS blacklist (number TEXT PRIMARY KEY);
-    CREATE TABLE IF NOT EXISTS whatsapp_groups (id TEXT PRIMARY KEY, name TEXT);
+    CREATE TABLE IF NOT EXISTS whitelist (number TEXT PRIMARY KEY); 
+    CREATE TABLE IF NOT EXISTS whatsapp_groups (id TEXT PRIMARY KEY, name TEXT); 
     CREATE TABLE IF NOT EXISTS custom_groups (
         group_id TEXT PRIMARY KEY,
         admin_group TEXT,
@@ -47,7 +48,6 @@ db.exec(`
     );
 `);
 
-// تحديث بنية الجداول لإضافة الميزات الجديدة تلقائياً
 const colsToAdd = [
     'blocked_types TEXT',
     'blocked_action TEXT',
@@ -58,7 +58,12 @@ const colsToAdd = [
     'panic_time_window INTEGER',
     'panic_lockout_duration INTEGER',
     'panic_alert_target TEXT',
-    'panic_alert_message TEXT'
+    'panic_alert_message TEXT',
+    'enable_whitelist INTEGER',
+    'custom_blacklist TEXT',
+    'custom_whitelist TEXT',
+    'use_global_blacklist INTEGER',
+    'use_global_whitelist INTEGER'
 ];
 colsToAdd.forEach(col => {
     try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch(e){}
@@ -67,7 +72,7 @@ colsToAdd.forEach(col => {
 function loadConfigFromDB() {
     let newConfig = {
         enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
-        autoAction: false, enableBlacklist: true, enableAntiSpam: false, 
+        autoAction: false, enableBlacklist: true, enableWhitelist: true, enableAntiSpam: false, 
         spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll',
         blockedTypes: [], blockedAction: 'delete', 
         spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
@@ -81,7 +86,7 @@ function loadConfigFromDB() {
     const globals = db.prepare('SELECT * FROM global_settings').all();
     globals.forEach(row => {
         if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits'].includes(row.key)) newConfig[row.key] = JSON.parse(row.value);
-        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableAntiSpam'].includes(row.key)) {
+        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
         } 
         else if (['spamDuplicateLimit', 'spamFloodLimit'].includes(row.key)) {
@@ -103,6 +108,11 @@ function loadConfigFromDB() {
             enableAIMedia: g.enable_ai_media === 1,
             autoAction: g.auto_action === 1,
             enableBlacklist: g.enable_blacklist === 1,
+            enableWhitelist: g.enable_whitelist !== 0,
+            useGlobalBlacklist: g.use_global_blacklist !== 0,
+            useGlobalWhitelist: g.use_global_whitelist !== 0,
+            customBlacklist: JSON.parse(g.custom_blacklist || '[]'),
+            customWhitelist: JSON.parse(g.custom_whitelist || '[]'),
             enableAntiSpam: g.enable_anti_spam === 1,
             spamDuplicateLimit: g.spam_duplicate_limit,
             spamFloodLimit: g.spam_flood_limit,
@@ -114,8 +124,6 @@ function loadConfigFromDB() {
             blockedAction: g.blocked_action || 'delete',
             spamTypes: JSON.parse(g.spam_types || '["text", "image", "video", "audio", "document", "sticker"]'),
             spamLimits: JSON.parse(g.spam_limits || '{"text":7,"image":3,"video":2,"audio":3,"document":3,"sticker":3}'),
-            
-            // Panic Mode Settings
             enablePanicMode: g.enable_panic_mode === 1,
             panicMessageLimit: g.panic_message_limit || 10,
             panicTimeWindow: g.panic_time_window || 5,
@@ -136,6 +144,7 @@ function saveConfigToDB(conf) {
         setGlobal.run('enableAIMedia', conf.enableAIMedia ? '1' : '0');
         setGlobal.run('autoAction', conf.autoAction ? '1' : '0');
         setGlobal.run('enableBlacklist', conf.enableBlacklist ? '1' : '0');
+        setGlobal.run('enableWhitelist', conf.enableWhitelist ? '1' : '0');
         setGlobal.run('enableAntiSpam', conf.enableAntiSpam ? '1' : '0');
         setGlobal.run('spamDuplicateLimit', conf.spamDuplicateLimit.toString());
         setGlobal.run('spamAction', conf.spamAction);
@@ -155,25 +164,28 @@ function saveConfigToDB(conf) {
         const insertGroup = db.prepare(`
             INSERT INTO custom_groups (
                 group_id, admin_group, use_default_words, enable_word_filter, enable_ai_filter, 
-                enable_ai_media, auto_action, enable_blacklist, enable_anti_spam, spam_duplicate_limit, 
+                enable_ai_media, auto_action, enable_blacklist, enable_whitelist, enable_anti_spam, spam_duplicate_limit, 
                 spam_action, enable_welcome_message, welcome_message_text, custom_words,
                 blocked_types, blocked_action, spam_types, spam_limits,
                 enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
-                panic_alert_target, panic_alert_message
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                panic_alert_target, panic_alert_message,
+                custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
             insertGroup.run(
                 gId, gData.adminGroup, gData.useDefaultWords ? 1 : 0, gData.enableWordFilter ? 1 : 0,
                 gData.enableAIFilter ? 1 : 0, gData.enableAIMedia ? 1 : 0, gData.autoAction ? 1 : 0,
-                gData.enableBlacklist ? 1 : 0, gData.enableAntiSpam ? 1 : 0, gData.spamDuplicateLimit,
+                gData.enableBlacklist ? 1 : 0, gData.enableWhitelist ? 1 : 0, gData.enableAntiSpam ? 1 : 0, gData.spamDuplicateLimit,
                 gData.spamAction, gData.enableWelcomeMessage ? 1 : 0, 
                 gData.welcomeMessageText, JSON.stringify(gData.words),
                 JSON.stringify(gData.blockedTypes || []), gData.blockedAction || 'delete', 
                 JSON.stringify(gData.spamTypes || []), JSON.stringify(gData.spamLimits || {}),
                 gData.enablePanicMode ? 1 : 0, gData.panicMessageLimit, gData.panicTimeWindow,
-                gData.panicLockoutDuration, gData.panicAlertTarget, gData.panicAlertMessage
+                gData.panicLockoutDuration, gData.panicAlertTarget, gData.panicAlertMessage,
+                JSON.stringify(gData.customBlacklist || []), JSON.stringify(gData.customWhitelist || []),
+                gData.useGlobalBlacklist ? 1 : 0, gData.useGlobalWhitelist ? 1 : 0
             );
         }
     });
@@ -198,7 +210,6 @@ const userTrackers = new Map();
 const abortedMessages = new Set(); 
 const spamMutedUsers = new Map(); 
 
-// Variables for Panic Mode tracking
 const groupRaidTrackers = new Map();
 const lockedGroups = new Set();
 
@@ -220,6 +231,9 @@ app.get('/', (req, res) => {
 
     const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
     const blacklistArr = blacklistRows.map(r => r.number);
+    
+    const whitelistRows = db.prepare('SELECT number FROM whitelist').all();
+    const whitelistArr = whitelistRows.map(r => r.number);
 
     const html = `
     <!DOCTYPE html>
@@ -261,7 +275,6 @@ app.get('/', (req, res) => {
             }
             html[lang="ar"] { --font: 'IBM Plex Sans Arabic', sans-serif; }
 
-            /* ── Light Mode ── */
             html.light {
                 --bg: #f0f4f8;
                 --sidebar-bg: #ffffff;
@@ -312,6 +325,7 @@ app.get('/', (req, res) => {
             html.light .qr-wrap { background: #e8edf3; }
             html.light ::-webkit-scrollbar-track { background: var(--bg); }
             html.light ::-webkit-scrollbar-thumb { background: #c5d0db; }
+            html.light .group-list-card:hover { border-color: rgba(2,136,209,0.4); }
 
             .icon-btn {
                 width: 38px; height: 38px; border-radius: 10px; border: 1.5px solid var(--card-border);
@@ -323,7 +337,7 @@ app.get('/', (req, res) => {
 
             body, .sidebar, .main, .topbar, .card, .toggle-row, input, textarea, select,
             .nav-item, .chip, .chip-container, .sub-panel, .modal-content, .qr-wrap,
-            .group-card, .limit-item, .cb-label, .status-pill, .sidebar-footer button {
+            .group-card, .group-list-card, .limit-item, .cb-label, .status-pill, .sidebar-footer button {
                 transition: background 0.25s ease, border-color 0.25s ease, color 0.15s ease, box-shadow 0.25s ease;
             }
             
@@ -497,8 +511,54 @@ app.get('/', (req, res) => {
             .limit-item span { font-size: 14px; flex: 1; color: var(--text); }
             .limit-item input[type="number"] { width: 60px; padding: 6px 8px; font-size: 14px; margin: 0; text-align: center; }
 
+            /* ── GROUP LIST CARDS (new) ── */
+            .group-list-card {
+                background: var(--card-bg); border: 1.5px solid var(--card-border);
+                border-radius: 14px; margin-bottom: 14px;
+                display: flex; align-items: center; gap: 18px;
+                padding: 18px 22px; cursor: pointer; transition: border-color 0.2s, transform 0.2s;
+            }
+            .group-list-card:hover { border-color: rgba(64,196,255,0.35); transform: translateY(-1px); }
+            .group-list-card:hover .glc-arrow { opacity: 1; }
+            .glc-avatar {
+                width: 52px; height: 52px; border-radius: 13px; flex-shrink: 0;
+                background: var(--accent-dim); border: 1.5px solid var(--card-border);
+                display: flex; align-items: center; justify-content: center;
+                overflow: hidden; font-size: 18px; font-weight: 700; color: var(--accent);
+            }
+            .glc-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 11px; }
+            .glc-info { flex: 1; min-width: 0; }
+            .glc-name { font-size: 16px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .glc-id { font-family: monospace; font-size: 11px; color: var(--text-muted); background: var(--input-bg); padding: 2px 8px; border-radius: 5px; border: 1px solid var(--card-border); margin-top: 4px; display: inline-block; }
+            .glc-chips { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 9px; }
+            .glc-chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+            .glc-chip.green  { background: var(--accent-dim); color: var(--accent); border: 1px solid rgba(0,200,83,0.25); }
+            .glc-chip.orange { background: var(--orange-dim); color: var(--orange); border: 1px solid rgba(255,171,64,0.25); }
+            .glc-chip.blue   { background: var(--blue-dim);   color: var(--blue);   border: 1px solid rgba(64,196,255,0.25); }
+            .glc-chip.red    { background: var(--red-dim);    color: var(--red);    border: 1px solid rgba(255,82,82,0.25); }
+            .glc-chip.purple { background: var(--purple-dim); color: var(--purple); border: 1px solid rgba(209,140,255,0.25); }
+            .glc-arrow { font-size: 16px; color: var(--blue); opacity: 0; transition: opacity 0.2s; flex-shrink: 0; margin-inline-start: 4px; }
+
+            /* ── GROUP DETAIL header bar (new) ── */
+            .group-detail-bar {
+                display: flex; align-items: center; gap: 16px;
+                margin-bottom: 28px; flex-wrap: wrap;
+            }
+            .group-detail-identity {
+                display: flex; align-items: center; gap: 14px;
+                background: var(--card-bg); border: 1px solid var(--card-border);
+                border-radius: 12px; padding: 12px 20px; flex: 1;
+            }
+            .group-detail-avatar {
+                width: 46px; height: 46px; border-radius: 12px; flex-shrink: 0;
+                background: var(--accent-dim); border: 1.5px solid var(--card-border);
+                display: flex; align-items: center; justify-content: center;
+                overflow: hidden; font-size: 17px; font-weight: 700; color: var(--accent);
+            }
+            .group-detail-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
+
+            /* ── keep existing group-card for detail body ── */
             .group-card { background: var(--card-bg); border: 1.5px solid var(--card-border); border-radius: 14px; margin-bottom: 16px; overflow: hidden; transition: border-color 0.2s; }
-            .group-card:hover { border-color: rgba(64,196,255,0.3); }
             .group-card-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 20px; background: rgba(255,255,255,0.02); border-bottom: 1px solid var(--card-border); }
             .group-card-title { font-size: 16px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 10px; }
             .group-card-body { padding: 20px; }
@@ -534,10 +594,19 @@ app.get('/', (req, res) => {
             .sidebar-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 99; }
             .hamburger { display: none; background: none; border: none; color: var(--text); font-size: 24px; cursor: pointer; padding: 4px; }
 
-            .step-badge {
+            /* ── Group detail tabs ── */
+            .group-tabs { display:flex; gap:4px; border-bottom:1.5px solid var(--card-border); margin-bottom:20px; }
+            .group-tab { padding:10px 18px; border:none; background:none; color:var(--text-muted); font-size:14px; font-weight:600; font-family:var(--font); cursor:pointer; border-bottom:2.5px solid transparent; margin-bottom:-1.5px; transition:all 0.2s; display:flex; align-items:center; gap:7px; border-radius:8px 8px 0 0; }
+            .group-tab:hover { color:var(--text); background:rgba(255,255,255,0.04); }
+            .group-tab.active { color:var(--accent); border-bottom-color:var(--accent); background:var(--accent-dim); }
+            .group-tab-panel { display:none; }
+            .group-tab-panel.active { display:block; }
+
+                        .step-badge {
                 display: inline-block; background: var(--blue-dim); color: var(--blue);
                 padding: 2px 9px; border-radius: 12px; margin-inline-end: 6px; font-weight: 700; font-size: 13px;
             }
+
 
             @media (max-width: 768px) {
                 .sidebar { transform: translateX(100%); }
@@ -566,7 +635,7 @@ app.get('/', (req, res) => {
                 <span class="nav-icon"><i class="fas fa-satellite-dish"></i></span> ${t('حالة الاتصال', 'Connection Status')}
             </button>
             <button class="nav-item" onclick="showPage('page-blacklist', this)">
-                <span class="nav-icon"><i class="fas fa-user-slash"></i></span> ${t('القائمة السوداء', 'Blacklist')}
+                <span class="nav-icon"><i class="fas fa-users-slash"></i></span> ${t('إدارة الأرقام', 'Manage Numbers')}
                 <span class="nav-badge" id="blacklist-count">0</span>
             </button>
 
@@ -674,14 +743,15 @@ app.get('/', (req, res) => {
 
             <div class="page" id="page-blacklist">
                 <div class="page-header">
-                    <h2><i class="fas fa-user-slash"></i> ${t('القائمة السوداء العالمية', 'Global Blacklist')}</h2>
-                    <p>${t('الأرقام المحظورة تُطرد فوراً من أي مجموعة يكون فيها البوت مشرفاً', 'Banned numbers are immediately kicked from any group where the bot is admin')}</p>
+                    <h2><i class="fas fa-shield-alt"></i> ${t('إدارة الأرقام (حظر وتوثيق)', 'Number Management (Ban & VIP)')}</h2>
+                    <p>${t('أضف الأرقام المحظورة (طرد فوري) أو الموثوقة (تخطي الفلاتر)', 'Add banned numbers (instant kick) or trusted VIPs (bypass filters)')}</p>
                 </div>
                 <div class="card-grid">
+                    
                     <div class="card danger">
                         <div class="card-header">
-                            <h3 style="color:var(--red);"><i class="fas fa-user-plus"></i> ${t('إضافة رقم للحظر', 'Add to Blacklist')}</h3>
-                            <span style="font-size: 13px; color: var(--text-muted); background:var(--red-dim); padding:4px 10px; border-radius:20px;">${t('يُحفظ فوراً في DB', 'Saved instantly to DB')}</span>
+                            <h3 style="color:var(--red);"><i class="fas fa-user-plus"></i> ${t('القائمة السوداء (حظر)', 'Blacklist (Banned)')}</h3>
+                            <span style="font-size: 13px; color: var(--text-muted); background:var(--red-dim); padding:4px 10px; border-radius:20px;">${t('طرد فوري', 'Instant Kick')}</span>
                         </div>
                         <div class="field-group">
                             <label class="field-label">${t('رقم الهاتف (بدون +)', 'Phone Number (without +)')}</label>
@@ -692,27 +762,50 @@ app.get('/', (req, res) => {
                         </div>
                         <label class="field-label">${t('الأرقام المحظورة حالياً', 'Currently Banned Numbers')}</label>
                         <div id="blacklistContainer" class="chip-container"></div>
-                    </div>
-                    <div style="display:flex; flex-direction:column; gap:20px;">
-                        <div class="card">
-                            <div class="toggle-row danger" style="margin-bottom:0;">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" id="enableBlacklist" ${config.enableBlacklist ? 'checked' : ''}><span class="slider"></span></label>
-                                    <div class="toggle-label danger">
-                                        ${t('تفعيل نظام القائمة السوداء', 'Enable Blacklist System')}
-                                        <small>${t('طرد فوري عند محاولة الدخول أو الإضافة', 'Instant kick on entry or add attempt')}</small>
-                                    </div>
+                        
+                        <div class="toggle-row danger" style="margin-top:20px; margin-bottom:0;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableBlacklist" ${config.enableBlacklist ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label danger">
+                                    ${t('تفعيل نظام القائمة السوداء', 'Enable Blacklist System')}
                                 </div>
                             </div>
                         </div>
-                        <div class="card warning">
-                            <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
-                            <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
-                            <button type="button" id="purgeBtn" class="btn btn-warning btn-full" onclick="purgeBlacklisted()">
-                                <i class="fas fa-gavel"></i> ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
-                            </button>
+                    </div>
+
+                    <div class="card success">
+                        <div class="card-header">
+                            <h3 style="color:var(--accent);"><i class="fas fa-star"></i> ${t('القائمة البيضاء (VIP)', 'Whitelist (VIP)')}</h3>
+                            <span style="font-size: 13px; color: var(--text-muted); background:var(--accent-dim); padding:4px 10px; border-radius:20px;">${t('تخطي جميع القيود', 'Bypasses all rules')}</span>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('رقم الهاتف (بدون +)', 'Phone Number (without +)')}</label>
+                            <div class="input-with-btn">
+                                <input type="text" id="newWhitelistNumber" placeholder="Ex: 966512345678" onkeypress="if(event.key==='Enter'){event.preventDefault();addWhitelistNumber();}">
+                                <button type="button" class="btn btn-primary" onclick="addWhitelistNumber()"><i class="fas fa-check"></i> ${t('إضافة', 'Add')}</button>
+                            </div>
+                        </div>
+                        <label class="field-label">${t('الأرقام الموثوقة حالياً', 'Currently Trusted Numbers')}</label>
+                        <div id="whitelistContainer" class="chip-container"></div>
+
+                        <div class="toggle-row green" style="margin-top:20px; margin-bottom:0;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableWhitelist" ${config.enableWhitelist ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label green">
+                                    ${t('تفعيل نظام القائمة البيضاء', 'Enable Whitelist System')}
+                                </div>
+                            </div>
                         </div>
                     </div>
+
+                    <div class="card warning card-grid-full">
+                        <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
+                        <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
+                        <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; justify-content:center; padding:15px; font-size:16px;" onclick="purgeBlacklisted()">
+                            <i class="fas fa-gavel"></i> ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
+                        </button>
+                    </div>
+
                 </div>
             </div>
 
@@ -770,7 +863,7 @@ app.get('/', (req, res) => {
                     <div class="toggle-row warning" style="margin-bottom:0; border-radius:10px;">
                         <div class="toggle-left">
                             <label class="switch">
-                                <input type="checkbox" id="enableAntiSpam" ${config.enableAntiSpam ? 'checked' : ''} onchange="toggleSpamOptions(this.checked)">
+                                <input type="checkbox" id="enableAntiSpam" ${config.enableAntiSpam ? 'checked' : ''} onchange="toggleGroupPanel('global', 'spam', this.checked)">
                                 <span class="slider"></span>
                             </label>
                             <div class="toggle-label warning">
@@ -780,14 +873,14 @@ app.get('/', (req, res) => {
                         </div>
                     </div>
 
-                    <div id="spamOptionsPanel" style="overflow: hidden; max-height: ${config.enableAntiSpam ? '800px' : '0px'}; opacity: ${config.enableAntiSpam ? '1' : '0'}; transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease; margin-top: ${config.enableAntiSpam ? '20px' : '0px'};">
+                    <div id="group_spam_panel_global" style="overflow: hidden; max-height: ${config.enableAntiSpam ? '800px' : '0px'}; opacity: ${config.enableAntiSpam ? '1' : '0'}; transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease; margin-top: ${config.enableAntiSpam ? '20px' : '0px'};">
                         <div style="border-top: 1px dashed rgba(255,171,64,0.3); padding-top: 20px;">
                             <div class="field-row" style="margin-bottom:20px;">
                                 <div class="field-group" style="margin-bottom:0;">
                                     <label class="field-label">${t('الإجراء عند الرصد', 'Action on Detection')}</label>
                                     <select id="spamAction">
-                                        <option value="poll" ${config.spamAction === 'poll' ? 'selected' : ''}><i class="fas fa-poll"></i> ${t('تصويت للإدارة', 'Admin Poll')}</option>
-                                        <option value="auto" ${config.spamAction === 'auto' ? 'selected' : ''}><i class="fas fa-hammer"></i> ${t('طرد تلقائي وحظر', 'Auto Kick & Ban')}</option>
+                                        <option value="poll" ${config.spamAction === 'poll' ? 'selected' : ''}>${t('تصويت للإدارة', 'Admin Poll')}</option>
+                                        <option value="auto" ${config.spamAction === 'auto' ? 'selected' : ''}>${t('طرد تلقائي وحظر', 'Auto Kick & Ban')}</option>
                                     </select>
                                 </div>
                                 <div class="field-group" style="margin-bottom:0;">
@@ -796,7 +889,7 @@ app.get('/', (req, res) => {
                                 </div>
                             </div>
                             <label class="field-label" style="margin-bottom:12px;"><i class="fas fa-stopwatch"></i> ${t('حدود كل نوع خلال 15 ثانية', 'Limits per media type (15s)')}</label>
-                            <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">${t('فعّل <i class="fas fa-check"></i> النوع المراد مراقبته، ثم حدد الحد الأقصى للرسائل المسموح بها', 'Check <i class="fas fa-check"></i> the type to monitor, then set max allowed messages')}</p>
+                            <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">${t('فعّل النوع المراد مراقبته، ثم حدد الحد الأقصى للرسائل المسموح بها', 'Check the type to monitor, then set max allowed messages')}</p>
                             <div class="limit-grid">
                                 ${mediaTypesMeta.map(tData => `
                                 <div class="limit-item">
@@ -881,21 +974,49 @@ app.get('/', (req, res) => {
                 </div>
             </div>
 
+            <!-- ══════════════════════════════════════════════════════════
+                 GROUPS PAGE — list view + detail view
+            ══════════════════════════════════════════════════════════ -->
             <div class="page" id="page-groups">
-                <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
-                    <div>
-                        <h2><i class="fas fa-users-cog"></i> ${t('المجموعات المخصصة', 'Custom Groups')}</h2>
-                        <p>${t('إعدادات مخصصة لكل مجموعة — تتجاوز الإعدادات العامة', 'Custom settings per group — overrides global settings')}</p>
+
+                <!-- LIST VIEW -->
+                <div id="groupsListView">
+                    <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
+                        <div>
+                            <h2><i class="fas fa-users-cog"></i> ${t('المجموعات المخصصة', 'Custom Groups')}</h2>
+                            <p>${t('إعدادات مخصصة لكل مجموعة — تتجاوز الإعدادات العامة', 'Custom settings per group — overrides global settings')}</p>
+                        </div>
+                        <button type="button" class="btn btn-blue" onclick="addGroup()"><i class="fas fa-plus"></i> ${t('إضافة مجموعة', 'Add Group')}</button>
                     </div>
-                    <button type="button" class="btn btn-blue" onclick="addGroup()"><i class="fas fa-plus"></i> ${t('إضافة مجموعة', 'Add Group')}</button>
+                    <div id="groupsContainer"></div>
                 </div>
-                <div id="groupsContainer"></div>
+
+                <!-- DETAIL VIEW -->
+                <div id="groupsDetailView" style="display:none;">
+                    <div class="group-detail-bar">
+                        <button type="button" class="btn btn-ghost" onclick="closeGroupDetail()">
+                            <i class="fas fa-arrow-${lang === 'en' ? 'left' : 'right'}"></i> ${t('رجوع', 'Back')}
+                        </button>
+                        <div class="group-detail-identity">
+                            <div class="group-detail-avatar" id="detailGroupAvatar"></div>
+                            <div>
+                                <div style="font-size:18px; font-weight:700;" id="detailGroupName"></div>
+                                <span class="group-id-badge" id="detailGroupId"></span>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-danger btn-sm" id="detailDeleteBtn"><i class="fas fa-trash"></i> ${t('حذف', 'Delete')}</button>
+                    </div>
+                    <div id="groupDetailBody"></div>
+                </div>
+
             </div>
 
             <div id="saveMsgToast" class="toast"><i class="fas fa-check-circle"></i> ${t('تم الحفظ في قاعدة البيانات بنجاح!', 'Saved to database successfully!')}</div>
 
             </form>
-        </div><div id="ollamaModal" class="modal">
+        </div>
+
+        <div id="ollamaModal" class="modal">
             <div class="modal-content">
                 <div class="modal-header">
                     <h3 style="color:var(--blue);"><i class="fas fa-link"></i> ${t('إعدادات خادم Ollama', 'Ollama Server Settings')}</h3>
@@ -925,7 +1046,6 @@ app.get('/', (req, res) => {
         </div>
 
         <script>
-            // Fixing variable scoping for browser JS context
             const currentLang = '${lang}';
             const currentDir = '${dir}';
             let fetchedGroups = [];
@@ -973,8 +1093,6 @@ app.get('/', (req, res) => {
                 'direct_del': '${t("الحذف المباشر (تخطي التصويت)", "Direct Delete (Skip Poll)")}',
                 'select_group': '${t("اختر مجموعة...", "Select a Group...")}',
                 'default_setting': '${t("الاختيار الافتراضي (عام)", "Default (Global)")}',
-                
-                // Panic Mode dictionary entries
                 'panic_mode': '${t("وضع الطوارئ (Panic Mode)", "Panic Mode")}',
                 'panic_desc': '${t("إغلاق المجموعة تلقائياً عند رصد هجوم", "Auto-lock group on raid detection")}',
                 'panic_msg_limit': '${t("عدد الرسائل", "Message Limit")}',
@@ -984,16 +1102,27 @@ app.get('/', (req, res) => {
                 'target_group_only': '${t("المجموعة المستهدفة فقط", "Target Group Only")}',
                 'admin_group_only': '${t("مجموعة الإدارة فقط", "Admin Group Only")}',
                 'target_both': '${t("كلاهما (المجموعة والإدارة)", "Both")}',
-                'panic_msg_text': '${t("نص التنبيه ({time} للمدة)", "Alert Text ({time} for duration)")}'
+                'panic_msg_text': '${t("نص التنبيه ({time} للمدة)", "Alert Text ({time} for duration)")}',
+                'enable_wl': '${t("تفعيل القائمة البيضاء", "Enable Whitelist")}',
+                'wl_desc': '${t("تخطي الفلاتر للأرقام الموثوقة", "Bypass filters for trusted numbers")}',
+                'use_global_bl': '${t("تطبيق القائمة السوداء العامة", "Apply Global Blacklist")}',
+                'ug_bl_desc': '${t("دمج الأرقام المحظورة العامة مع هذه المجموعة", "Include globally banned numbers")}',
+                'custom_bl': '${t("أرقام محظورة مخصصة لهذه المجموعة", "Custom banned numbers for this group")}',
+                'use_global_wl': '${t("تطبيق القائمة البيضاء العامة", "Apply Global Whitelist")}',
+                'ug_wl_desc': '${t("دمج الأرقام الموثوقة العامة مع هذه المجموعة", "Include globally trusted numbers")}',
+                'custom_wl': '${t("أرقام موثوقة مخصصة لهذه المجموعة", "Custom trusted numbers for this group")}'
             };
 
-            // Fetch groups from database on load
             async function loadKnownGroups() {
                 try {
                     const res = await fetch('/api/groups');
                     fetchedGroups = await res.json();
+                    // if no groups yet and bot is connected, retry in 3s
+                    if (fetchedGroups.length === 0) {
+                        setTimeout(loadKnownGroups, 3000);
+                        return;
+                    }
                     
-                    // Populate default admin group dropdown
                     const defAdminContainer = document.getElementById('defaultAdminGroupContainer');
                     if (defAdminContainer) {
                         let defHTML = \`
@@ -1012,21 +1141,18 @@ app.get('/', (req, res) => {
                             defHTML += \`<option value="\${g.id}" \${sel}>\${g.name}</option>\`;
                         });
 
-                        // Fallback for an ID not in the database yet
                         if ('${config.defaultAdminGroup}' && !defFound) {
                             defHTML += \`<option value="${config.defaultAdminGroup}" selected>${config.defaultAdminGroup} (Unknown)</option>\`;
                         }
                         defHTML += \`</select>\`;
-                        
                         defAdminContainer.innerHTML = defHTML;
                     }
                     
-                    renderGroups(); // Re-render custom groups with new options
+                    renderGroups();
 
                 } catch(e) {}
             }
 
-            // HTML Generator for Select elements
             function createGroupSelectHTML(selectedValue, onchangeCode, allowEmpty = false) {
                 let html = \`<select onchange="\${onchangeCode}" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">\`;
                 html += \`<option value="">\${allowEmpty ? '-- ' + dict.default_setting + ' --' : '-- ' + dict.select_group + ' --'}</option>\`;
@@ -1098,86 +1224,9 @@ app.get('/', (req, res) => {
                 }
             }
 
-            function toggleSpamOptions(enabled) {
-                const panel = document.getElementById('spamOptionsPanel');
-                if (enabled) {
-                    panel.style.maxHeight = '800px';
-                    panel.style.opacity = '1';
-                    panel.style.marginTop = '20px';
-                } else {
-                    panel.style.maxHeight = '0px';
-                    panel.style.opacity = '0';
-                    panel.style.marginTop = '0px';
-                }
-            }
-
-            function toggleGroupSpamOptions(groupIndex, enabled) {
-                groupsArr[groupIndex].enableAntiSpam = enabled;
-                const panel = document.getElementById(\`group_spam_panel_\${groupIndex}\`);
-                if (!panel) return;
-
-                if (enabled) {
-                    panel.style.maxHeight = '800px';
-                    panel.style.opacity = '1';
-                    panel.style.marginTop = '20px';
-                } else {
-                    panel.style.maxHeight = '0px';
-                    panel.style.opacity = '0';
-                    panel.style.marginTop = '0px';
-                }
-            }
-            
-            function toggleGroupPanicOptions(groupIndex, enabled) {
-                groupsArr[groupIndex].enablePanicMode = enabled;
-                const panel = document.getElementById(\`group_panic_panel_\${groupIndex}\`);
-                if (!panel) return;
-
-                if (enabled) {
-                    panel.style.maxHeight = '800px';
-                    panel.style.opacity = '1';
-                    panel.style.marginTop = '20px';
-                } else {
-                    panel.style.maxHeight = '0px';
-                    panel.style.opacity = '0';
-                    panel.style.marginTop = '0px';
-                }
-            }
-
-            function toggleGroupWelcomeOptions(groupIndex, enabled) {
-                groupsArr[groupIndex].enableWelcomeMessage = enabled;
-                const panel = document.getElementById(\`group_welcome_panel_\${groupIndex}\`);
-                if (!panel) return;
-
-                if (enabled) {
-                    panel.style.maxHeight = '200px';
-                    panel.style.opacity = '1';
-                    panel.style.marginTop = '20px';
-                } else {
-                    panel.style.maxHeight = '0px';
-                    panel.style.opacity = '0';
-                    panel.style.marginTop = '0px';
-                }
-            }
-
-            function toggleGroupWordFilterOptions(groupIndex, enabled) {
-                groupsArr[groupIndex].enableWordFilter = enabled;
-                const panel = document.getElementById(\`group_words_panel_\${groupIndex}\`);
-                if (!panel) return;
-
-                if (enabled) {
-                    panel.style.maxHeight = '600px';
-                    panel.style.opacity = '1';
-                    panel.style.marginTop = '20px';
-                } else {
-                    panel.style.maxHeight = '0px';
-                    panel.style.opacity = '0';
-                    panel.style.marginTop = '0px';
-                }
-            }
-
             const pageTitles = {
                 'page-status': '${t("حالة الاتصال", "Connection Status")}',
-                'page-blacklist': '${t("القائمة السوداء", "Blacklist")}',
+                'page-blacklist': '${t("إدارة الأرقام", "Manage Numbers")}',
                 'page-general': '${t("الإعدادات العامة", "General Settings")}',
                 'page-spam': '${t("مكافحة الإزعاج", "Anti-Spam")}',
                 'page-media': '${t("فلتر الوسائط", "Media Filter")}',
@@ -1191,6 +1240,11 @@ app.get('/', (req, res) => {
                 if(btn) btn.classList.add('active');
                 document.getElementById('topbarTitle').textContent = pageTitles[pageId] || '';
                 closeSidebar();
+                // always show list view when navigating to groups page
+                if (pageId === 'page-groups') {
+                    document.getElementById('groupsListView').style.display = 'block';
+                    document.getElementById('groupsDetailView').style.display = 'none';
+                }
             }
             function toggleSidebar() {
                 document.getElementById('sidebar').classList.toggle('open');
@@ -1209,6 +1263,7 @@ app.get('/', (req, res) => {
 
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
             let blacklistArr = ${JSON.stringify(blacklistArr)}; 
+            let whitelistArr = ${JSON.stringify(whitelistArr)}; 
             let groupsConfigObj = ${JSON.stringify(config.groupsConfig)};
             const metaTypes = ${JSON.stringify(mediaTypesMeta)};
             
@@ -1222,6 +1277,11 @@ app.get('/', (req, res) => {
                 enableAIMedia: groupsConfigObj[key].enableAIMedia || false,
                 autoAction: groupsConfigObj[key].autoAction || false,
                 enableBlacklist: groupsConfigObj[key].enableBlacklist !== false,
+                enableWhitelist: groupsConfigObj[key].enableWhitelist !== false,
+                useGlobalBlacklist: groupsConfigObj[key].useGlobalBlacklist !== false,
+                useGlobalWhitelist: groupsConfigObj[key].useGlobalWhitelist !== false,
+                customBlacklist: groupsConfigObj[key].customBlacklist || [],
+                customWhitelist: groupsConfigObj[key].customWhitelist || [],
                 enableAntiSpam: groupsConfigObj[key].enableAntiSpam || false,
                 spamDuplicateLimit: groupsConfigObj[key].spamDuplicateLimit || 3,
                 spamAction: groupsConfigObj[key].spamAction || 'poll',
@@ -1238,6 +1298,334 @@ app.get('/', (req, res) => {
                 panicAlertTarget: groupsConfigObj[key].panicAlertTarget || 'both',
                 panicAlertMessage: groupsConfigObj[key].panicAlertMessage || '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}'
             }));
+
+            let currentDetailIndex = null;
+
+            function switchGroupTab(groupIndex, tabName, btn) {
+                document.querySelectorAll('#gtabs_' + groupIndex + ' .group-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('[id^="gtab_' + groupIndex + '_"]').forEach(p => p.classList.remove('active'));
+                btn.classList.add('active');
+                const panel = document.getElementById('gtab_' + groupIndex + '_' + tabName);
+                if (panel) panel.classList.add('active');
+            }
+
+                        // ══ NEW: render groups as clickable list cards ══
+            function renderGroups() {
+                const container = document.getElementById('groupsContainer');
+                container.innerHTML = '';
+
+                if (groupsArr.length === 0) {
+                    container.innerHTML = \`<div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
+                        <i class="fas fa-users-cog" style="font-size:48px; margin-bottom:16px; display:block; opacity:0.3;"></i>
+                        <div style="font-size:16px; font-weight:600;">\${currentLang === 'en' ? 'No custom groups yet' : 'لا توجد مجموعات مخصصة بعد'}</div>
+                        <div style="font-size:13px; margin-top:6px;">\${currentLang === 'en' ? 'Click "Add Group" to get started' : 'اضغط على "إضافة مجموعة" للبدء'}</div>
+                    </div>\`;
+                    return;
+                }
+
+                groupsArr.forEach((group, groupIndex) => {
+                    const knownGroup = fetchedGroups.find(g => g.id === group.id);
+                    const groupName = knownGroup ? knownGroup.name : (group.id ? group.id.split('@')[0].slice(-10) + '...' : dict.no_id);
+                    const initials = groupName.replace(/[^\u0600-\u06FFa-zA-Z]/g, '').slice(0, 2) || '؟';
+
+                    // build feature chips
+                    let chips = '';
+                    if (group.enablePanicMode) chips += \`<span class="glc-chip orange"><i class="fas fa-radiation"></i> \${currentLang==='en'?'Panic Mode':'طوارئ'}</span>\`;
+                    if (group.enableAntiSpam)  chips += \`<span class="glc-chip orange"><i class="fas fa-shield-alt"></i> Anti-Spam</span>\`;
+                    if (group.enableAIFilter)  chips += \`<span class="glc-chip blue"><i class="fas fa-brain"></i> AI</span>\`;
+                    if (group.enableWordFilter) chips += \`<span class="glc-chip green"><i class="fas fa-filter"></i> \${currentLang==='en'?'Word Filter':'فلتر كلمات'}</span>\`;
+                    if (group.enableWelcomeMessage) chips += \`<span class="glc-chip green"><i class="fas fa-door-open"></i> \${currentLang==='en'?'Welcome':'ترحيب'}</span>\`;
+                    if (group.blockedTypes && group.blockedTypes.length > 0) chips += \`<span class="glc-chip red"><i class="fas fa-ban"></i> \${group.blockedTypes.length} \${currentLang==='en'?'blocked':'ممنوع'}</span>\`;
+
+                    card.className = 'group-list-card';
+                    card.onclick = () => openGroupDetail(groupIndex);
+                    card.innerHTML = \`
+                        <div class="glc-avatar">\${initials}</div>
+                        <div class="glc-info">
+                            <div class="glc-name">\${groupName}</div>
+                            \${group.id ? \`<span class="glc-id">\${group.id}</span>\` : \`<span style="color:var(--orange);font-size:12px;">\${dict.no_id}</span>\`}
+                            \${chips ? \`<div class="glc-chips">\${chips}</div>\` : ''}
+                        </div>
+                        <i class="fas fa-chevron-\${currentLang==='en'?'right':'left'} glc-arrow"></i>
+                    \`;
+                    container.appendChild(card);
+                });
+            }
+
+            // ══ NEW: open group detail ══
+            function openGroupDetail(groupIndex) {
+                currentDetailIndex = groupIndex;
+                const group = groupsArr[groupIndex];
+                const knownGroup = fetchedGroups.find(g => g.id === group.id);
+                const groupName = knownGroup ? knownGroup.name : (group.id || dict.no_id);
+                const initials = groupName.replace(/[^\u0600-\u06FFa-zA-Z]/g, '').slice(0, 2) || '؟';
+
+                // set header
+                const av = document.getElementById('detailGroupAvatar');
+                av.textContent = initials;
+                av.style.background = 'var(--accent-dim)';
+                av.style.color = 'var(--accent)';
+                document.getElementById('detailGroupName').textContent = groupName;
+                document.getElementById('detailGroupId').textContent = group.id || dict.no_id;
+
+                // delete button
+                document.getElementById('detailDeleteBtn').onclick = () => {
+                    if (confirm(dict.delete_confirm.replace(/<[^>]*>?/gm, ''))) {
+                        groupsArr.splice(groupIndex, 1);
+                        closeGroupDetail();
+                    }
+                };
+
+                // render the full settings body
+                renderGroupDetailBody(groupIndex);
+
+                document.getElementById('groupsListView').style.display = 'none';
+                document.getElementById('groupsDetailView').style.display = 'block';
+            }
+
+            // ══ NEW: close detail, go back to list ══
+            function closeGroupDetail() {
+                document.getElementById('groupsDetailView').style.display = 'none';
+                document.getElementById('groupsListView').style.display = 'block';
+                currentDetailIndex = null;
+                renderGroups();
+            }
+
+            // ══ NEW: render the per-group settings inside the detail view ══
+            function renderGroupDetailBody(groupIndex) {
+                const group = groupsArr[groupIndex];
+                const container = document.getElementById('groupDetailBody');
+
+                let wordsHtml = group.words.map((word, wordIndex) => 
+                    \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`
+                ).join('');
+
+                let blHtml = group.customBlacklist.map((num, idx) => 
+                    \`<div class="chip red-chip">\${num} <span class="chip-remove" onclick="removeGroupBlacklist(\${groupIndex}, \${idx})">&times;</span></div>\`
+                ).join('');
+
+                let wlHtml = group.customWhitelist.map((num, idx) => 
+                    \`<div class="chip">\${num} <span class="chip-remove" onclick="removeGroupWhitelist(\${groupIndex}, \${idx})">&times;</span></div>\`
+                ).join('');
+
+                const blockedChecks = metaTypes.map(t => 
+                    \`<label class="cb-label"><input type="checkbox" value="\${t.id}" \${group.blockedTypes.includes(t.id)?'checked':''} onchange="updateGroupArray(\${groupIndex}, 'blockedTypes', '\${t.id}', this.checked)"> \${t.icon} \${t.name}</label>\`
+                ).join('');
+
+                const spamLimitGrid = metaTypes.map(t => {
+                    const isChecked = group.spamTypes.includes(t.id) ? 'checked' : '';
+                    const limitVal = group.spamLimits[t.id] || 5;
+                    return \`<div class="limit-item">
+                        <input type="checkbox" value="\${t.id}" \${isChecked} onchange="updateGroupArray(\${groupIndex}, 'spamTypes', '\${t.id}', this.checked)">
+                        <span style="font-size:13px;width:70px;">\${t.icon} \${t.name}</span>
+                        <input type="number" value="\${limitVal}" min="1" onchange="updateSpamLimit(\${groupIndex}, '\${t.id}', this.value)">
+                    </div>\`;
+                }).join('');
+
+                const tabs = [
+                    { id: 'general', icon: 'fa-cog',        label: currentLang==='en'?'General':'عام' },
+                    { id: 'filters', icon: 'fa-filter',     label: currentLang==='en'?'Filters':'فلاتر' },
+                    { id: 'spam',    icon: 'fa-shield-alt', label: currentLang==='en'?'Anti-Spam':'سبام' },
+                    { id: 'panic',   icon: 'fa-radiation',  label: currentLang==='en'?'Panic':'طوارئ' },
+                    { id: 'lists',   icon: 'fa-list',       label: currentLang==='en'?'Lists':'القوائم' },
+                ];
+                const tabButtons = tabs.map((tab, i) =>
+                    \`<button type="button" class="group-tab \${i===0?'active':''}" onclick="switchGroupTab(\${groupIndex},'\${tab.id}',this)"><i class="fas \${tab.icon}"></i> \${tab.label}</button>\`
+                ).join('');
+
+                container.innerHTML = \`
+                    <div class="field-row" style="margin-bottom:20px;">
+                        <div class="field-group" style="margin-bottom:0;">
+                            <label class="field-label">\${dict.target_group}</label>
+                            \${createGroupSelectHTML(group.id, \`updateGroupData(\${groupIndex}, 'id', this.value)\`, false)}
+                        </div>
+                        <div class="field-group" style="margin-bottom:0;">
+                            <label class="field-label">\${dict.admin_group}</label>
+                            \${createGroupSelectHTML(group.adminGroup, \`updateGroupData(\${groupIndex}, 'adminGroup', this.value)\`, true)}
+                        </div>
+                    </div>
+
+                    <div class="group-tabs" id="gtabs_\${groupIndex}">\${tabButtons}</div>
+
+                    <div class="group-tab-panel active" id="gtab_\${groupIndex}_general">
+                        <div class="sub-panel red" style="margin-bottom:16px;">
+                            <h4 style="color:var(--red);">\${dict.blocked_types}</h4>
+                            <div class="cb-group" style="margin-bottom:10px;">\${blockedChecks}</div>
+                            <label class="field-label">\${dict.block_action}</label>
+                            <select onchange="updateGroupData(\${groupIndex}, 'blockedAction', this.value)">
+                                <option value="delete" \${group.blockedAction==='delete'?'selected':''}>\${dict.act_del}</option>
+                                <option value="poll" \${group.blockedAction==='poll'?'selected':''}>\${dict.act_poll}</option>
+                                <option value="auto" \${group.blockedAction==='auto'?'selected':''}>\${dict.act_auto}</option>
+                            </select>
+                        </div>
+                        <div class="card success">
+                            <div class="toggle-row green" style="margin-bottom:0;border-radius:10px;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enableWelcomeMessage?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'welcome',this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label green">\${dict.welcome_msg}<small>\${dict.welcome_desc}</small></div>
+                                </div>
+                            </div>
+                            <div id="group_welcome_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enableWelcomeMessage?'200px':'0px'};opacity:\${group.enableWelcomeMessage?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableWelcomeMessage?'20px':'0px'};">
+                                <label class="field-label">\${dict.msg_text}</label>
+                                <textarea rows="2" onchange="updateGroupData(\${groupIndex}, 'welcomeMessageText', this.value)">\${group.welcomeMessageText}</textarea>
+                            </div>
+                        </div>
+                        <div class="toggle-row pink" style="margin-bottom:0;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" \${group.autoAction?'checked':''} onchange="updateGroupToggle(\${groupIndex},'autoAction',this.checked)"><span class="slider"></span></label>
+                                <div class="toggle-label pink">\${dict.direct_del}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="group-tab-panel" id="gtab_\${groupIndex}_filters">
+                        <div class="card warning">
+                            <div class="toggle-row warning" style="margin-bottom:0;border-radius:10px;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enableWordFilter?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'words',this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label warning">\${dict.word_filter}<small>\${dict.wf_desc}</small></div>
+                                </div>
+                            </div>
+                            <div id="group_words_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enableWordFilter?'600px':'0px'};opacity:\${group.enableWordFilter?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableWordFilter?'20px':'0px'};">
+                                <div class="toggle-row" style="margin-bottom:14px;background:rgba(255,255,255,0.04);border-color:rgba(255,171,64,0.25);">
+                                    <div class="toggle-left">
+                                        <label class="switch"><input type="checkbox" \${group.useDefaultWords?'checked':''} onchange="updateGroupToggle(\${groupIndex},'useDefaultWords',this.checked)"><span class="slider"></span></label>
+                                        <div class="toggle-label">\${dict.use_global}<small>\${dict.ug_desc}</small></div>
+                                    </div>
+                                </div>
+                                <label class="field-label">\${dict.custom_words}</label>
+                                <div class="input-with-btn" style="margin-bottom:10px;">
+                                    <input type="text" id="newGroupWord_\${groupIndex}" placeholder="..." onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupWord(\${groupIndex});}">
+                                    <button type="button" class="btn btn-primary btn-sm" onclick="addGroupWord(\${groupIndex})"><i class="fas fa-plus"></i> \${dict.add}</button>
+                                </div>
+                                <div class="chip-container">\${wordsHtml}</div>
+                            </div>
+                        </div>
+                        <div class="toggle-row blue" style="margin-bottom:12px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" \${group.enableAIFilter?'checked':''} onchange="updateGroupToggle(\${groupIndex},'enableAIFilter',this.checked)"><span class="slider"></span></label>
+                                <div class="toggle-label blue">\${dict.ai_text}</div>
+                            </div>
+                        </div>
+                        <div class="toggle-row purple" style="margin-bottom:0;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" \${group.enableAIMedia?'checked':''} onchange="updateGroupToggle(\${groupIndex},'enableAIMedia',this.checked)"><span class="slider"></span></label>
+                                <div class="toggle-label purple">\${dict.ai_vision}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="group-tab-panel" id="gtab_\${groupIndex}_spam">
+                        <div class="card warning">
+                            <div class="toggle-row warning" style="margin-bottom:0;border-radius:10px;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enableAntiSpam?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'spam',this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label warning">\${dict.anti_spam}<small>\${dict.spam_desc}</small></div>
+                                </div>
+                            </div>
+                            <div id="group_spam_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enableAntiSpam?'800px':'0px'};opacity:\${group.enableAntiSpam?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableAntiSpam?'20px':'0px'};">
+                                <div style="border-top:1px dashed rgba(255,171,64,0.3);padding-top:20px;">
+                                    <div class="field-row" style="margin-bottom:20px;">
+                                        <div class="field-group" style="margin-bottom:0;">
+                                            <label class="field-label">\${dict.action}</label>
+                                            <select onchange="updateGroupData(\${groupIndex}, 'spamAction', this.value)">
+                                                <option value="poll" \${group.spamAction==='poll'?'selected':''}>\${dict.poll}</option>
+                                                <option value="auto" \${group.spamAction==='auto'?'selected':''}>\${dict.auto_kick}</option>
+                                            </select>
+                                        </div>
+                                        <div class="field-group" style="margin-bottom:0;">
+                                            <label class="field-label">\${dict.text_dup}</label>
+                                            <input type="number" value="\${group.spamDuplicateLimit}" min="2" max="15" onchange="updateGroupData(\${groupIndex},'spamDuplicateLimit',parseInt(this.value))">
+                                        </div>
+                                    </div>
+                                    <label class="field-label" style="margin-bottom:12px;"><i class="fas fa-stopwatch"></i> \${dict.limits_15s}</label>
+                                    <div class="limit-grid">\${spamLimitGrid}</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="group-tab-panel" id="gtab_\${groupIndex}_panic">
+                        <div class="card danger">
+                            <div class="toggle-row danger" style="margin-bottom:0;border-radius:10px;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enablePanicMode?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'panic',this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label danger">\${dict.panic_mode}<small>\${dict.panic_desc}</small></div>
+                                </div>
+                            </div>
+                            <div id="group_panic_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enablePanicMode?'800px':'0px'};opacity:\${group.enablePanicMode?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enablePanicMode?'20px':'0px'};">
+                                <div style="border-top:1px dashed rgba(255,82,82,0.3);padding-top:20px;">
+                                    <div class="field-row" style="margin-bottom:12px;">
+                                        <div class="field-group" style="margin-bottom:0;"><label class="field-label">\${dict.panic_msg_limit}</label><input type="number" value="\${group.panicMessageLimit}" min="2" onchange="updateGroupData(\${groupIndex},'panicMessageLimit',parseInt(this.value))"></div>
+                                        <div class="field-group" style="margin-bottom:0;"><label class="field-label">\${dict.panic_time_window}</label><input type="number" value="\${group.panicTimeWindow}" min="1" onchange="updateGroupData(\${groupIndex},'panicTimeWindow',parseInt(this.value))"></div>
+                                        <div class="field-group" style="margin-bottom:0;"><label class="field-label">\${dict.panic_lock_dur}</label><input type="number" value="\${group.panicLockoutDuration}" min="1" onchange="updateGroupData(\${groupIndex},'panicLockoutDuration',parseInt(this.value))"></div>
+                                    </div>
+                                    <div class="field-group">
+                                        <label class="field-label">\${dict.panic_target}</label>
+                                        <select onchange="updateGroupData(\${groupIndex},'panicAlertTarget',this.value)">
+                                            <option value="both" \${group.panicAlertTarget==='both'?'selected':''}>\${dict.target_both}</option>
+                                            <option value="group" \${group.panicAlertTarget==='group'?'selected':''}>\${dict.target_group_only}</option>
+                                            <option value="admin" \${group.panicAlertTarget==='admin'?'selected':''}>\${dict.admin_group_only}</option>
+                                        </select>
+                                    </div>
+                                    <div class="field-group" style="margin-bottom:0;">
+                                        <label class="field-label">\${dict.panic_msg_text}</label>
+                                        <textarea rows="2" onchange="updateGroupData(\${groupIndex},'panicAlertMessage',this.value)">\${group.panicAlertMessage}</textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="group-tab-panel" id="gtab_\${groupIndex}_lists">
+                        <div class="card danger">
+                            <div class="toggle-row danger" style="margin-bottom:0;border-radius:10px;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enableBlacklist?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'blacklist',this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label danger">\${dict.enable_bl}<small>\${dict.bl_desc}</small></div>
+                                </div>
+                            </div>
+                            <div id="group_blacklist_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enableBlacklist?'600px':'0px'};opacity:\${group.enableBlacklist?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableBlacklist?'20px':'0px'};">
+                                <div class="toggle-row" style="margin-bottom:14px;background:rgba(255,255,255,0.04);border-color:rgba(255,82,82,0.25);">
+                                    <div class="toggle-left">
+                                        <label class="switch"><input type="checkbox" \${group.useGlobalBlacklist?'checked':''} onchange="updateGroupToggle(\${groupIndex},'useGlobalBlacklist',this.checked)"><span class="slider"></span></label>
+                                        <div class="toggle-label">\${dict.use_global_bl}<small>\${dict.ug_bl_desc}</small></div>
+                                    </div>
+                                </div>
+                                <label class="field-label">\${dict.custom_bl}</label>
+                                <div class="input-with-btn" style="margin-bottom:10px;">
+                                    <input type="text" id="newGroupBl_\${groupIndex}" placeholder="Ex: 966512345678" onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupBlacklist(\${groupIndex});}">
+                                    <button type="button" class="btn btn-danger btn-sm" onclick="addGroupBlacklist(\${groupIndex})"><i class="fas fa-plus"></i> \${dict.add}</button>
+                                </div>
+                                <div class="chip-container">\${blHtml}</div>
+                            </div>
+                        </div>
+                        <div class="card success">
+                            <div class="toggle-row green" style="margin-bottom:0;border-radius:10px;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enableWhitelist?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'whitelist',this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label green">\${dict.enable_wl}<small>\${dict.wl_desc}</small></div>
+                                </div>
+                            </div>
+                            <div id="group_whitelist_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enableWhitelist?'600px':'0px'};opacity:\${group.enableWhitelist?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableWhitelist?'20px':'0px'};">
+                                <div class="toggle-row" style="margin-bottom:14px;background:rgba(255,255,255,0.04);border-color:rgba(0,230,118,0.25);">
+                                    <div class="toggle-left">
+                                        <label class="switch"><input type="checkbox" \${group.useGlobalWhitelist?'checked':''} onchange="updateGroupToggle(\${groupIndex},'useGlobalWhitelist',this.checked)"><span class="slider"></span></label>
+                                        <div class="toggle-label">\${dict.use_global_wl}<small>\${dict.ug_wl_desc}</small></div>
+                                    </div>
+                                </div>
+                                <label class="field-label">\${dict.custom_wl}</label>
+                                <div class="input-with-btn" style="margin-bottom:10px;">
+                                    <input type="text" id="newGroupWl_\${groupIndex}" placeholder="Ex: 966512345678" onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupWhitelist(\${groupIndex});}">
+                                    <button type="button" class="btn btn-primary btn-sm" onclick="addGroupWhitelist(\${groupIndex})"><i class="fas fa-plus"></i> \${dict.add}</button>
+                                </div>
+                                <div class="chip-container">\${wlHtml}</div>
+                            </div>
+                        </div>
+                    </div>
+                \`;
+            }
+
 
             function updateGroupArray(gIndex, arrName, val, isChecked) {
                 let arr = groupsArr[gIndex][arrName];
@@ -1262,26 +1650,45 @@ app.get('/', (req, res) => {
                 const container = document.getElementById('blacklistContainer');
                 container.innerHTML = '';
                 blacklistArr.forEach((number, index) => {
-                    container.innerHTML += \`<div class="chip blacklist-chip">\${number} <span class="chip-remove" onclick="removeBlacklistNumber(\${index})">&times;</span></div>\`;
+                    container.innerHTML += \`<div class="chip red-chip">\${number} <span class="chip-remove" onclick="removeBlacklistNumber(\${index})">&times;</span></div>\`;
                 });
                 document.getElementById('blacklist-count').innerText = blacklistArr.length;
             }
 
+            function renderWhitelist() {
+                const container = document.getElementById('whitelistContainer');
+                container.innerHTML = '';
+                whitelistArr.forEach((number, index) => {
+                    container.innerHTML += \`<div class="chip">\${number} <span class="chip-remove" onclick="removeWhitelistNumber(\${index})">&times;</span></div>\`;
+                });
+            }
+
             async function addBlacklistNumber() {
                 const input = document.getElementById('newBlacklistNumber');
-                let rawValue = input.value;
-                let justNumbers = rawValue.replace(/\\D/g, ''); 
+                let justNumbers = input.value.replace(/\\D/g, ''); 
                 if (justNumbers) {
                     let finalId = justNumbers + '@c.us';
                     if (!blacklistArr.includes(finalId)) {
                         blacklistArr.push(finalId);
                         renderBlacklist(); 
                         try {
-                            await fetch('/api/blacklist/add', {
-                                method: 'POST',
-                                headers: {'Content-Type': 'application/json'},
-                                body: JSON.stringify({number: finalId})
-                            });
+                            await fetch('/api/blacklist/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({number: finalId}) });
+                        } catch(e) {}
+                    }
+                }
+                input.value = '';
+            }
+
+            async function addWhitelistNumber() {
+                const input = document.getElementById('newWhitelistNumber');
+                let justNumbers = input.value.replace(/\\D/g, ''); 
+                if (justNumbers) {
+                    let finalId = justNumbers + '@c.us';
+                    if (!whitelistArr.includes(finalId)) {
+                        whitelistArr.push(finalId);
+                        renderWhitelist(); 
+                        try {
+                            await fetch('/api/whitelist/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({number: finalId}) });
                         } catch(e) {}
                     }
                 }
@@ -1293,11 +1700,16 @@ app.get('/', (req, res) => {
                 blacklistArr.splice(index, 1);
                 renderBlacklist();
                 try {
-                    await fetch('/api/blacklist/remove', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({number: numberToRemove})
-                    });
+                    await fetch('/api/blacklist/remove', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({number: numberToRemove}) });
+                } catch(e) {}
+            }
+
+            async function removeWhitelistNumber(index) {
+                const numberToRemove = whitelistArr[index];
+                whitelistArr.splice(index, 1);
+                renderWhitelist();
+                try {
+                    await fetch('/api/whitelist/remove', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({number: numberToRemove}) });
                 } catch(e) {}
             }
 
@@ -1340,237 +1752,36 @@ app.get('/', (req, res) => {
                 renderDefaultWords();
             }
 
-            function renderGroups() {
-                const container = document.getElementById('groupsContainer');
-                container.innerHTML = '';
-                groupsArr.forEach((group, groupIndex) => {
-                    let wordsHtml = group.words.map((word, wordIndex) => 
-                        \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`
-                    ).join('');
+            function toggleGroupPanel(groupIndex, type, enabled) {
+                const panelMap = { spam: 'spam', welcome: 'welcome', words: 'words', panic: 'panic', blacklist: 'blacklist', whitelist: 'whitelist' };
+                const fieldMap = { spam: 'enableAntiSpam', welcome: 'enableWelcomeMessage', words: 'enableWordFilter', panic: 'enablePanicMode', blacklist: 'enableBlacklist', whitelist: 'enableWhitelist' };
+                const maxHeightMap = { spam: '600px', welcome: '200px', words: '600px', panic: '800px', blacklist: '600px', whitelist: '600px' };
 
-                    const blockedChecks = metaTypes.map(t => 
-                        \`<label class="cb-label"><input type="checkbox" value="\${t.id}" \${group.blockedTypes.includes(t.id)?'checked':''} onchange="updateGroupArray(\${groupIndex}, 'blockedTypes', '\${t.id}', this.checked)"> \${t.icon} \${t.name}</label>\`
-                    ).join('');
+                if (groupIndex !== 'global') {
+                    groupsArr[groupIndex][fieldMap[type]] = enabled;
+                }
 
-                    const spamLimitGrid = metaTypes.map(t => {
-                        const isChecked = group.spamTypes.includes(t.id) ? 'checked' : '';
-                        const limitVal = group.spamLimits[t.id] || 5;
-                        return \`
-                        <div class="limit-item">
-                            <input type="checkbox" value="\${t.id}" \${isChecked} onchange="updateGroupArray(\${groupIndex}, 'spamTypes', '\${t.id}', this.checked)">
-                            <span style="font-size:13px; width:70px;">\${t.icon} \${t.name}</span>
-                            <input type="number" value="\${limitVal}" min="1" onchange="updateSpamLimit(\${groupIndex}, '\${t.id}', this.value)">
-                        </div>\`;
-                    }).join('');
+                const panel = document.getElementById(\`group_\${panelMap[type]}_panel_\${groupIndex}\`);
+                if (!panel) return;
 
-                    container.innerHTML += \`
-                    <div class="group-card">
-                        <div class="group-card-header">
-                            <div class="group-card-title">
-                                <i class="fas fa-users text-muted" style="color:var(--text-muted)"></i>
-                                \${dict.group} \${groupIndex + 1}
-                                \${group.id ? \`<span class="group-id-badge">\${group.id.split('@')[0].slice(-8)}...</span>\` : \`<span style="color:var(--orange);font-size:12px;">\${dict.no_id}</span>\`}
-                            </div>
-                            <button type="button" class="btn btn-danger btn-sm" onclick="removeGroup(\${groupIndex})"><i class="fas fa-trash"></i> \${dict.delete}</button>
-                        </div>
-                        <div class="group-card-body">
-
-                            <div class="field-group">
-                                <label class="field-label">\${dict.target_group}</label>
-                                \${createGroupSelectHTML(group.id, \`updateGroupData(\${groupIndex}, 'id', this.value)\`, false)}
-                            </div>
-                            <div class="field-group">
-                                <label class="field-label">\${dict.admin_group}</label>
-                                \${createGroupSelectHTML(group.adminGroup, \`updateGroupData(\${groupIndex}, 'adminGroup', this.value)\`, true)}
-                            </div>
-
-                            <div class="sub-panel red" style="margin-bottom:12px;">
-                                <h4 style="color:var(--red);">\${dict.blocked_types}</h4>
-                                <div class="cb-group" style="margin-bottom:10px;">\${blockedChecks}</div>
-                                <label class="field-label">\${dict.block_action}</label>
-                                <select onchange="updateGroupData(\${groupIndex}, 'blockedAction', this.value)">
-                                    <option value="delete" \${group.blockedAction === 'delete' ? 'selected' : ''}>\${dict.act_del}</option>
-                                    <option value="poll" \${group.blockedAction === 'poll' ? 'selected' : ''}>\${dict.act_poll}</option>
-                                    <option value="auto" \${group.blockedAction === 'auto' ? 'selected' : ''}>\${dict.act_auto}</option>
-                                </select>
-                            </div>
-
-                            <div class="card danger">
-                                <div class="toggle-row danger" style="margin-bottom:0; border-radius:10px;">
-                                    <div class="toggle-left">
-                                        <label class="switch">
-                                            <input type="checkbox" \${group.enablePanicMode ? 'checked' : ''} onchange="toggleGroupPanicOptions(\${groupIndex}, this.checked)">
-                                            <span class="slider"></span>
-                                        </label>
-                                        <div class="toggle-label danger">
-                                            \${dict.panic_mode}
-                                            <small>\${dict.panic_desc}</small>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div id="group_panic_panel_\${groupIndex}" style="overflow: hidden; max-height: \${group.enablePanicMode ? '800px' : '0px'}; opacity: \${group.enablePanicMode ? '1' : '0'}; transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease; margin-top: \${group.enablePanicMode ? '20px' : '0px'};">
-                                    <div style="border-top: 1px dashed rgba(255,82,82,0.3); padding-top: 20px;">
-                                        
-                                        <div class="field-row" style="margin-bottom:12px;">
-                                            <div class="field-group" style="margin-bottom:0;">
-                                                <label class="field-label">\${dict.panic_msg_limit}</label>
-                                                <input type="number" value="\${group.panicMessageLimit}" min="2" onchange="updateGroupData(\${groupIndex}, 'panicMessageLimit', parseInt(this.value))">
-                                            </div>
-                                            <div class="field-group" style="margin-bottom:0;">
-                                                <label class="field-label">\${dict.panic_time_window}</label>
-                                                <input type="number" value="\${group.panicTimeWindow}" min="1" onchange="updateGroupData(\${groupIndex}, 'panicTimeWindow', parseInt(this.value))">
-                                            </div>
-                                            <div class="field-group" style="margin-bottom:0;">
-                                                <label class="field-label">\${dict.panic_lock_dur}</label>
-                                                <input type="number" value="\${group.panicLockoutDuration}" min="1" onchange="updateGroupData(\${groupIndex}, 'panicLockoutDuration', parseInt(this.value))">
-                                            </div>
-                                        </div>
-
-                                        <div class="field-group">
-                                            <label class="field-label">\${dict.panic_target}</label>
-                                            <select onchange="updateGroupData(\${groupIndex}, 'panicAlertTarget', this.value)">
-                                                <option value="both" \${group.panicAlertTarget === 'both' ? 'selected' : ''}>\${dict.target_both}</option>
-                                                <option value="group" \${group.panicAlertTarget === 'group' ? 'selected' : ''}>\${dict.target_group_only}</option>
-                                                <option value="admin" \${group.panicAlertTarget === 'admin' ? 'selected' : ''}>\${dict.admin_group_only}</option>
-                                            </select>
-                                        </div>
-
-                                        <div class="field-group" style="margin-bottom:0;">
-                                            <label class="field-label">\${dict.panic_msg_text}</label>
-                                            <textarea rows="2" onchange="updateGroupData(\${groupIndex}, 'panicAlertMessage', this.value)">\${group.panicAlertMessage}</textarea>
-                                        </div>
-
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="card warning">
-                                <div class="toggle-row warning" style="margin-bottom:0; border-radius:10px;">
-                                    <div class="toggle-left">
-                                        <label class="switch">
-                                            <input type="checkbox" \${group.enableAntiSpam ? 'checked' : ''} onchange="toggleGroupSpamOptions(\${groupIndex}, this.checked)">
-                                            <span class="slider"></span>
-                                        </label>
-                                        <div class="toggle-label warning">
-                                            \${dict.anti_spam}
-                                            <small>\${dict.spam_desc}</small>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div id="group_spam_panel_\${groupIndex}" style="overflow: hidden; max-height: \${group.enableAntiSpam ? '800px' : '0px'}; opacity: \${group.enableAntiSpam ? '1' : '0'}; transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease; margin-top: \${group.enableAntiSpam ? '20px' : '0px'};">
-                                    <div style="border-top: 1px dashed rgba(255,171,64,0.3); padding-top: 20px;">
-                                        <div class="field-row" style="margin-bottom:20px;">
-                                            <div class="field-group" style="margin-bottom:0;">
-                                                <label class="field-label">\${dict.action}</label>
-                                                <select onchange="updateGroupData(\${groupIndex}, 'spamAction', this.value)">
-                                                    <option value="poll" \${group.spamAction === 'poll' ? 'selected' : ''}>\${dict.poll}</option>
-                                                    <option value="auto" \${group.spamAction === 'auto' ? 'selected' : ''}>\${dict.auto_kick}</option>
-                                                </select>
-                                            </div>
-                                            <div class="field-group" style="margin-bottom:0;">
-                                                <label class="field-label">\${dict.text_dup}</label>
-                                                <input type="number" value="\${group.spamDuplicateLimit}" min="2" max="15" onchange="updateGroupData(\${groupIndex}, 'spamDuplicateLimit', parseInt(this.value))">
-                                            </div>
-                                        </div>
-                                        <label class="field-label" style="margin-bottom:12px;"><i class="fas fa-stopwatch"></i> \${dict.limits_15s}</label>
-                                        <div class="limit-grid">\${spamLimitGrid}</div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="card green">
-                                <div class="toggle-row green" style="margin-bottom:0; border-radius:10px;">
-                                    <div class="toggle-left">
-                                        <label class="switch">
-                                            <input type="checkbox" \${group.enableWelcomeMessage ? 'checked' : ''} onchange="toggleGroupWelcomeOptions(\${groupIndex}, this.checked)">
-                                            <span class="slider"></span>
-                                        </label>
-                                        <div class="toggle-label green">
-                                            \${dict.welcome_msg}
-                                            <small>\${dict.welcome_desc}</small>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div id="group_welcome_panel_\${groupIndex}" style="overflow: hidden; max-height: \${group.enableWelcomeMessage ? '200px' : '0px'}; opacity: \${group.enableWelcomeMessage ? '1' : '0'}; transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease; margin-top: \${group.enableWelcomeMessage ? '20px' : '0px'};">
-                                    <div style="border-color:rgba(100,200,120,0.3);">
-                                        <label class="field-label">\${dict.msg_text}</label>
-                                        <textarea rows="2" onchange="updateGroupData(\${groupIndex}, 'welcomeMessageText', this.value)">\${group.welcomeMessageText}</textarea>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="toggle-row danger" style="margin-bottom:12px;">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enableBlacklist ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableBlacklist', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label danger">\${dict.enable_bl}<small>\${dict.bl_desc}</small></div>
-                                </div>
-                            </div>
-
-                            <div class="card warning">
-                                <div class="toggle-row warning" style="margin-bottom:0; border-radius:10px;">
-                                    <div class="toggle-left">
-                                        <label class="switch">
-                                            <input type="checkbox" \${group.enableWordFilter ? 'checked' : ''} onchange="toggleGroupWordFilterOptions(\${groupIndex}, this.checked)">
-                                            <span class="slider"></span>
-                                        </label>
-                                        <div class="toggle-label warning">
-                                            \${dict.word_filter}
-                                            <small>\${dict.wf_desc}</small>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <div id="group_words_panel_\${groupIndex}" style="overflow: hidden; max-height: \${group.enableWordFilter ? '600px' : '0px'}; opacity: \${group.enableWordFilter ? '1' : '0'}; transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease; margin-top: \${group.enableWordFilter ? '20px' : '0px'};">
-                                    <div style="border-top: 0;">
-                                        <div class="toggle-row" style="margin-bottom:14px; background:rgba(255,255,255,0.04); border-color:rgba(255,171,64,0.25);">
-                                            <div class="toggle-left">
-                                                <label class="switch"><input type="checkbox" \${group.useDefaultWords ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'useDefaultWords', this.checked)"><span class="slider"></span></label>
-                                                <div class="toggle-label">\${dict.use_global}<small>\${dict.ug_desc}</small></div>
-                                            </div>
-                                        </div>
-                                        <label class="field-label">\${dict.custom_words}</label>
-                                        <div class="input-with-btn" style="margin-bottom:10px;">
-                                            <input type="text" id="newGroupWord_\${groupIndex}" placeholder="..." onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupWord(\${groupIndex});}">
-                                            <button type="button" class="btn btn-primary btn-sm" onclick="addGroupWord(\${groupIndex})"><i class="fas fa-plus"></i> \${dict.add}</button>
-                                        </div>
-                                        <div class="chip-container">\${wordsHtml}</div>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="toggle-row blue" style="margin-bottom:12px;">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enableAIFilter ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAIFilter', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label blue">\${dict.ai_text}</div>
-                                </div>
-                            </div>
-                            <div class="toggle-row purple" style="margin-bottom:12px;">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enableAIMedia ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'enableAIMedia', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label purple">\${dict.ai_vision}</div>
-                                </div>
-                            </div>
-                            <div class="toggle-row pink">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.autoAction ? 'checked' : ''} onchange="updateGroupToggle(\${groupIndex}, 'autoAction', this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label pink">\${dict.direct_del}</div>
-                                </div>
-                            </div>
-
-                        </div>
-                    </div>
-                    \`;
-                });
+                if (enabled) {
+                    panel.style.maxHeight = maxHeightMap[type];
+                    panel.style.opacity = '1';
+                    panel.style.marginTop = '20px';
+                } else {
+                    panel.style.maxHeight = '0px';
+                    panel.style.opacity = '0';
+                    panel.style.marginTop = '0px';
+                }
             }
 
             function addGroup() {
                 groupsArr.push({ 
                     id: '', adminGroup: '', words: [], useDefaultWords: true, 
                     enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
-                    autoAction: false, enableBlacklist: true,
+                    autoAction: false, enableBlacklist: true, enableWhitelist: true,
+                    useGlobalBlacklist: true, useGlobalWhitelist: true,
+                    customBlacklist: [], customWhitelist: [],
                     enableAntiSpam: false, spamDuplicateLimit: 3, spamAction: 'poll',
                     enableWelcomeMessage: false, welcomeMessageText: '${t("مرحباً بك يا {user} في مجموعتنا!", "Welcome {user} to our group!")}',
                     blockedTypes: [], blockedAction: 'delete', 
@@ -1578,58 +1789,60 @@ app.get('/', (req, res) => {
                     spamLimits: {text:7, image:3, video:2, audio:3, document:3, sticker:3},
                     enablePanicMode: false, panicMessageLimit: 10, panicTimeWindow: 5, panicLockoutDuration: 10, panicAlertTarget: 'both', panicAlertMessage: '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}'
                 });
-                renderGroups();
-            }
-
-            function removeGroup(index) {
-                if(confirm(dict.delete_confirm.replace(/<[^>]*>?/gm, ''))) {
-                    groupsArr.splice(index, 1);
-                    renderGroups();
-                }
+                // open the new group's detail immediately
+                openGroupDetail(groupsArr.length - 1);
             }
 
             function updateGroupData(index, field, value) { groupsArr[index][field] = value; }
             function updateGroupToggle(index, field, isChecked) { groupsArr[index][field] = isChecked; }
-
-            function toggleGroupPanel(groupIndex, type, enabled) {
-                const panelMap = { spam: 'spam', welcome: 'welcome', words: 'words', panic: 'panic' };
-                const fieldMap = { spam: 'enableAntiSpam', welcome: 'enableWelcomeMessage', words: 'enableWordFilter', panic: 'enablePanicMode' };
-                const maxHeightMap = { spam: '600px', welcome: '200px', words: '600px', panic: '800px' };
-
-                groupsArr[groupIndex][fieldMap[type]] = enabled;
-
-                const panel = document.getElementById(\`group_\${panelMap[type]}_panel_\${groupIndex}\`);
-                const toggle = panel.previousElementSibling;
-                if (!panel) return;
-
-                if (enabled) {
-                    panel.style.maxHeight = maxHeightMap[type];
-                    panel.style.opacity = '1';
-                    panel.style.marginBottom = '12px';
-                    if (toggle) toggle.style.borderRadius = '10px 10px 0 0';
-                } else {
-                    panel.style.maxHeight = '0px';
-                    panel.style.opacity = '0';
-                    panel.style.marginBottom = '0px';
-                    if (toggle) toggle.style.borderRadius = '10px';
-                }
-            }
 
             function addGroupWord(groupIndex) {
                 const input = document.getElementById(\`newGroupWord_\${groupIndex}\`);
                 const word = input.value.trim();
                 if (word && !groupsArr[groupIndex].words.includes(word)) {
                     groupsArr[groupIndex].words.push(word);
-                    renderGroups();
+                    renderGroupDetailBody(groupIndex);
                 }
             }
-
             function removeGroupWord(groupIndex, wordIndex) {
                 groupsArr[groupIndex].words.splice(wordIndex, 1);
-                renderGroups();
+                renderGroupDetailBody(groupIndex);
+            }
+
+            function addGroupBlacklist(gIndex) {
+                const input = document.getElementById(\`newGroupBl_\${gIndex}\`);
+                let justNumbers = input.value.replace(/\\D/g, ''); 
+                if (justNumbers) {
+                    let finalId = justNumbers + '@c.us';
+                    if (!groupsArr[gIndex].customBlacklist.includes(finalId)) {
+                        groupsArr[gIndex].customBlacklist.push(finalId);
+                        renderGroupDetailBody(gIndex);
+                    }
+                }
+            }
+            function removeGroupBlacklist(gIndex, idx) {
+                groupsArr[gIndex].customBlacklist.splice(idx, 1);
+                renderGroupDetailBody(gIndex);
+            }
+
+            function addGroupWhitelist(gIndex) {
+                const input = document.getElementById(\`newGroupWl_\${gIndex}\`);
+                let justNumbers = input.value.replace(/\\D/g, ''); 
+                if (justNumbers) {
+                    let finalId = justNumbers + '@c.us';
+                    if (!groupsArr[gIndex].customWhitelist.includes(finalId)) {
+                        groupsArr[gIndex].customWhitelist.push(finalId);
+                        renderGroupDetailBody(gIndex);
+                    }
+                }
+            }
+            function removeGroupWhitelist(gIndex, idx) {
+                groupsArr[gIndex].customWhitelist.splice(idx, 1);
+                renderGroupDetailBody(gIndex);
             }
 
             renderBlacklist();
+            renderWhitelist();
             renderDefaultWords();
             loadKnownGroups();
 
@@ -1669,9 +1882,7 @@ app.get('/', (req, res) => {
             async function saveConfig() {
                 let finalGroupsObj = {};
                 groupsArr.forEach(g => { 
-                    if(g.id) {
-                        finalGroupsObj[g.id] = g; 
-                    } 
+                    if(g.id) { finalGroupsObj[g.id] = g; } 
                 });
 
                 const gSpamTypes = [];
@@ -1696,6 +1907,7 @@ app.get('/', (req, res) => {
                     blockedTypes: getCheckedValues('globalBlockedTypes'),
                     blockedAction: document.getElementById('globalBlockedAction').value,
                     enableBlacklist: document.getElementById('enableBlacklist').checked,
+                    enableWhitelist: document.getElementById('enableWhitelist').checked,
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
                     enableAIFilter: document.getElementById('enableAIFilter').checked,
                     enableAIMedia: document.getElementById('enableAIMedia').checked,
@@ -1725,7 +1937,6 @@ app.get('/', (req, res) => {
                 await saveConfig();
             }
             
-            // ── Theme Toggle ──
             function toggleTheme() {
                 const isLight = document.documentElement.classList.toggle('light');
                 document.getElementById('themeToggle').innerHTML = isLight ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
@@ -1754,16 +1965,25 @@ app.get('/api/groups', (req, res) => {
     try {
         const groups = db.prepare('SELECT * FROM whatsapp_groups').all();
         res.json(groups);
-    } catch(e) {
-        res.json([]);
-    }
+    } catch(e) { res.json([]); }
 });
+
 
 app.post('/api/blacklist/add', (req, res) => {
     if(req.body.number) {
         try {
             db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(req.body.number);
             console.log(`[أمان] تم إضافة رقم للقائمة السوداء عبر اللوحة: ${req.body.number}`);
+        } catch(e) {}
+    }
+    res.sendStatus(200);
+});
+
+app.post('/api/whitelist/add', (req, res) => {
+    if(req.body.number) {
+        try {
+            db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)').run(req.body.number);
+            console.log(`[أمان] تم إضافة رقم موثوق للقائمة البيضاء عبر اللوحة: ${req.body.number}`);
         } catch(e) {}
     }
     res.sendStatus(200);
@@ -1779,16 +1999,24 @@ app.post('/api/blacklist/remove', (req, res) => {
     res.sendStatus(200);
 });
 
+app.post('/api/whitelist/remove', (req, res) => {
+    if(req.body.number) {
+        try {
+            db.prepare('DELETE FROM whitelist WHERE number = ?').run(req.body.number);
+            console.log(`[أمان] تم إزالة رقم من القائمة البيضاء عبر اللوحة: ${req.body.number}`);
+        } catch(e) {}
+    }
+    res.sendStatus(200);
+});
+
 app.post('/api/blacklist/purge', async (req, res) => {
     if (!client.info || !client.info.wid) {
         return res.status(400).json({ error: 'البوت غير متصل حالياً، يرجى الانتظار. / Bot disconnected, please wait.' });
     }
-
     try {
         console.log(`[تنظيف] بدأت عملية المسح الشامل للمجموعات...`);
         const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
         const blacklistArr = blacklistRows.map(r => r.number);
-
         if (blacklistArr.length === 0) return res.json({ message: 'القائمة السوداء فارغة. / Blacklist is empty.' });
 
         const chats = await client.getChats();
@@ -1799,7 +2027,6 @@ app.post('/api/blacklist/purge', async (req, res) => {
             if (chat.isGroup) {
                 const botData = chat.participants.find(p => p.id._serialized === botId);
                 const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
-
                 if (botIsAdmin) {
                     const usersToKick = chat.participants
                         .map(p => p.id._serialized)
@@ -1807,7 +2034,6 @@ app.post('/api/blacklist/purge', async (req, res) => {
                             const cleanId = id.replace(/:[0-9]+/, ''); 
                             return blacklistArr.includes(cleanId) || blacklistArr.includes(id);
                         });
-
                     if (usersToKick.length > 0) {
                         try {
                             await chat.removeParticipants(usersToKick);
@@ -1829,8 +2055,6 @@ app.post('/api/blacklist/purge', async (req, res) => {
 app.get('/api/status', (req, res) => {
     const l = req.query.lang === 'en' ? 'en' : 'ar';
     let translatedStatus = botStatus;
-    
-    // Auto-translate internal bot statuses if English is requested
     if (l === 'en') {
         translatedStatus = translatedStatus
             .replace('جاري تهيئة النظام وبدء التشغيل...', 'Initializing system and starting...')
@@ -1881,20 +2105,21 @@ client.on('ready', async () => {
     botStatus = '<i class="fas fa-check-circle" style="color:var(--accent);"></i> متصل وجاهز للعمل';
     currentQR = '';
     console.log('تم ربط حساب واتساب بنجاح!');
-    
-    // Sync groups to DB
     try {
         const chats = await client.getChats();
+        const groups = chats.filter(c => c.isGroup);
+        console.log('[معلومة] جاري مزامنة ' + groups.length + ' مجموعة...');
         const insertGrp = db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)');
-        
         const syncTx = db.transaction((chatList) => {
             for (const c of chatList) {
                 if (c.isGroup) insertGrp.run(c.id._serialized, c.name);
             }
         });
         syncTx(chats);
-        console.log('[معلومة] تمت مزامنة المجموعات في قاعدة البيانات.');
-    } catch (error) {}
+        console.log('[معلومة] تمت مزامنة ' + groups.length + ' مجموعة بنجاح.');
+    } catch (error) {
+        console.error('[خطأ] فشل مزامنة المجموعات: ' + error.message);
+    }
 });
 
 client.on('authenticated', () => {
@@ -1909,34 +2134,25 @@ client.on('disconnected', async (reason) => {
     setTimeout(() => { client.initialize(); }, 3000);
 });
 
-// Update group in DB when joining a new one
 client.on('group_join', async (notification) => {
     try {
         const chat = await notification.getChat();
         const groupId = chat.id._serialized;
-        
-        // Add newly joined group to the database
-        try {
-            db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)').run(groupId, chat.name);
-        } catch(e) {}
+        try { db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)').run(groupId, chat.name); } catch(e) {}
 
         const groupConfig = config.groupsConfig[groupId];
-        
         let isBlacklistEnabledForGroup = config.enableBlacklist;
+        let isWhitelistEnabledForGroup = config.enableWhitelist;
         let targetAdminGroup = config.defaultAdminGroup;
         
         if (groupConfig) {
-            if (typeof groupConfig.enableBlacklist !== 'undefined') {
-                isBlacklistEnabledForGroup = groupConfig.enableBlacklist;
-            }
-            if (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') {
-                targetAdminGroup = groupConfig.adminGroup.trim();
-            }
+            if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabledForGroup = groupConfig.enableBlacklist;
+            if (typeof groupConfig.enableWhitelist !== 'undefined') isWhitelistEnabledForGroup = groupConfig.enableWhitelist;
+            if (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') targetAdminGroup = groupConfig.adminGroup.trim();
         }
 
         for (const participantId of notification.recipientIds) {
             let cleanJoinedId = participantId.replace(/:[0-9]+/, '');
-            
             if (cleanJoinedId.includes('@lid')) {
                 try {
                     const contact = await client.getContactById(participantId);
@@ -1945,15 +2161,24 @@ client.on('group_join', async (notification) => {
                 } catch(e) { cleanJoinedId = cleanJoinedId.replace('@lid', '@c.us'); }
             }
 
+            let isWhitelisted = false;
+            if (isWhitelistEnabledForGroup) {
+                const globalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanJoinedId);
+                const useGlobal = groupConfig ? (groupConfig.useGlobalWhitelist !== false) : true;
+                const inCustom = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanJoinedId) : false;
+                if ((useGlobal && globalWl) || inCustom) isWhitelisted = true;
+            }
+            
             let isKicked = false;
 
-            if (isBlacklistEnabledForGroup) {
-                const isBanned = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanJoinedId);
-                
-                if (isBanned) {
+            if (isBlacklistEnabledForGroup && !isWhitelisted) {
+                const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanJoinedId);
+                const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
+                const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanJoinedId) : false;
+
+                if ((useGlobal && globalBl) || inCustom) {
                     console.log(`[أمان] محاولة دخول رقم محظور (${cleanJoinedId}). جاري الطرد...`);
                     isKicked = true;
-                    
                     setTimeout(async () => {
                         try {
                             await chat.removeParticipants([participantId]);
@@ -1976,7 +2201,6 @@ client.on('group_join', async (notification) => {
     } catch (error) {}
 });
 
-// Sync group name changes to DB
 client.on('group_update', async (notification) => {
     try {
         const chat = await notification.getChat();
@@ -1994,72 +2218,6 @@ client.on('message', async msg => {
         if (chat.isGroup) {
             if (msg.fromMe) return;
 
-            const groupId = chat.id._serialized;
-            const groupConfig = config.groupsConfig[groupId];
-            
-            // ================== PANIC MODE LOGIC ==================
-            if (groupConfig && groupConfig.enablePanicMode) {
-                if (!lockedGroups.has(groupId)) {
-                    const now = Date.now();
-                    if (!groupRaidTrackers.has(groupId)) groupRaidTrackers.set(groupId, []);
-                    let raidTracker = groupRaidTrackers.get(groupId);
-                    raidTracker.push(now);
-
-                    // Filter out timestamps outside the configured time window
-                    const timeWindowMs = (groupConfig.panicTimeWindow || 5) * 1000;
-                    raidTracker = raidTracker.filter(t => now - t < timeWindowMs);
-                    groupRaidTrackers.set(groupId, raidTracker);
-
-                    const limit = groupConfig.panicMessageLimit || 10;
-                    if (raidTracker.length >= limit) {
-                        // Trigger Panic Lockdown
-                        lockedGroups.add(groupId);
-                        groupRaidTrackers.delete(groupId); // Clear tracker immediately 
-
-                        console.log(`[أمان] تم رصد هجوم (Raid) في مجموعة ${chat.name}! جاري الإغلاق...`);
-
-                        try {
-                            // Lock the group (Set to Admins Only)
-                            await chat.setMessagesAdminsOnly(true);
-
-                            const lockMins = groupConfig.panicLockoutDuration || 10;
-                            const rawAlertMsg = groupConfig.panicAlertMessage || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.';
-                            const alertMsgText = rawAlertMsg.replace(/{time}/g, lockMins);
-                            const alertTarget = groupConfig.panicAlertTarget || 'both';
-
-                            let targetAdminGroup = (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') ? groupConfig.adminGroup.trim() : config.defaultAdminGroup;
-
-                            if (alertTarget === 'group' || alertTarget === 'both') {
-                                await client.sendMessage(groupId, alertMsgText);
-                            }
-                            if (alertTarget === 'admin' || alertTarget === 'both') {
-                                await client.sendMessage(targetAdminGroup, `🚨 *تنبيه طوارئ (Panic Mode)* 🚨\nتم رصد هجوم في مجموعة "${chat.name}" وإغلاقها تلقائياً لمدة ${lockMins} دقائق.`);
-                            }
-
-                            // Schedule automatic unlock
-                            setTimeout(async () => {
-                                try {
-                                    await chat.setMessagesAdminsOnly(false);
-                                    if (alertTarget === 'group' || alertTarget === 'both') {
-                                        await client.sendMessage(groupId, '🔓 *انتهت فترة الإغلاق التلقائي. يمكنكم إرسال الرسائل الآن.*');
-                                    }
-                                    if (alertTarget === 'admin' || alertTarget === 'both') {
-                                        await client.sendMessage(targetAdminGroup, `🔓 *تنبيه طوارئ*\nتم إعادة فتح مجموعة "${chat.name}" بعد انتهاء فترة الإغلاق التلقائي.`);
-                                    }
-                                } catch (e) { console.error('[خطأ] فشل فتح المجموعة:', e); }
-                                lockedGroups.delete(groupId);
-                            }, lockMins * 60 * 1000);
-
-                        } catch (e) {
-                            console.error('[خطأ] فشل إغلاق المجموعة في وضع الطوارئ. قد لا يكون البوت مشرفاً.', e);
-                            lockedGroups.delete(groupId); // Reset on failure
-                        }
-                    }
-                }
-                // If group is already locked, standard non-admin messages will naturally be blocked by WhatsApp.
-            }
-            // =======================================================
-
             const rawAuthorId = msg.author || msg.from;
             let cleanAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
 
@@ -2069,6 +2227,62 @@ client.on('message', async msg => {
                     if (contact && contact.number) cleanAuthorId = `${contact.number}@c.us`;
                     else cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us');
                 } catch(e) { cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us'); }
+            }
+
+            const groupId = chat.id._serialized;
+            const groupConfig = config.groupsConfig[groupId];
+            
+            let isWhitelistEnabled = config.enableWhitelist;
+            if (groupConfig && typeof groupConfig.enableWhitelist !== 'undefined') isWhitelistEnabled = groupConfig.enableWhitelist;
+
+            if (isWhitelistEnabled) {
+                const globalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanAuthorId);
+                const useGlobal = groupConfig ? (groupConfig.useGlobalWhitelist !== false) : true;
+                const inCustom = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanAuthorId) : false;
+                if ((useGlobal && globalWl) || inCustom) return;
+            }
+
+            // Panic Mode
+            if (groupConfig && groupConfig.enablePanicMode) {
+                if (!lockedGroups.has(groupId)) {
+                    const now = Date.now();
+                    if (!groupRaidTrackers.has(groupId)) groupRaidTrackers.set(groupId, []);
+                    let raidTracker = groupRaidTrackers.get(groupId);
+                    raidTracker.push(now);
+                    const timeWindowMs = (groupConfig.panicTimeWindow || 5) * 1000;
+                    raidTracker = raidTracker.filter(t => now - t < timeWindowMs);
+                    groupRaidTrackers.set(groupId, raidTracker);
+
+                    const limit = groupConfig.panicMessageLimit || 10;
+                    if (raidTracker.length >= limit) {
+                        lockedGroups.add(groupId);
+                        groupRaidTrackers.delete(groupId);
+                        console.log(`[أمان] تم رصد هجوم (Raid) في مجموعة ${chat.name}! جاري الإغلاق...`);
+                        try {
+                            await chat.setMessagesAdminsOnly(true);
+                            const lockMins = groupConfig.panicLockoutDuration || 10;
+                            const rawAlertMsg = groupConfig.panicAlertMessage || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.';
+                            const alertMsgText = rawAlertMsg.replace(/{time}/g, lockMins);
+                            const alertTarget = groupConfig.panicAlertTarget || 'both';
+                            let targetAdminGroup = (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') ? groupConfig.adminGroup.trim() : config.defaultAdminGroup;
+
+                            if (alertTarget === 'group' || alertTarget === 'both') await client.sendMessage(groupId, alertMsgText);
+                            if (alertTarget === 'admin' || alertTarget === 'both') await client.sendMessage(targetAdminGroup, `🚨 *تنبيه طوارئ (Panic Mode)* 🚨\nتم رصد هجوم في مجموعة "${chat.name}" وإغلاقها تلقائياً لمدة ${lockMins} دقائق.`);
+
+                            setTimeout(async () => {
+                                try {
+                                    await chat.setMessagesAdminsOnly(false);
+                                    if (alertTarget === 'group' || alertTarget === 'both') await client.sendMessage(groupId, '🔓 *انتهت فترة الإغلاق التلقائي. يمكنكم إرسال الرسائل الآن.*');
+                                    if (alertTarget === 'admin' || alertTarget === 'both') await client.sendMessage(targetAdminGroup, `🔓 *تنبيه طوارئ*\nتم إعادة فتح مجموعة "${chat.name}" بعد انتهاء فترة الإغلاق التلقائي.`);
+                                } catch (e) { console.error('[خطأ] فشل فتح المجموعة:', e); }
+                                lockedGroups.delete(groupId);
+                            }, lockMins * 60 * 1000);
+                        } catch (e) {
+                            console.error('[خطأ] فشل إغلاق المجموعة في وضع الطوارئ.', e);
+                            lockedGroups.delete(groupId);
+                        }
+                    }
+                }
             }
 
             let internalMsgType = 'text';
@@ -2084,27 +2298,22 @@ client.on('message', async msg => {
             let isAIMediaEnabled = config.enableAIMedia; 
             let isAutoActionEnabled = config.autoAction; 
             let isBlacklistEnabled = config.enableBlacklist; 
-            
             let isAntiSpamEnabled = config.enableAntiSpam;
             let spamDuplicateLimit = config.spamDuplicateLimit;
             let spamAction = config.spamAction;
             let spamTypes = config.spamTypes;
             let spamLimits = config.spamLimits;
-
             let blockedTypes = config.blockedTypes;
             let blockedAction = config.blockedAction;
             let forbiddenWords = [...config.defaultWords];
 
-            // Strictly ensure the admin group exists and has no spaces.
             if (groupConfig) {
                 targetAdminGroup = (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') ? groupConfig.adminGroup.trim() : config.defaultAdminGroup;
-                
                 if (typeof groupConfig.enableWordFilter !== 'undefined') isWordFilterEnabled = groupConfig.enableWordFilter;
                 if (typeof groupConfig.enableAIFilter !== 'undefined') isAIFilterEnabled = groupConfig.enableAIFilter;
                 if (typeof groupConfig.enableAIMedia !== 'undefined') isAIMediaEnabled = groupConfig.enableAIMedia;
                 if (typeof groupConfig.autoAction !== 'undefined') isAutoActionEnabled = groupConfig.autoAction;
                 if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabled = groupConfig.enableBlacklist;
-                
                 if (typeof groupConfig.enableAntiSpam !== 'undefined') {
                     isAntiSpamEnabled = groupConfig.enableAntiSpam;
                     spamDuplicateLimit = groupConfig.spamDuplicateLimit || 3;
@@ -2114,14 +2323,15 @@ client.on('message', async msg => {
                 if (groupConfig.spamLimits) spamLimits = groupConfig.spamLimits;
                 if (groupConfig.blockedTypes) blockedTypes = groupConfig.blockedTypes;
                 if (groupConfig.blockedAction) blockedAction = groupConfig.blockedAction;
-
                 if (groupConfig.useDefaultWords === false) forbiddenWords = [];
                 if (groupConfig.words && groupConfig.words.length > 0) forbiddenWords = [...forbiddenWords, ...groupConfig.words];
             }
 
             if (isBlacklistEnabled) {
-                const isBanned = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanAuthorId);
-                if (isBanned) {
+                const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanAuthorId);
+                const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
+                const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanAuthorId) : false;
+                if ((useGlobal && globalBl) || inCustom) {
                     console.log(`[أمان] رقم محظور أرسل رسالة. سيتم حذفه.`);
                     await msg.delete(true);
                     await chat.removeParticipants([rawAuthorId]);
@@ -2132,7 +2342,6 @@ client.on('message', async msg => {
             if (blockedTypes.includes(internalMsgType)) {
                 console.log(`[أمان] رصد نوع ممنوع قطعي (${internalMsgType}). يتم الحذف.`);
                 try { await msg.delete(true); } catch(e){}
-                
                 if (blockedAction === 'auto') {
                     try {
                         await chat.removeParticipants([rawAuthorId]);
@@ -2151,26 +2360,19 @@ client.on('message', async msg => {
 
             if (isAntiSpamEnabled) {
                 const trackerKey = `${groupId}_${cleanAuthorId}`;
-                
                 if (spamMutedUsers.has(trackerKey)) {
                     if (Date.now() < spamMutedUsers.get(trackerKey)) {
                         try { await msg.delete(true); } catch(e) {}
                         return; 
-                    } else {
-                        spamMutedUsers.delete(trackerKey); 
-                    }
+                    } else { spamMutedUsers.delete(trackerKey); }
                 }
 
                 if (!userTrackers.has(trackerKey)) userTrackers.set(trackerKey, []);
                 let tracker = userTrackers.get(trackerKey);
-
-                // --- MODIFIED CODE FOR METHOD 2 ---
                 const messageTime = msg.timestamp * 1000;
                 tracker.push({ text: msg.body, time: messageTime, msgObj: msg, id: msgId, type: internalMsgType });
-
                 tracker = tracker.filter(m => messageTime - m.time < 15000); 
                 userTrackers.set(trackerKey, tracker);
-                // ----------------------------------
 
                 let isSpamFlagged = false;
                 let spamFlagReason = '';
@@ -2202,32 +2404,21 @@ client.on('message', async msg => {
                 if (isSpamFlagged) {
                     console.log(`[أمان] تم رصد مزعج في (${chat.name}): ${spamFlagReason}`);
                     spamMutedUsers.set(trackerKey, Date.now() + 60000);
-
                     for (const m of tracker) abortedMessages.add(m.id);
-                    
                     try { await msg.delete(true); } catch(e) {}
-
                     for (const m of tracker) {
                         if (m.id !== msgId) { 
-                            try { 
-                                await m.msgObj.delete(true); 
-                                await new Promise(r => setTimeout(r, 500)); 
-                            } catch(err) {}
+                            try { await m.msgObj.delete(true); await new Promise(r => setTimeout(r, 500)); } catch(err) {}
                         }
                     }
-                    
                     try {
                         const recentMsgs = await chat.fetchMessages({ limit: 15 });
                         for (const rMsg of recentMsgs) {
                             if ((rMsg.author || rMsg.from) === rawAuthorId) {
-                                try { 
-                                    await rMsg.delete(true); 
-                                    await new Promise(r => setTimeout(r, 200)); 
-                                } catch(e) {}
+                                try { await rMsg.delete(true); await new Promise(r => setTimeout(r, 200)); } catch(e) {}
                             }
                         }
                     } catch(err) {}
-                    
                     userTrackers.delete(trackerKey); 
 
                     const contact = await msg.getContact();
@@ -2237,9 +2428,7 @@ client.on('message', async msg => {
                     if (spamAction === 'auto') {
                         try {
                             await chat.removeParticipants([rawAuthorId]);
-                            if (isBlacklistEnabled) {
-                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
-                            }
+                            if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
                             const reportText = `🚨 *حظر تلقائي (إزعاج)*\nتم طرد العضو من "${chat.name}"${isBlacklistEnabled ? ' وإدراجه في القائمة السوداء' : ''}.\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${spamFlagReason}`;
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
                         } catch(e) {}
@@ -2248,12 +2437,7 @@ client.on('message', async msg => {
                         const pollTitle = `🚨 إشعار إزعاج في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${spamFlagReason}\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
                         const poll = new Poll(pollTitle, pollOptions);
                         const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
-                        
-                        pendingBans.set(pollMsg.id._serialized, {
-                            senderId: senderId,
-                            pollMsg: pollMsg,
-                            isBlacklistEnabled: isBlacklistEnabled
-                        });
+                        pendingBans.set(pollMsg.id._serialized, { senderId: senderId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
                     }
                     return; 
                 }
@@ -2263,7 +2447,6 @@ client.on('message', async msg => {
 
             let isViolating = false;
             let violationReason = '';
-
             const isMediaContent = internalMsgType !== 'text';
 
             if (isWordFilterEnabled && forbiddenWords.length > 0 && msg.body) {
@@ -2299,7 +2482,6 @@ client.on('message', async msg => {
                 try {
                     const msgText = msg.body || '[صورة بدون نص مرفق]';
                     const aiPromptText = `أنت مشرف مجموعة صارم. تعليماتك هي: ${config.aiPrompt}\n\nبناء على التعليمات، هل هذا المحتوى يعتبر مخالف؟ أجب بكلمة "نعم" أو "لا" فقط.\nالمحتوى: "${msgText}"`;
-                    
                     const payload = { model: config.ollamaModel, prompt: aiPromptText, stream: false };
                     if (base64Image) payload.images = [base64Image];
 
@@ -2307,10 +2489,7 @@ client.on('message', async msg => {
                         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
                     });
                     
-                    if (abortedMessages.has(msgId)) {
-                        abortedMessages.delete(msgId); 
-                        return; 
-                    }
+                    if (abortedMessages.has(msgId)) { abortedMessages.delete(msgId); return; }
 
                     const data = await response.json();
                     if (data.response && data.response.includes('نعم')) {
@@ -2332,7 +2511,6 @@ client.on('message', async msg => {
                     try {
                         await chat.removeParticipants([rawAuthorId]);
                         if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
-
                         const reportText = `🚨 *تقرير إجراء وحظر تلقائي*\nتم مسح محتوى مخالف وطرد العضو من "${chat.name}".\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${violationReason}\n📝 *النص الممسوح:*\n"${messageContent}"`;
                         await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
                     } catch(e) {}
@@ -2340,7 +2518,6 @@ client.on('message', async msg => {
                     const pollOptions = isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا، اكتف بالحذف'] : ['نعم، طرد', 'لا'];
                     const pollTitle = `🚨 إشعار بمحتوى مخالف في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${violationReason}\nالنص:\n"${messageContent}"\n\nهل ترغب في طرده؟`;
                     const poll = new Poll(pollTitle, pollOptions);
-                    
                     const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
                     pendingBans.set(pollMsg.id._serialized, { senderId: senderId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
                 }
@@ -2351,7 +2528,6 @@ client.on('message', async msg => {
 
 client.on('vote_update', async vote => {
     const pollId = vote.parentMessage.id._serialized;
-
     if (pendingBans.has(pollId)) {
         if (vote.selectedOptions && vote.selectedOptions.length > 0) {
             const selectedOption = vote.selectedOptions[0].name;
@@ -2362,10 +2538,8 @@ client.on('vote_update', async vote => {
                 if (data.isBlacklistEnabled) {
                     try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan); } catch(e) {}
                 }
-
                 const botId = client.info.wid._serialized;
                 const chats = await client.getChats();
-                
                 for (const chat of chats) {
                     if (chat.isGroup) {
                         const botData = chat.participants.find(p => p.id._serialized === botId);
@@ -2373,13 +2547,12 @@ client.on('vote_update', async vote => {
                             try {
                                 await chat.removeParticipants([userToBan]);
                                 await new Promise(resolve => setTimeout(resolve, 1000)); 
-                            } catch(e) { }
+                            } catch(e) {}
                         }
                     }
                 }
                 const replyText = data.isBlacklistEnabled ? '✅ *تم تطبيق الطرد وإدراج الرقم في القائمة السوداء بنجاح.*' : '✅ *تم تطبيق الطرد بنجاح.*';
                 await data.pollMsg.reply(replyText);
-
             } else if (selectedOption.includes('لا')) {
                 await data.pollMsg.reply('🛑 *تم إلغاء الطرد بناءً على تصويت الإدارة.*');
             }
