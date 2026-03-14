@@ -47,12 +47,18 @@ db.exec(`
     );
 `);
 
-// تحديث بنية الجداول لإضافة ميزة (تخصيص حدود كل نوع وسائط) تلقائياً
+// تحديث بنية الجداول لإضافة الميزات الجديدة تلقائياً
 const colsToAdd = [
     'blocked_types TEXT',
     'blocked_action TEXT',
     'spam_types TEXT',
-    'spam_limits TEXT'
+    'spam_limits TEXT',
+    'enable_panic_mode INTEGER',
+    'panic_message_limit INTEGER',
+    'panic_time_window INTEGER',
+    'panic_lockout_duration INTEGER',
+    'panic_alert_target TEXT',
+    'panic_alert_message TEXT'
 ];
 colsToAdd.forEach(col => {
     try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch(e){}
@@ -107,7 +113,15 @@ function loadConfigFromDB() {
             blockedTypes: JSON.parse(g.blocked_types || '[]'),
             blockedAction: g.blocked_action || 'delete',
             spamTypes: JSON.parse(g.spam_types || '["text", "image", "video", "audio", "document", "sticker"]'),
-            spamLimits: JSON.parse(g.spam_limits || '{"text":7,"image":3,"video":2,"audio":3,"document":3,"sticker":3}')
+            spamLimits: JSON.parse(g.spam_limits || '{"text":7,"image":3,"video":2,"audio":3,"document":3,"sticker":3}'),
+            
+            // Panic Mode Settings
+            enablePanicMode: g.enable_panic_mode === 1,
+            panicMessageLimit: g.panic_message_limit || 10,
+            panicTimeWindow: g.panic_time_window || 5,
+            panicLockoutDuration: g.panic_lockout_duration || 10,
+            panicAlertTarget: g.panic_alert_target || 'both',
+            panicAlertMessage: g.panic_alert_message || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.'
         };
     });
 
@@ -143,8 +157,10 @@ function saveConfigToDB(conf) {
                 group_id, admin_group, use_default_words, enable_word_filter, enable_ai_filter, 
                 enable_ai_media, auto_action, enable_blacklist, enable_anti_spam, spam_duplicate_limit, 
                 spam_action, enable_welcome_message, welcome_message_text, custom_words,
-                blocked_types, blocked_action, spam_types, spam_limits
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                blocked_types, blocked_action, spam_types, spam_limits,
+                enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
+                panic_alert_target, panic_alert_message
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
@@ -155,7 +171,9 @@ function saveConfigToDB(conf) {
                 gData.spamAction, gData.enableWelcomeMessage ? 1 : 0, 
                 gData.welcomeMessageText, JSON.stringify(gData.words),
                 JSON.stringify(gData.blockedTypes || []), gData.blockedAction || 'delete', 
-                JSON.stringify(gData.spamTypes || []), JSON.stringify(gData.spamLimits || {})
+                JSON.stringify(gData.spamTypes || []), JSON.stringify(gData.spamLimits || {}),
+                gData.enablePanicMode ? 1 : 0, gData.panicMessageLimit, gData.panicTimeWindow,
+                gData.panicLockoutDuration, gData.panicAlertTarget, gData.panicAlertMessage
             );
         }
     });
@@ -179,6 +197,10 @@ let botStatus = '<i class="fas fa-spinner fa-spin"></i> جاري تهيئة ال
 const userTrackers = new Map();
 const abortedMessages = new Set(); 
 const spamMutedUsers = new Map(); 
+
+// Variables for Panic Mode tracking
+const groupRaidTrackers = new Map();
+const lockedGroups = new Set();
 
 app.get('/', (req, res) => {
     let lang = 'ar';
@@ -595,7 +617,7 @@ app.get('/', (req, res) => {
                         <span style="font-size: 11px; font-weight: 700; color: ${lang === 'en' ? 'var(--accent)' : 'var(--text-muted)'}; transition: color 0.3s;">EN</span>
                     </div>
 
-                    <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode"><i class="fas fa-moon"></i></button>    
+                    <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode"><i class="fas fa-moon"></i></button>   
                     <div class="status-pill">
                         <div class="status-dot" id="statusDot"></div>
                         <span id="status-text"><i class="fas fa-spinner fa-spin"></i> ${t('جاري تهيئة النظام وبدء التشغيل...', 'Initializing system...')}</span>
@@ -664,7 +686,7 @@ app.get('/', (req, res) => {
                         <div class="field-group">
                             <label class="field-label">${t('رقم الهاتف (بدون +)', 'Phone Number (without +)')}</label>
                             <div class="input-with-btn">
-                                <input type="text" id="newBlacklistNumber" placeholder="Ex: 966582014941" onkeypress="if(event.key==='Enter'){event.preventDefault();addBlacklistNumber();}">
+                                <input type="text" id="newBlacklistNumber" placeholder="Ex: 966512345678" onkeypress="if(event.key==='Enter'){event.preventDefault();addBlacklistNumber();}">
                                 <button type="button" class="btn btn-danger" onclick="addBlacklistNumber()"><i class="fas fa-ban"></i> ${t('حظر', 'Ban')}</button>
                             </div>
                         </div>
@@ -950,7 +972,19 @@ app.get('/', (req, res) => {
                 'ai_vision': '${t("تحليل الصور (Vision)", "Image Analysis (Vision)")}',
                 'direct_del': '${t("الحذف المباشر (تخطي التصويت)", "Direct Delete (Skip Poll)")}',
                 'select_group': '${t("اختر مجموعة...", "Select a Group...")}',
-                'default_setting': '${t("الاختيار الافتراضي (عام)", "Default (Global)")}'
+                'default_setting': '${t("الاختيار الافتراضي (عام)", "Default (Global)")}',
+                
+                // Panic Mode dictionary entries
+                'panic_mode': '${t("وضع الطوارئ (Panic Mode)", "Panic Mode")}',
+                'panic_desc': '${t("إغلاق المجموعة تلقائياً عند رصد هجوم", "Auto-lock group on raid detection")}',
+                'panic_msg_limit': '${t("عدد الرسائل", "Message Limit")}',
+                'panic_time_window': '${t("خلال (ثواني)", "Within (Seconds)")}',
+                'panic_lock_dur': '${t("مدة الإغلاق (دقائق)", "Lockout Duration (Mins)")}',
+                'panic_target': '${t("إرسال التنبيه إلى", "Send Alert To")}',
+                'target_group_only': '${t("المجموعة المستهدفة فقط", "Target Group Only")}',
+                'admin_group_only': '${t("مجموعة الإدارة فقط", "Admin Group Only")}',
+                'target_both': '${t("كلاهما (المجموعة والإدارة)", "Both")}',
+                'panic_msg_text': '${t("نص التنبيه ({time} للمدة)", "Alert Text ({time} for duration)")}'
             };
 
             // Fetch groups from database on load
@@ -1092,6 +1126,22 @@ app.get('/', (req, res) => {
                     panel.style.marginTop = '0px';
                 }
             }
+            
+            function toggleGroupPanicOptions(groupIndex, enabled) {
+                groupsArr[groupIndex].enablePanicMode = enabled;
+                const panel = document.getElementById(\`group_panic_panel_\${groupIndex}\`);
+                if (!panel) return;
+
+                if (enabled) {
+                    panel.style.maxHeight = '800px';
+                    panel.style.opacity = '1';
+                    panel.style.marginTop = '20px';
+                } else {
+                    panel.style.maxHeight = '0px';
+                    panel.style.opacity = '0';
+                    panel.style.marginTop = '0px';
+                }
+            }
 
             function toggleGroupWelcomeOptions(groupIndex, enabled) {
                 groupsArr[groupIndex].enableWelcomeMessage = enabled;
@@ -1180,7 +1230,13 @@ app.get('/', (req, res) => {
                 blockedTypes: groupsConfigObj[key].blockedTypes || [],
                 blockedAction: groupsConfigObj[key].blockedAction || 'delete',
                 spamTypes: groupsConfigObj[key].spamTypes || ['text', 'image', 'video', 'audio', 'document', 'sticker'],
-                spamLimits: groupsConfigObj[key].spamLimits || {text:7, image:3, video:2, audio:3, document:3, sticker:3}
+                spamLimits: groupsConfigObj[key].spamLimits || {text:7, image:3, video:2, audio:3, document:3, sticker:3},
+                enablePanicMode: groupsConfigObj[key].enablePanicMode || false,
+                panicMessageLimit: groupsConfigObj[key].panicMessageLimit || 10,
+                panicTimeWindow: groupsConfigObj[key].panicTimeWindow || 5,
+                panicLockoutDuration: groupsConfigObj[key].panicLockoutDuration || 10,
+                panicAlertTarget: groupsConfigObj[key].panicAlertTarget || 'both',
+                panicAlertMessage: groupsConfigObj[key].panicAlertMessage || '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}'
             }));
 
             function updateGroupArray(gIndex, arrName, val, isChecked) {
@@ -1339,6 +1395,56 @@ app.get('/', (req, res) => {
                                 </select>
                             </div>
 
+                            <div class="card danger">
+                                <div class="toggle-row danger" style="margin-bottom:0; border-radius:10px;">
+                                    <div class="toggle-left">
+                                        <label class="switch">
+                                            <input type="checkbox" \${group.enablePanicMode ? 'checked' : ''} onchange="toggleGroupPanicOptions(\${groupIndex}, this.checked)">
+                                            <span class="slider"></span>
+                                        </label>
+                                        <div class="toggle-label danger">
+                                            \${dict.panic_mode}
+                                            <small>\${dict.panic_desc}</small>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div id="group_panic_panel_\${groupIndex}" style="overflow: hidden; max-height: \${group.enablePanicMode ? '800px' : '0px'}; opacity: \${group.enablePanicMode ? '1' : '0'}; transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease; margin-top: \${group.enablePanicMode ? '20px' : '0px'};">
+                                    <div style="border-top: 1px dashed rgba(255,82,82,0.3); padding-top: 20px;">
+                                        
+                                        <div class="field-row" style="margin-bottom:12px;">
+                                            <div class="field-group" style="margin-bottom:0;">
+                                                <label class="field-label">\${dict.panic_msg_limit}</label>
+                                                <input type="number" value="\${group.panicMessageLimit}" min="2" onchange="updateGroupData(\${groupIndex}, 'panicMessageLimit', parseInt(this.value))">
+                                            </div>
+                                            <div class="field-group" style="margin-bottom:0;">
+                                                <label class="field-label">\${dict.panic_time_window}</label>
+                                                <input type="number" value="\${group.panicTimeWindow}" min="1" onchange="updateGroupData(\${groupIndex}, 'panicTimeWindow', parseInt(this.value))">
+                                            </div>
+                                            <div class="field-group" style="margin-bottom:0;">
+                                                <label class="field-label">\${dict.panic_lock_dur}</label>
+                                                <input type="number" value="\${group.panicLockoutDuration}" min="1" onchange="updateGroupData(\${groupIndex}, 'panicLockoutDuration', parseInt(this.value))">
+                                            </div>
+                                        </div>
+
+                                        <div class="field-group">
+                                            <label class="field-label">\${dict.panic_target}</label>
+                                            <select onchange="updateGroupData(\${groupIndex}, 'panicAlertTarget', this.value)">
+                                                <option value="both" \${group.panicAlertTarget === 'both' ? 'selected' : ''}>\${dict.target_both}</option>
+                                                <option value="group" \${group.panicAlertTarget === 'group' ? 'selected' : ''}>\${dict.target_group_only}</option>
+                                                <option value="admin" \${group.panicAlertTarget === 'admin' ? 'selected' : ''}>\${dict.admin_group_only}</option>
+                                            </select>
+                                        </div>
+
+                                        <div class="field-group" style="margin-bottom:0;">
+                                            <label class="field-label">\${dict.panic_msg_text}</label>
+                                            <textarea rows="2" onchange="updateGroupData(\${groupIndex}, 'panicAlertMessage', this.value)">\${group.panicAlertMessage}</textarea>
+                                        </div>
+
+                                    </div>
+                                </div>
+                            </div>
+
                             <div class="card warning">
                                 <div class="toggle-row warning" style="margin-bottom:0; border-radius:10px;">
                                     <div class="toggle-left">
@@ -1469,7 +1575,8 @@ app.get('/', (req, res) => {
                     enableWelcomeMessage: false, welcomeMessageText: '${t("مرحباً بك يا {user} في مجموعتنا!", "Welcome {user} to our group!")}',
                     blockedTypes: [], blockedAction: 'delete', 
                     spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
-                    spamLimits: {text:7, image:3, video:2, audio:3, document:3, sticker:3}
+                    spamLimits: {text:7, image:3, video:2, audio:3, document:3, sticker:3},
+                    enablePanicMode: false, panicMessageLimit: 10, panicTimeWindow: 5, panicLockoutDuration: 10, panicAlertTarget: 'both', panicAlertMessage: '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}'
                 });
                 renderGroups();
             }
@@ -1485,9 +1592,9 @@ app.get('/', (req, res) => {
             function updateGroupToggle(index, field, isChecked) { groupsArr[index][field] = isChecked; }
 
             function toggleGroupPanel(groupIndex, type, enabled) {
-                const panelMap = { spam: 'spam', welcome: 'welcome', words: 'words' };
-                const fieldMap = { spam: 'enableAntiSpam', welcome: 'enableWelcomeMessage', words: 'enableWordFilter' };
-                const maxHeightMap = { spam: '600px', welcome: '200px', words: '600px' };
+                const panelMap = { spam: 'spam', welcome: 'welcome', words: 'words', panic: 'panic' };
+                const fieldMap = { spam: 'enableAntiSpam', welcome: 'enableWelcomeMessage', words: 'enableWordFilter', panic: 'enablePanicMode' };
+                const maxHeightMap = { spam: '600px', welcome: '200px', words: '600px', panic: '800px' };
 
                 groupsArr[groupIndex][fieldMap[type]] = enabled;
 
@@ -1887,6 +1994,72 @@ client.on('message', async msg => {
         if (chat.isGroup) {
             if (msg.fromMe) return;
 
+            const groupId = chat.id._serialized;
+            const groupConfig = config.groupsConfig[groupId];
+            
+            // ================== PANIC MODE LOGIC ==================
+            if (groupConfig && groupConfig.enablePanicMode) {
+                if (!lockedGroups.has(groupId)) {
+                    const now = Date.now();
+                    if (!groupRaidTrackers.has(groupId)) groupRaidTrackers.set(groupId, []);
+                    let raidTracker = groupRaidTrackers.get(groupId);
+                    raidTracker.push(now);
+
+                    // Filter out timestamps outside the configured time window
+                    const timeWindowMs = (groupConfig.panicTimeWindow || 5) * 1000;
+                    raidTracker = raidTracker.filter(t => now - t < timeWindowMs);
+                    groupRaidTrackers.set(groupId, raidTracker);
+
+                    const limit = groupConfig.panicMessageLimit || 10;
+                    if (raidTracker.length >= limit) {
+                        // Trigger Panic Lockdown
+                        lockedGroups.add(groupId);
+                        groupRaidTrackers.delete(groupId); // Clear tracker immediately 
+
+                        console.log(`[أمان] تم رصد هجوم (Raid) في مجموعة ${chat.name}! جاري الإغلاق...`);
+
+                        try {
+                            // Lock the group (Set to Admins Only)
+                            await chat.setMessagesAdminsOnly(true);
+
+                            const lockMins = groupConfig.panicLockoutDuration || 10;
+                            const rawAlertMsg = groupConfig.panicAlertMessage || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.';
+                            const alertMsgText = rawAlertMsg.replace(/{time}/g, lockMins);
+                            const alertTarget = groupConfig.panicAlertTarget || 'both';
+
+                            let targetAdminGroup = (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') ? groupConfig.adminGroup.trim() : config.defaultAdminGroup;
+
+                            if (alertTarget === 'group' || alertTarget === 'both') {
+                                await client.sendMessage(groupId, alertMsgText);
+                            }
+                            if (alertTarget === 'admin' || alertTarget === 'both') {
+                                await client.sendMessage(targetAdminGroup, `🚨 *تنبيه طوارئ (Panic Mode)* 🚨\nتم رصد هجوم في مجموعة "${chat.name}" وإغلاقها تلقائياً لمدة ${lockMins} دقائق.`);
+                            }
+
+                            // Schedule automatic unlock
+                            setTimeout(async () => {
+                                try {
+                                    await chat.setMessagesAdminsOnly(false);
+                                    if (alertTarget === 'group' || alertTarget === 'both') {
+                                        await client.sendMessage(groupId, '🔓 *انتهت فترة الإغلاق التلقائي. يمكنكم إرسال الرسائل الآن.*');
+                                    }
+                                    if (alertTarget === 'admin' || alertTarget === 'both') {
+                                        await client.sendMessage(targetAdminGroup, `🔓 *تنبيه طوارئ*\nتم إعادة فتح مجموعة "${chat.name}" بعد انتهاء فترة الإغلاق التلقائي.`);
+                                    }
+                                } catch (e) { console.error('[خطأ] فشل فتح المجموعة:', e); }
+                                lockedGroups.delete(groupId);
+                            }, lockMins * 60 * 1000);
+
+                        } catch (e) {
+                            console.error('[خطأ] فشل إغلاق المجموعة في وضع الطوارئ. قد لا يكون البوت مشرفاً.', e);
+                            lockedGroups.delete(groupId); // Reset on failure
+                        }
+                    }
+                }
+                // If group is already locked, standard non-admin messages will naturally be blocked by WhatsApp.
+            }
+            // =======================================================
+
             const rawAuthorId = msg.author || msg.from;
             let cleanAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
 
@@ -1905,9 +2078,6 @@ client.on('message', async msg => {
             else if (msg.type === 'document') internalMsgType = 'document';
             else if (msg.type === 'sticker') internalMsgType = 'sticker';
 
-            const groupId = chat.id._serialized;
-            const groupConfig = config.groupsConfig[groupId];
-            
             let targetAdminGroup = config.defaultAdminGroup;
             let isWordFilterEnabled = config.enableWordFilter;
             let isAIFilterEnabled = config.enableAIFilter; 
@@ -1994,11 +2164,13 @@ client.on('message', async msg => {
                 if (!userTrackers.has(trackerKey)) userTrackers.set(trackerKey, []);
                 let tracker = userTrackers.get(trackerKey);
 
-                const now = Date.now();
-                tracker.push({ text: msg.body, time: now, msgObj: msg, id: msgId, type: internalMsgType });
+                // --- MODIFIED CODE FOR METHOD 2 ---
+                const messageTime = msg.timestamp * 1000;
+                tracker.push({ text: msg.body, time: messageTime, msgObj: msg, id: msgId, type: internalMsgType });
 
-                tracker = tracker.filter(m => now - m.time < 15000); 
+                tracker = tracker.filter(m => messageTime - m.time < 15000); 
                 userTrackers.set(trackerKey, tracker);
+                // ----------------------------------
 
                 let isSpamFlagged = false;
                 let spamFlagReason = '';
