@@ -664,7 +664,7 @@ app.get('/', (req, res) => {
                         <div class="field-group">
                             <label class="field-label">${t('رقم الهاتف (بدون +)', 'Phone Number (without +)')}</label>
                             <div class="input-with-btn">
-                                <input type="text" id="newBlacklistNumber" placeholder="Ex: 966582014941" onkeypress="if(event.key==='Enter'){event.preventDefault();addBlacklistNumber();}">
+                                <input type="text" id="newBlacklistNumber" placeholder="Ex: 96612345678" onkeypress="if(event.key==='Enter'){event.preventDefault();addBlacklistNumber();}">
                                 <button type="button" class="btn btn-danger" onclick="addBlacklistNumber()"><i class="fas fa-ban"></i> ${t('حظر', 'Ban')}</button>
                             </div>
                         </div>
