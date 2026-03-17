@@ -1,9 +1,29 @@
 const express = require('express');
-const { Client, LocalAuth, Poll } = require('whatsapp-web.js');
+const { Client, LocalAuth, Poll, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
-const Database = require('better-sqlite3'); 
-const util = require('util'); 
-const fs = require('fs'); 
+const Database = require('better-sqlite3');
+const util = require('util');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+
+// Ensure media storage directory exists
+if (!fs.existsSync('./media')) fs.mkdirSync('./media');
+
+// Multer: dynamic storage per group
+const mediaStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const dir = path.join('./media', req.params.groupId);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+        // Preserve original name but make it safe
+        const safe = file.originalname.replace(/[^a-zA-Z0-9._\u0600-\u06FF-]/g, '_');
+        cb(null, safe);
+    }
+});
+const upload = multer({ storage: mediaStorage, limits: { fileSize: 64 * 1024 * 1024 } }); // 64 MB max
 
 const logsHistory = [];
 const origLog = console.log;
@@ -13,14 +33,14 @@ function saveLog(type, args) {
     const time = new Date().toLocaleTimeString('ar-SA', { hour12: false });
     const msg = util.format(...args);
     logsHistory.push(`[${time}] [${type}] ${msg}`);
-    if (logsHistory.length > 200) logsHistory.shift(); 
+    if (logsHistory.length > 200) logsHistory.shift();
 }
 
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
 const db = new Database('./bot_data.sqlite');
-db.pragma('journal_mode = WAL'); 
+db.pragma('journal_mode = WAL');
 
 db.exec(`
     CREATE TABLE IF NOT EXISTS global_settings (key TEXT PRIMARY KEY, value TEXT);
@@ -43,18 +63,19 @@ const colsToAdd = [
     'panic_lockout_duration INTEGER', 'panic_alert_target TEXT', 'panic_alert_message TEXT',
     'enable_whitelist INTEGER', 'custom_blacklist TEXT', 'custom_whitelist TEXT',
     'use_global_blacklist INTEGER', 'use_global_whitelist INTEGER',
-    'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT'
+    'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT', 'qa_language TEXT'
 ];
 colsToAdd.forEach(col => {
-    try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch(e){}
+    try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch (e) { }
 });
 
 function loadConfigFromDB() {
     let newConfig = {
-        enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
-        autoAction: false, enableBlacklist: true, enableWhitelist: true, enableAntiSpam: false, 
+        enableWordFilter: true, enableAIFilter: false, enableAIMedia: false,
+        autoAction: false, enableBlacklist: true, enableWhitelist: true, enableAntiSpam: false,
+        safeMode: false,
         spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll',
-        blockedTypes: [], blockedAction: 'delete', 
+        blockedTypes: [], blockedAction: 'delete',
         spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
         spamLimits: { text: 7, image: 3, video: 2, audio: 3, document: 3, sticker: 3 },
         defaultAdminGroup: '', defaultWords: [], aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية.',
@@ -63,7 +84,7 @@ function loadConfigFromDB() {
 
     db.prepare('SELECT * FROM global_settings').all().forEach(row => {
         if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits'].includes(row.key)) newConfig[row.key] = JSON.parse(row.value);
-        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam'].includes(row.key)) {
+        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
         } else if (['spamDuplicateLimit', 'spamFloodLimit'].includes(row.key)) {
             newConfig[row.key] = parseInt(row.value, 10);
@@ -89,7 +110,7 @@ function loadConfigFromDB() {
             enablePanicMode: g.enable_panic_mode === 1, panicMessageLimit: g.panic_message_limit || 10,
             panicTimeWindow: g.panic_time_window || 5, panicLockoutDuration: g.panic_lockout_duration || 10,
             panicAlertTarget: g.panic_alert_target || 'both', panicAlertMessage: g.panic_alert_message || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.',
-            enableQAFeature: g.enable_qa_feature === 1, qaList: JSON.parse(g.custom_qa || '[]'), eventDate: g.qa_event_date || ''
+            enableQAFeature: g.enable_qa_feature === 1, qaList: JSON.parse(g.custom_qa || '[]'), eventDate: g.qa_event_date || '', qaLanguage: g.qa_language || 'ar'
         };
     });
     return newConfig;
@@ -105,6 +126,7 @@ function saveConfigToDB(conf) {
         setGlobal.run('enableBlacklist', conf.enableBlacklist ? '1' : '0');
         setGlobal.run('enableWhitelist', conf.enableWhitelist ? '1' : '0');
         setGlobal.run('enableAntiSpam', conf.enableAntiSpam ? '1' : '0');
+        setGlobal.run('safeMode', conf.safeMode ? '1' : '0');
         setGlobal.run('spamDuplicateLimit', conf.spamDuplicateLimit.toString());
         setGlobal.run('spamAction', conf.spamAction);
         setGlobal.run('blockedTypes', JSON.stringify(conf.blockedTypes));
@@ -126,8 +148,8 @@ function saveConfigToDB(conf) {
                 blocked_types, blocked_action, spam_types, spam_limits,
                 enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
                 panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist,
-                enable_qa_feature, custom_qa, qa_event_date
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                enable_qa_feature, custom_qa, qa_event_date, qa_language
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
@@ -136,20 +158,20 @@ function saveConfigToDB(conf) {
                 gData.enableAIFilter ? 1 : 0, gData.enableAIMedia ? 1 : 0, gData.autoAction ? 1 : 0,
                 gData.enableBlacklist ? 1 : 0, gData.enableWhitelist ? 1 : 0, gData.enableAntiSpam ? 1 : 0, gData.spamDuplicateLimit,
                 gData.spamAction, gData.enableWelcomeMessage ? 1 : 0, gData.welcomeMessageText, JSON.stringify(gData.words),
-                JSON.stringify(gData.blockedTypes || []), gData.blockedAction || 'delete', 
+                JSON.stringify(gData.blockedTypes || []), gData.blockedAction || 'delete',
                 JSON.stringify(gData.spamTypes || []), JSON.stringify(gData.spamLimits || {}),
                 gData.enablePanicMode ? 1 : 0, gData.panicMessageLimit, gData.panicTimeWindow,
                 gData.panicLockoutDuration, gData.panicAlertTarget, gData.panicAlertMessage,
                 JSON.stringify(gData.customBlacklist || []), JSON.stringify(gData.customWhitelist || []),
                 gData.useGlobalBlacklist ? 1 : 0, gData.useGlobalWhitelist ? 1 : 0,
-                gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || ''
+                gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || '', gData.qaLanguage || 'ar'
             );
         }
     });
     saveTx();
 }
 
-if (db.prepare('SELECT count(*) as count FROM global_settings').get().count === 0) saveConfigToDB(loadConfigFromDB()); 
+if (db.prepare('SELECT count(*) as count FROM global_settings').get().count === 0) saveConfigToDB(loadConfigFromDB());
 let config = loadConfigFromDB();
 
 const app = express();
@@ -158,7 +180,7 @@ app.use(express.json());
 
 let currentQR = '';
 let botStatus = '<i class="fas fa-spinner fa-spin"></i> جاري تهيئة النظام وبدء التشغيل...';
-const userTrackers = new Map(); const abortedMessages = new Set(); const spamMutedUsers = new Map(); 
+const userTrackers = new Map(); const abortedMessages = new Set(); const spamMutedUsers = new Map();
 const groupRaidTrackers = new Map(); const lockedGroups = new Set();
 
 app.get('/', (req, res) => {
@@ -177,7 +199,7 @@ app.get('/', (req, res) => {
     const blacklistArr = db.prepare('SELECT number FROM blacklist').all().map(r => r.number);
     const whitelistArr = db.prepare('SELECT number FROM whitelist').all().map(r => r.number);
 
-    const html = `<!DOCTYPE html><html dir="${dir}" lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${t('لوحة تحكم المشرف الآلي', 'Auto Mod Dashboard')}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><style>*{box-sizing:border-box;margin:0;padding:0}:root{--bg:#080c10;--sidebar-bg:#0e1318;--card-bg:#131920;--card-border:#1e2830;--input-bg:#0a0f14;--input-border:#1e2830;--text:#dce8f5;--text-muted:#6b8099;--accent:#00c853;--accent-dim:rgba(0,200,83,0.1);--accent-hover:#00a846;--red:#ff5252;--red-dim:rgba(255,82,82,0.1);--orange:#ffab40;--orange-dim:rgba(255,171,64,0.1);--blue:#40c4ff;--blue-dim:rgba(64,196,255,0.1);--purple:#d18cff;--purple-dim:rgba(209,140,255,0.1);--modal-bg:rgba(0,0,0,0.8);--topbar-bg:rgba(8,12,16,0.92);--radius:12px;--font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px}html[lang="ar"]{--font:'IBM Plex Sans Arabic',sans-serif}html.light{--bg:#f0f4f8;--sidebar-bg:#fff;--card-bg:#fff;--card-border:#dde3eb;--input-bg:#f5f8fb;--input-border:#dde3eb;--text:#0f1923;--text-muted:#5a7289;--accent:#00a846;--accent-dim:rgba(0,168,70,0.1);--accent-hover:#008c3a;--red:#e53935;--red-dim:rgba(229,57,53,0.1);--orange:#f57c00;--orange-dim:rgba(245,124,0,0.1);--blue:#0288d1;--blue-dim:rgba(2,136,209,0.1);--purple:#7b1fa2;--purple-dim:rgba(123,31,162,0.1);--modal-bg:rgba(0,0,0,0.55);--topbar-bg:rgba(240,244,248,0.94)}html.light .nav-item:hover{background:rgba(0,0,0,0.05);color:var(--text)}html.light .toggle-row{background:rgba(0,0,0,0.03)}html.light .toggle-row.danger{background:rgba(229,57,53,0.06)}html.light .toggle-row.warning{background:rgba(245,124,0,0.06)}html.light .toggle-row.blue{background:rgba(2,136,209,0.06)}html.light .toggle-row.purple{background:rgba(123,31,162,0.06)}html.light .toggle-row.pink{background:rgba(194,24,91,0.06)}html.light .toggle-row.green{background:rgba(0,150,80,0.06)}html.light .slider{background:#d0dae4;border-color:#b8c8d8}html.light .slider:before{background:#8fa8bf}html.light input:checked+.slider{background:rgba(0,168,70,0.18);border-color:var(--accent)}html.light input:checked+.slider:before{background:var(--accent)}html.light .sub-panel{background:rgba(0,0,0,0.03)}html.light #terminalOutput{background:#1a1a2e}html.light .card.danger,html.light .card.info,html.light .card.purple,html.light .card.success,html.light .card.warning{background:linear-gradient(180deg,var(--accent-dim) 0,var(--card-bg) 60%)}html.light .card.danger{background:linear-gradient(180deg,rgba(229,57,53,0.04) 0,var(--card-bg) 60%)}html.light .card.warning{background:linear-gradient(180deg,rgba(245,124,0,0.04) 0,var(--card-bg) 60%)}html.light .card.info{background:linear-gradient(180deg,rgba(2,136,209,0.04) 0,var(--card-bg) 60%)}html.light .card.success{background:linear-gradient(180deg,rgba(0,168,70,0.04) 0,var(--card-bg) 60%)}html.light .card.purple{background:linear-gradient(180deg,rgba(123,31,162,0.04) 0,var(--card-bg) 60%)}html.light .logo-icon{box-shadow:0 0 20px rgba(0,168,70,0.2)}html.light .btn-primary{box-shadow:none}html.light .qr-wrap{background:#e8edf3}html.light ::-webkit-scrollbar-track{background:var(--bg)}html.light ::-webkit-scrollbar-thumb{background:#c5d0db}html.light .group-list-card:hover{border-color:rgba(2,136,209,0.4)}.icon-btn{width:38px;height:38px;border-radius:10px;border:1.5px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:17px;transition:all .2s;flex-shrink:0}.icon-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}body,.card,.cb-label,.chip,.chip-container,.group-card,.group-list-card,.limit-item,.main,.modal-content,.nav-item,.qr-wrap,.sidebar,.sidebar-footer button,.status-pill,.sub-panel,.toggle-row,.topbar,input,select,textarea{transition:background .25s ease,border-color .25s ease,color .15s ease,box-shadow .25s ease}html{font-size:16px}body{font-family:var(--font);font-size:1rem;background:var(--bg);color:var(--text);min-height:100vh;display:flex;line-height:1.6}.sidebar{width:260px;min-height:100vh;background:var(--sidebar-bg);border-inline-end:1px solid var(--card-border);display:flex;flex-direction:column;position:fixed;inset-inline-start:0;top:0;z-index:100;transition:transform .3s}.sidebar-logo{padding:28px 22px 20px;border-bottom:1px solid var(--card-border);display:flex;align-items:center;gap:14px}.logo-icon{width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,#00e676,#00b0ff);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;box-shadow:0 0 20px rgba(0,230,118,0.3);color:#fff}.logo-text{font-size:15px;font-weight:700;color:var(--text);line-height:1.3}.logo-text small{display:block;font-weight:400;color:var(--text-muted);font-size:12px;margin-top:2px}.nav-section{padding:18px 16px 8px;font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase}.nav-item{display:flex;align-items:center;gap:12px;padding:12px 18px;margin:2px 10px;border-radius:10px;cursor:pointer;color:var(--text-muted);font-size:15px;transition:all .2s;border:none;background:0 0;width:calc(100% - 20px);text-align:start;font-family:var(--font)}.nav-item:hover{background:rgba(255,255,255,0.06);color:var(--text)}.nav-item.active{background:var(--accent-dim);color:var(--accent);font-weight:600;border:1px solid rgba(0,230,118,0.2)}.nav-item .nav-icon{font-size:18px;width:24px;text-align:center;flex-shrink:0}.nav-item .nav-badge{margin-inline-start:auto;background:var(--red);color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;min-width:22px;text-align:center}.sidebar-footer{margin-top:auto;padding:18px;border-top:1px solid var(--card-border);display:flex;gap:10px}.sidebar-footer button{flex:1;padding:11px 8px;border-radius:10px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;font-size:14px;transition:all .2s;font-family:var(--font);font-weight:600}.sidebar-footer button:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}.main{margin-inline-start:260px;flex:1;display:flex;flex-direction:column;min-height:100vh;min-width:0}.topbar{position:sticky;top:0;z-index:50;background:var(--topbar-bg);backdrop-filter:blur(16px);border-bottom:1px solid var(--card-border);padding:0 40px;height:66px;display:flex;align-items:center;justify-content:space-between}.topbar-title{font-size:18px;font-weight:700;color:var(--text)}.topbar-right{display:flex;align-items:center;gap:14px}.status-pill{display:flex;align-items:center;gap:10px;background:var(--card-bg);border:1px solid var(--card-border);padding:8px 18px;border-radius:24px;font-size:14px;color:var(--text-muted)}.status-dot{width:9px;height:9px;border-radius:50%;background:var(--text-muted);flex-shrink:0}.status-dot.online{background:var(--accent);box-shadow:0 0 10px var(--accent);animation:pulse 2s infinite}.status-dot.waiting{background:var(--orange);box-shadow:0 0 8px var(--orange)}@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 10px var(--accent)}50%{opacity:.6;box-shadow:0 0 4px var(--accent)}}.page{display:none;padding:32px 40px;width:100%;max-width:1400px}.page.active{display:block}.page-header{margin-bottom:28px}.page-header h2{font-size:26px;font-weight:700;color:var(--text);letter-spacing:-.3px;display:flex;align-items:center;gap:10px}.page-header p{color:var(--text-muted);font-size:15px;margin-top:5px}.card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius);padding:24px;margin-bottom:20px}.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--card-border)}.card-header h3{font-size:17px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.card.danger{border-color:rgba(255,82,82,0.35);background:linear-gradient(180deg,rgba(255,82,82,0.04) 0,var(--card-bg) 60%)}.card.warning{border-color:rgba(255,171,64,0.35);background:linear-gradient(180deg,rgba(255,171,64,0.04) 0,var(--card-bg) 60%)}.card.info{border-color:rgba(64,196,255,0.35);background:linear-gradient(180deg,rgba(64,196,255,0.04) 0,var(--card-bg) 60%)}.card.purple{border-color:rgba(209,140,255,0.35);background:linear-gradient(180deg,rgba(209,140,255,0.04) 0,var(--card-bg) 60%)}.card.success{border-color:rgba(0,230,118,0.35);background:linear-gradient(180deg,rgba(0,230,118,0.04) 0,var(--card-bg) 60%)}label.field-label{display:block;font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.8px}input[type=number],input[type=text],select,textarea{width:100%;padding:12px 16px;background:var(--input-bg);border:1.5px solid var(--input-border);border-radius:10px;color:var(--text);font-size:15px;font-family:var(--font);transition:border-color .2s,box-shadow .2s;outline:0}input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,230,118,0.12)}textarea{resize:vertical}select option{background:var(--card-bg);color:var(--text)}.field-group{margin-bottom:20px}.field-row{display:flex;gap:14px}.field-row>*{flex:1}.input-with-btn{display:flex;gap:10px}.input-with-btn input{margin:0}.btn{padding:11px 22px;border-radius:10px;border:none;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font);transition:all .2s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;letter-spacing:.2px}.btn-primary{background:var(--accent);color:#000}.btn-primary:hover{background:var(--accent-hover);transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,230,118,0.4)}.btn-danger{background:var(--red);color:#fff}.btn-danger:hover{background:#ff1744;transform:translateY(-1px);box-shadow:0 4px 14px rgba(255,82,82,0.4)}.btn-warning{background:var(--orange);color:#000}.btn-warning:hover{background:#ff9100;transform:translateY(-1px)}.btn-ghost{background:0 0;border:1.5px solid var(--card-border);color:var(--text-muted)}.btn-ghost:hover{border-color:var(--text);color:var(--text)}.btn-blue{background:var(--blue);color:#000}.btn-blue:hover{transform:translateY(-1px)}.btn-sm{padding:7px 14px;font-size:13px}.btn-full{width:100%;justify-content:center;padding:15px;font-size:16px}.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-radius:10px;background:rgba(255,255,255,0.03);border:1.5px solid var(--card-border);margin-bottom:12px;gap:14px}.toggle-row.danger{border-color:rgba(255,82,82,0.3);background:rgba(255,82,82,0.05)}.toggle-row.warning{border-color:rgba(255,171,64,0.3);background:rgba(255,171,64,0.05)}.toggle-row.blue{border-color:rgba(64,196,255,0.3);background:rgba(64,196,255,0.05)}.toggle-row.purple{border-color:rgba(209,140,255,0.3);background:rgba(209,140,255,0.05)}.toggle-row.pink{border-color:rgba(240,100,170,0.3);background:rgba(240,100,170,0.05)}.toggle-row.green{border-color:rgba(100,200,120,0.3);background:rgba(100,200,120,0.05)}.toggle-left{display:flex;align-items:center;gap:16px}.toggle-label{font-size:15px;font-weight:600;color:var(--text)}.toggle-label small{display:block;font-size:12px;color:var(--text-muted);font-weight:400;margin-top:2px}.toggle-label.danger{color:var(--red)}.toggle-label.warning{color:var(--orange)}.toggle-label.blue{color:var(--blue)}.toggle-label.purple{color:var(--purple)}.toggle-label.pink{color:#ff80ab}.toggle-label.green{color:#69f0ae}.switch{position:relative;display:inline-block;width:50px;height:28px;flex-shrink:0}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;cursor:pointer;inset:0;background:#1e2830;border:1.5px solid #2a3a4a;transition:.3s;border-radius:28px}.slider:before{position:absolute;content:"";height:20px;width:20px;bottom:2px;inset-inline-start:2px;background:#4a5a6a;transition:.3s;border-radius:50%}input:checked+.slider{background:rgba(0,230,118,0.2);border-color:var(--accent)}input:checked+.slider:before{background:var(--accent);box-shadow:0 0 8px rgba(0,230,118,0.6)}[dir=ltr] input:checked+.slider:before{transform:translateX(22px)}[dir=rtl] input:checked+.slider:before{transform:translateX(-22px)}.lang-slider:before{height:14px;width:14px;bottom:1.5px;inset-inline-start:1.5px}[dir=ltr] input:checked+.lang-slider:before{transform:translateX(20px)}[dir=rtl] input:checked+.lang-slider:before{transform:translateX(-20px)}.chip-container{display:flex;flex-wrap:wrap;gap:10px;padding:14px;background:var(--input-bg);border-radius:10px;min-height:52px;border:1.5px dashed var(--card-border);margin-top:10px}.chip{background:var(--accent-dim);color:var(--accent);padding:6px 14px;border-radius:20px;font-size:14px;display:flex;align-items:center;gap:8px;border:1px solid rgba(0,230,118,0.3);font-weight:500}.chip.red-chip{background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3)}.chip-remove{cursor:pointer;font-size:16px;font-weight:700;opacity:.6;line-height:1}.chip-remove:hover{opacity:1}.sub-panel{background:rgba(0,0,0,0.2);border:1.5px solid var(--card-border);border-radius:10px;padding:18px;margin-top:12px}.sub-panel.orange{border-color:rgba(255,171,64,0.3)}.sub-panel.red{border-color:rgba(255,82,82,0.3)}.sub-panel h4{font-size:14px;font-weight:700;color:var(--text-muted);margin-bottom:14px;display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.5px}.cb-group{display:flex;gap:10px;flex-wrap:wrap}.cb-label{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:8px;cursor:pointer;font-size:14px;color:var(--text-muted);transition:all .2s;user-select:none}.cb-label:hover{border-color:var(--accent);color:var(--text)}.cb-label input{accent-color:var(--accent);width:16px;height:16px;cursor:pointer}.limit-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}.limit-item{display:flex;align-items:center;gap:10px;background:var(--card-bg);padding:10px 14px;border-radius:9px;border:1.5px solid var(--card-border)}.limit-item input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:pointer;flex-shrink:0}.limit-item span{font-size:14px;flex:1;color:var(--text)}.limit-item input[type=number]{width:60px;padding:6px 8px;font-size:14px;margin:0;text-align:center}.group-list-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:14px;display:flex;align-items:center;gap:18px;padding:18px 22px;cursor:pointer;transition:border-color .2s,transform .2s}.group-list-card:hover{border-color:rgba(64,196,255,0.35);transform:translateY(-1px)}.group-list-card:hover .glc-arrow{opacity:1}.glc-avatar{width:52px;height:52px;border-radius:13px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:18px;font-weight:700;color:var(--accent)}.glc-avatar img{width:100%;height:100%;object-fit:cover;border-radius:11px}.glc-info{flex:1;min-width:0}.glc-name{font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.glc-id{font-family:monospace;font-size:11px;color:var(--text-muted);background:var(--input-bg);padding:2px 8px;border-radius:5px;border:1px solid var(--card-border);margin-top:4px;display:inline-block}.glc-chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.glc-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}.glc-chip.green{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,83,0.25)}.glc-chip.orange{background:var(--orange-dim);color:var(--orange);border:1px solid rgba(255,171,64,0.25)}.glc-chip.blue{background:var(--blue-dim);color:var(--blue);border:1px solid rgba(64,196,255,0.25)}.glc-chip.red{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.25)}.glc-chip.purple{background:var(--purple-dim);color:var(--purple);border:1px solid rgba(209,140,255,0.25)}.glc-arrow{font-size:16px;color:var(--blue);opacity:0;transition:opacity .2s;flex-shrink:0;margin-inline-start:4px}.group-detail-bar{display:flex;align-items:center;gap:16px;margin-bottom:28px;flex-wrap:wrap}.group-detail-identity{display:flex;align-items:center;gap:14px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:12px 20px;flex:1}.group-detail-avatar{width:46px;height:46px;border-radius:12px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:17px;font-weight:700;color:var(--accent)}.group-detail-avatar img{width:100%;height:100%;object-fit:cover;border-radius:10px}.group-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:16px;overflow:hidden;transition:border-color .2s}.group-card-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--card-border)}.group-card-title{font-size:16px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.group-card-body{padding:20px}.group-id-badge{font-family:monospace;font-size:12px;color:var(--text-muted);background:var(--input-bg);padding:3px 10px;border-radius:6px;border:1px solid var(--card-border)}.qr-wrap{display:flex;flex-direction:column;align-items:center;gap:20px;padding:36px;background:var(--input-bg);border-radius:12px;border:1.5px dashed var(--card-border)}#qr-image{max-width:230px;border-radius:12px;border:10px solid #fff;box-shadow:0 8px 30px rgba(0,0,0,0.5);display:none}.toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(24px);background:var(--accent);color:#000;padding:13px 28px;border-radius:40px;font-weight:700;font-size:15px;z-index:9999;opacity:0;transition:all .35s;pointer-events:none;box-shadow:0 4px 20px rgba(0,230,118,0.5)}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.modal{display:none;position:fixed;z-index:1000;inset:0;background:var(--modal-bg);backdrop-filter:blur(8px);align-items:center;justify-content:center}.modal.open{display:flex}.modal-content{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:16px;padding:32px;width:90%;max-width:640px;box-shadow:0 24px 80px rgba(0,0,0,0.7);animation:slideIn .25s ease;max-height:90vh;overflow-y:auto}.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.modal-header h3{font-size:20px;font-weight:700}.close-modal{background:0 0;border:none;color:var(--text-muted);font-size:26px;cursor:pointer;padding:4px;line-height:1}.close-modal:hover{color:var(--red)}@keyframes slideIn{from{transform:translateY(-24px);opacity:0}to{transform:translateY(0);opacity:1}}#terminalOutput{background:#000;color:#00ff88;font-family:'Courier New',monospace;height:400px;overflow-y:auto;padding:16px;border-radius:10px;font-size:13px;direction:ltr;text-align:start;border:1px solid #0a1a0a}#terminalOutput div{margin-bottom:5px;border-bottom:1px solid #0a1a0a;padding-bottom:5px;word-wrap:break-word;line-height:1.6}.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}.card-grid .card{margin-bottom:0}.card-grid-full{grid-column:1/-1}@media (max-width:1100px){.card-grid{grid-template-columns:1fr}}.section-sep{height:1px;background:var(--card-border);margin:20px 0}::-webkit-scrollbar{width:7px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:4px}.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99}.hamburger{display:none;background:0 0;border:none;color:var(--text);font-size:24px;cursor:pointer;padding:4px}.group-tabs{display:flex;gap:4px;border-bottom:1.5px solid var(--card-border);margin-bottom:20px}.group-tab{padding:10px 18px;border:none;background:0 0;color:var(--text-muted);font-size:14px;font-weight:600;font-family:var(--font);cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px;transition:all .2s;display:flex;align-items:center;gap:7px;border-radius:8px 8px 0 0}.group-tab:hover{color:var(--text);background:rgba(255,255,255,0.04)}.group-tab.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-dim)}.group-tab-panel{display:none}.group-tab-panel.active{display:block}.step-badge{display:inline-block;background:var(--blue-dim);color:var(--blue);padding:2px 9px;border-radius:12px;margin-inline-end:6px;font-weight:700;font-size:13px}@media (max-width:768px){.sidebar{transform:translateX(100%)}[dir=ltr] .sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.sidebar-overlay.open{display:block}.main{margin-inline-start:0}.hamburger{display:block}.page{padding:18px}.topbar{padding:0 18px}.limit-grid{grid-template-columns:1fr}.card-grid{grid-template-columns:1fr}.field-row{flex-direction:column}}</style>
+    const html = `<!DOCTYPE html><html dir="${dir}" lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${t('لوحة تحكم المشرف الآلي', 'Auto Mod Dashboard')}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><style>*{box-sizing:border-box;margin:0;padding:0}:root{--bg:#080c10;--sidebar-bg:#0e1318;--card-bg:#131920;--card-border:#1e2830;--input-bg:#0a0f14;--input-border:#1e2830;--text:#dce8f5;--text-muted:#6b8099;--accent:#00c853;--accent-dim:rgba(0,200,83,0.1);--accent-hover:#00a846;--red:#ff5252;--red-dim:rgba(255,82,82,0.1);--orange:#ffab40;--orange-dim:rgba(255,171,64,0.1);--blue:#40c4ff;--blue-dim:rgba(64,196,255,0.1);--purple:#d18cff;--purple-dim:rgba(209,140,255,0.1);--modal-bg:rgba(0,0,0,0.8);--topbar-bg:rgba(8,12,16,0.92);--radius:12px;--font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px}html[lang="ar"]{--font:'IBM Plex Sans Arabic',sans-serif}html.light{--bg:#f0f4f8;--sidebar-bg:#fff;--card-bg:#fff;--card-border:#dde3eb;--input-bg:#f5f8fb;--input-border:#dde3eb;--text:#0f1923;--text-muted:#5a7289;--accent:#00a846;--accent-dim:rgba(0,168,70,0.1);--accent-hover:#008c3a;--red:#e53935;--red-dim:rgba(229,57,53,0.1);--orange:#f57c00;--orange-dim:rgba(245,124,0,0.1);--blue:#0288d1;--blue-dim:rgba(2,136,209,0.1);--purple:#7b1fa2;--purple-dim:rgba(123,31,162,0.1);--modal-bg:rgba(0,0,0,0.55);--topbar-bg:rgba(240,244,248,0.94)}html.light .nav-item:hover{background:rgba(0,0,0,0.05);color:var(--text)}html.light .toggle-row{background:rgba(0,0,0,0.03)}html.light .toggle-row.danger{background:rgba(229,57,53,0.06)}html.light .toggle-row.warning{background:rgba(245,124,0,0.06)}html.light .toggle-row.blue{background:rgba(2,136,209,0.06)}html.light .toggle-row.purple{background:rgba(123,31,162,0.06)}html.light .toggle-row.pink{background:rgba(194,24,91,0.06)}html.light .toggle-row.green{background:rgba(0,150,80,0.06)}html.light .slider{background:#d0dae4;border-color:#b8c8d8}html.light .slider:before{background:#8fa8bf}html.light input:checked+.slider{background:rgba(0,168,70,0.18);border-color:var(--accent)}html.light input:checked+.slider:before{background:var(--accent)}html.light .sub-panel{background:rgba(0,0,0,0.03)}html.light #terminalOutput{background:#1a1a2e}html.light .card.danger,html.light .card.info,html.light .card.purple,html.light .card.success,html.light .card.warning{background:linear-gradient(180deg,var(--accent-dim) 0,var(--card-bg) 60%)}html.light .card.danger{background:linear-gradient(180deg,rgba(229,57,53,0.04) 0,var(--card-bg) 60%)}html.light .card.warning{background:linear-gradient(180deg,rgba(245,124,0,0.04) 0,var(--card-bg) 60%)}html.light .card.info{background:linear-gradient(180deg,rgba(2,136,209,0.04) 0,var(--card-bg) 60%)}html.light .card.success{background:linear-gradient(180deg,rgba(0,168,70,0.04) 0,var(--card-bg) 60%)}html.light .card.purple{background:linear-gradient(180deg,rgba(123,31,162,0.04) 0,var(--card-bg) 60%)}html.light .logo-icon{box-shadow:0 0 20px rgba(0,168,70,0.2)}html.light .btn-primary{box-shadow:none}html.light .qr-wrap{background:#e8edf3}html.light ::-webkit-scrollbar-track{background:var(--bg)}html.light ::-webkit-scrollbar-thumb{background:#c5d0db}html.light .group-list-card:hover{border-color:rgba(2,136,209,0.4)}.icon-btn{width:38px;height:38px;border-radius:10px;border:1.5px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:17px;transition:all .2s;flex-shrink:0}.icon-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}body,.card,.cb-label,.chip,.chip-container,.group-card,.group-list-card,.limit-item,.main,.modal-content,.nav-item,.qr-wrap,.sidebar,.sidebar-footer button,.status-pill,.sub-panel,.toggle-row,.topbar,input,select,textarea{transition:background .25s ease,border-color .25s ease,color .15s ease,box-shadow .25s ease}html{font-size:16px}body{font-family:var(--font);font-size:1rem;background:var(--bg);color:var(--text);min-height:100vh;display:flex;line-height:1.6}.sidebar{width:260px;min-height:100vh;background:var(--sidebar-bg);border-inline-end:1px solid var(--card-border);display:flex;flex-direction:column;position:fixed;inset-inline-start:0;top:0;z-index:100;transition:transform .3s}.sidebar-logo{padding:28px 22px 20px;border-bottom:1px solid var(--card-border);display:flex;align-items:center;gap:14px}.logo-icon{width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,#00e676,#00b0ff);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;box-shadow:0 0 20px rgba(0,230,118,0.3);color:#fff}.logo-text{font-size:15px;font-weight:700;color:var(--text);line-height:1.3}.logo-text small{display:block;font-weight:400;color:var(--text-muted);font-size:12px;margin-top:2px}.nav-section{padding:18px 16px 8px;font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase}.nav-item{display:flex;align-items:center;gap:12px;padding:12px 18px;margin:2px 10px;border-radius:10px;cursor:pointer;color:var(--text-muted);font-size:15px;transition:all .2s;border:none;background:0 0;width:calc(100% - 20px);text-align:start;font-family:var(--font)}.nav-item:hover{background:rgba(255,255,255,0.06);color:var(--text)}.nav-item.active{background:var(--accent-dim);color:var(--accent);font-weight:600;border:1px solid rgba(0,230,118,0.2)}.nav-item .nav-icon{font-size:18px;width:24px;text-align:center;flex-shrink:0}.nav-item .nav-badge{margin-inline-start:auto;background:var(--red);color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;min-width:22px;text-align:center}.sidebar-footer{margin-top:auto;padding:18px;border-top:1px solid var(--card-border);display:flex;gap:10px}.sidebar-footer button{flex:1;padding:11px 8px;border-radius:10px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;font-size:14px;transition:all .2s;font-family:var(--font);font-weight:600}.sidebar-footer button:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}.main{margin-inline-start:260px;flex:1;display:flex;flex-direction:column;min-height:100vh;min-width:0}.topbar{position:sticky;top:0;z-index:50;background:var(--topbar-bg);backdrop-filter:blur(16px);border-bottom:1px solid var(--card-border);padding:0 40px;height:66px;display:flex;align-items:center;justify-content:space-between}.topbar-title{font-size:18px;font-weight:700;color:var(--text)}.topbar-right{display:flex;align-items:center;gap:14px}.status-pill{display:flex;align-items:center;gap:10px;background:var(--card-bg);border:1px solid var(--card-border);padding:8px 18px;border-radius:24px;font-size:14px;color:var(--text-muted)}.status-dot{width:9px;height:9px;border-radius:50%;background:var(--text-muted);flex-shrink:0}.status-dot.online{background:var(--accent);box-shadow:0 0 10px var(--accent);animation:pulse 2s infinite}.status-dot.waiting{background:var(--orange);box-shadow:0 0 8px var(--orange)}@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 10px var(--accent)}50%{opacity:.6;box-shadow:0 0 4px var(--accent)}}.page{display:none;padding:32px 40px;width:100%;max-width:1400px}.page.active{display:block}.page-header{margin-bottom:28px}.page-header h2{font-size:26px;font-weight:700;color:var(--text);letter-spacing:-.3px;display:flex;align-items:center;gap:10px}.page-header p{color:var(--text-muted);font-size:15px;margin-top:5px}.card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius);padding:24px;margin-bottom:20px}.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--card-border)}.card-header h3{font-size:17px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.card.danger{border-color:rgba(255,82,82,0.35);background:linear-gradient(180deg,rgba(255,82,82,0.04) 0,var(--card-bg) 60%)}.card.warning{border-color:rgba(255,171,64,0.35);background:linear-gradient(180deg,rgba(255,171,64,0.04) 0,var(--card-bg) 60%)}.card.info{border-color:rgba(64,196,255,0.35);background:linear-gradient(180deg,rgba(64,196,255,0.04) 0,var(--card-bg) 60%)}.card.purple{border-color:rgba(209,140,255,0.35);background:linear-gradient(180deg,rgba(209,140,255,0.04) 0,var(--card-bg) 60%)}.card.success{border-color:rgba(0,230,118,0.35);background:linear-gradient(180deg,rgba(0,230,118,0.04) 0,var(--card-bg) 60%)}label.field-label{display:block;font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.8px}input[type=number],input[type=text],select,textarea{width:100%;padding:12px 16px;background:var(--input-bg);border:1.5px solid var(--input-border);border-radius:10px;color:var(--text);font-size:15px;font-family:var(--font);transition:border-color .2s,box-shadow .2s;outline:0}input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,230,118,0.12)}textarea{resize:vertical}select option{background:var(--card-bg);color:var(--text)}.field-group{margin-bottom:20px}.field-row{display:flex;gap:14px}.field-row>*{flex:1}.input-with-btn{display:flex;gap:10px}.input-with-btn input{margin:0}.btn{padding:11px 22px;border-radius:10px;border:1.5px solid transparent;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font);transition:all .2s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;letter-spacing:.2px}.btn-primary{background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700}.btn-primary:hover{background:rgba(0,230,118,0.18);border-color:rgba(0,230,118,0.7);transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,230,118,0.2)}.btn-danger{background:var(--red);color:#fff;border-color:transparent}.btn-danger:hover{background:#ff1744;transform:translateY(-1px);box-shadow:0 4px 14px rgba(255,82,82,0.4)}.btn-warning{background:var(--orange);color:#000;border-color:transparent}.btn-warning:hover{background:#ff9100;transform:translateY(-1px)}.btn-ghost{background:0 0;border:1.5px solid var(--card-border);color:var(--text-muted)}.btn-ghost:hover{border-color:var(--text);color:var(--text)}.btn-blue{background:var(--blue);color:#000;border-color:transparent}.btn-blue:hover{transform:translateY(-1px)}.btn-sm{padding:7px 14px;font-size:13px}.btn-full{width:100%;justify-content:center;padding:15px;font-size:16px}.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-radius:10px;background:rgba(255,255,255,0.03);border:1.5px solid var(--card-border);margin-bottom:12px;gap:14px}.toggle-row.danger{border-color:rgba(255,82,82,0.3);background:rgba(255,82,82,0.05)}.toggle-row.warning{border-color:rgba(255,171,64,0.3);background:rgba(255,171,64,0.05)}.toggle-row.blue{border-color:rgba(64,196,255,0.3);background:rgba(64,196,255,0.05)}.toggle-row.purple{border-color:rgba(209,140,255,0.3);background:rgba(209,140,255,0.05)}.toggle-row.pink{border-color:rgba(240,100,170,0.3);background:rgba(240,100,170,0.05)}.toggle-row.green{border-color:rgba(100,200,120,0.3);background:rgba(100,200,120,0.05)}.toggle-left{display:flex;align-items:center;gap:16px}.toggle-label{font-size:15px;font-weight:600;color:var(--text)}.toggle-label small{display:block;font-size:12px;color:var(--text-muted);font-weight:400;margin-top:2px}.toggle-label.danger{color:var(--red)}.toggle-label.warning{color:var(--orange)}.toggle-label.blue{color:var(--blue)}.toggle-label.purple{color:var(--purple)}.toggle-label.pink{color:#ff80ab}.toggle-label.green{color:#69f0ae}.switch{position:relative;display:inline-block;width:50px;height:28px;flex-shrink:0}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;cursor:pointer;inset:0;background:#1e2830;border:1.5px solid #2a3a4a;transition:.3s;border-radius:28px}.slider:before{position:absolute;content:"";height:20px;width:20px;bottom:2px;inset-inline-start:2px;background:#4a5a6a;transition:.3s;border-radius:50%}input:checked+.slider{background:rgba(0,230,118,0.2);border-color:var(--accent)}input:checked+.slider:before{background:var(--accent);box-shadow:0 0 8px rgba(0,230,118,0.6)}[dir=ltr] input:checked+.slider:before{transform:translateX(22px)}[dir=rtl] input:checked+.slider:before{transform:translateX(-22px)}.lang-slider:before{height:14px;width:14px;bottom:1.5px;inset-inline-start:1.5px}[dir=ltr] input:checked+.lang-slider:before{transform:translateX(20px)}[dir=rtl] input:checked+.lang-slider:before{transform:translateX(-20px)}.chip-container{display:flex;flex-wrap:wrap;gap:10px;padding:14px;background:var(--input-bg);border-radius:10px;min-height:52px;border:1.5px dashed var(--card-border);margin-top:10px}.chip{background:var(--accent-dim);color:var(--accent);padding:6px 14px;border-radius:20px;font-size:14px;display:flex;align-items:center;gap:8px;border:1px solid rgba(0,230,118,0.3);font-weight:500}.chip.red-chip{background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3)}.chip-remove{cursor:pointer;font-size:16px;font-weight:700;opacity:.6;line-height:1}.chip-remove:hover{opacity:1}.sub-panel{background:rgba(0,0,0,0.2);border:1.5px solid var(--card-border);border-radius:10px;padding:18px;margin-top:12px}.sub-panel.orange{border-color:rgba(255,171,64,0.3)}.sub-panel.red{border-color:rgba(255,82,82,0.3)}.sub-panel h4{font-size:14px;font-weight:700;color:var(--text-muted);margin-bottom:14px;display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.5px}.cb-group{display:flex;gap:10px;flex-wrap:wrap}.cb-label{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:8px;cursor:pointer;font-size:14px;color:var(--text-muted);transition:all .2s;user-select:none}.cb-label:hover{border-color:var(--accent);color:var(--text)}.cb-label input{accent-color:var(--accent);width:16px;height:16px;cursor:pointer}.limit-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}.limit-item{display:flex;align-items:center;gap:10px;background:var(--card-bg);padding:10px 14px;border-radius:9px;border:1.5px solid var(--card-border)}.limit-item input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:pointer;flex-shrink:0}.limit-item span{font-size:14px;flex:1;color:var(--text)}.limit-item input[type=number]{width:60px;padding:6px 8px;font-size:14px;margin:0;text-align:center}.group-list-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:14px;display:flex;align-items:center;gap:18px;padding:18px 22px;cursor:pointer;transition:border-color .2s,transform .2s}.group-list-card:hover{border-color:rgba(64,196,255,0.35);transform:translateY(-1px)}.group-list-card:hover .glc-arrow{opacity:1}.glc-avatar{width:52px;height:52px;border-radius:13px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:18px;font-weight:700;color:var(--accent)}.glc-avatar img{width:100%;height:100%;object-fit:cover;border-radius:11px}.glc-info{flex:1;min-width:0}.glc-name{font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.glc-id{font-family:monospace;font-size:11px;color:var(--text-muted);background:var(--input-bg);padding:2px 8px;border-radius:5px;border:1px solid var(--card-border);margin-top:4px;display:inline-block}.glc-chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.glc-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}.glc-chip.green{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,83,0.25)}.glc-chip.orange{background:var(--orange-dim);color:var(--orange);border:1px solid rgba(255,171,64,0.25)}.glc-chip.blue{background:var(--blue-dim);color:var(--blue);border:1px solid rgba(64,196,255,0.25)}.glc-chip.red{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.25)}.glc-chip.purple{background:var(--purple-dim);color:var(--purple);border:1px solid rgba(209,140,255,0.25)}.glc-arrow{font-size:16px;color:var(--blue);opacity:0;transition:opacity .2s;flex-shrink:0;margin-inline-start:4px}.group-detail-bar{display:flex;align-items:center;gap:16px;margin-bottom:28px;flex-wrap:wrap}.group-detail-identity{display:flex;align-items:center;gap:14px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:12px 20px;flex:1}.group-detail-avatar{width:46px;height:46px;border-radius:12px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:17px;font-weight:700;color:var(--accent)}.group-detail-avatar img{width:100%;height:100%;object-fit:cover;border-radius:10px}.group-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:16px;overflow:hidden;transition:border-color .2s}.group-card-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--card-border)}.group-card-title{font-size:16px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.group-card-body{padding:20px}.group-id-badge{font-family:monospace;font-size:12px;color:var(--text-muted);background:var(--input-bg);padding:3px 10px;border-radius:6px;border:1px solid var(--card-border)}.qr-wrap{display:flex;flex-direction:column;align-items:center;gap:20px;padding:36px;background:var(--input-bg);border-radius:12px;border:1.5px dashed var(--card-border)}#qr-image{max-width:230px;border-radius:12px;border:10px solid #fff;box-shadow:0 8px 30px rgba(0,0,0,0.5);display:none}.toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(24px);background:var(--accent);color:#000;padding:13px 28px;border-radius:40px;font-weight:700;font-size:15px;z-index:9999;opacity:0;transition:all .35s;pointer-events:none;box-shadow:0 4px 20px rgba(0,230,118,0.5)}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.modal{display:none;position:fixed;z-index:1000;inset:0;background:var(--modal-bg);backdrop-filter:blur(8px);align-items:center;justify-content:center}.modal.open{display:flex}.modal-content{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:16px;padding:32px;width:90%;max-width:640px;box-shadow:0 24px 80px rgba(0,0,0,0.7);animation:slideIn .25s ease;max-height:90vh;overflow-y:auto}.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.modal-header h3{font-size:20px;font-weight:700}.close-modal{background:0 0;border:none;color:var(--text-muted);font-size:26px;cursor:pointer;padding:4px;line-height:1}.close-modal:hover{color:var(--red)}@keyframes slideIn{from{transform:translateY(-24px);opacity:0}to{transform:translateY(0);opacity:1}}#terminalOutput{background:#000;color:#00ff88;font-family:'Courier New',monospace;height:400px;overflow-y:auto;padding:16px;border-radius:10px;font-size:13px;direction:ltr;text-align:start;border:1px solid #0a1a0a}#terminalOutput div{margin-bottom:5px;border-bottom:1px solid #0a1a0a;padding-bottom:5px;word-wrap:break-word;line-height:1.6}.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}.card-grid .card{margin-bottom:0}.card-grid-full{grid-column:1/-1}@media (max-width:1100px){.card-grid{grid-template-columns:1fr}}.section-sep{height:1px;background:var(--card-border);margin:20px 0}::-webkit-scrollbar{width:7px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:4px}.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99}.hamburger{display:none;background:0 0;border:none;color:var(--text);font-size:24px;cursor:pointer;padding:4px}.group-tabs{display:flex;gap:4px;border-bottom:1.5px solid var(--card-border);margin-bottom:20px}.group-tab{padding:10px 18px;border:none;background:0 0;color:var(--text-muted);font-size:14px;font-weight:600;font-family:var(--font);cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px;transition:all .2s;display:flex;align-items:center;gap:7px;border-radius:8px 8px 0 0}.group-tab:hover{color:var(--text);background:rgba(255,255,255,0.04)}.group-tab.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-dim)}.group-tab-panel{display:none}.group-tab-panel.active{display:block}.step-badge{display:inline-block;background:var(--blue-dim);color:var(--blue);padding:2px 9px;border-radius:12px;margin-inline-end:6px;font-weight:700;font-size:13px}@media (max-width:768px){.sidebar{transform:translateX(100%)}[dir=ltr] .sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.sidebar-overlay.open{display:block}.main{margin-inline-start:0}.hamburger{display:block}.page{padding:18px}.topbar{padding:0 18px}.limit-grid{grid-template-columns:1fr}.card-grid{grid-template-columns:1fr}.field-row{flex-direction:column}}</style>
     </head>
     <body>
         <nav class="sidebar" id="sidebar">
@@ -370,6 +392,51 @@ app.get('/', (req, res) => {
                     <h2><i class="fas fa-cog"></i> ${t('الإعدادات العامة', 'General Settings')}</h2>
                     <p>${t('تطبّق على جميع المجموعات التي لا تملك إعدادات مخصصة', 'Applies to all groups without custom settings')}</p>
                 </div>
+
+                <div class="card" style="border-color:rgba(100,220,150,0.5); background:linear-gradient(160deg,rgba(100,220,150,0.07) 0,var(--card-bg) 55%); margin-bottom:24px; position:relative; overflow:hidden;">
+                    <style>
+                        @keyframes safePulse {
+                            0%,100% { box-shadow: 0 0 0 0 rgba(100,220,150,0.55); }
+                            50%      { box-shadow: 0 0 0 8px rgba(100,220,150,0); }
+                        }
+                        #safeMode + .slider { transition: background 0.35s ease, box-shadow 0.35s ease !important; }
+                        #safeMode:not(:checked) + .slider { animation: safePulse 1.8s ease-in-out infinite; }
+                    </style>
+
+                    <!-- Recommended ribbon -->
+                    <div style="display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,rgba(255,171,64,0.18),rgba(255,171,64,0.04));border:1px solid rgba(255,171,64,0.4);border-radius:10px;padding:11px 16px;margin-bottom:18px;">
+                        <i class="fas fa-exclamation-triangle" style="color:var(--orange);font-size:18px;flex-shrink:0;"></i>
+                        <div>
+                            <strong style="color:var(--orange);font-size:14px;">${t('يُنصح بشدة بتفعيله', '⚠️ Strongly Recommended')}</strong>
+                            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${t('تشغيل البوت بدون هذا الوضع يزيد من احتمالية حظر حسابك من واتساب', 'Running the bot without Safe Mode significantly increases the risk of your WhatsApp account being banned')}</div>
+                        </div>
+                    </div>
+
+                    <div class="card-header" style="padding-bottom:14px;">
+                        <h3 style="color:#64dc96;"><i class="fas fa-user-shield"></i> ${t('الوضع الآمن (Safe Mode)', 'Safe Mode')}</h3>
+                        <span style="font-size:12px; background:rgba(100,220,150,0.15); color:#64dc96; border:1px solid rgba(100,220,150,0.4); padding:3px 12px; border-radius:20px; font-weight:700;">${t('حماية من الحظر', 'Anti-Ban')}</span>
+                    </div>
+                    <div class="toggle-row" style="border-color:rgba(100,220,150,0.35); background:rgba(100,220,150,0.07); margin-bottom:16px; padding:14px 18px; border-radius:12px;">
+                        <div class="toggle-left" style="gap:16px;">
+                            <label class="switch" style="flex-shrink:0;"><input type="checkbox" id="safeMode" ${config.safeMode ? 'checked' : ''}><span class="slider"></span></label>
+                            <div class="toggle-label" style="color:#64dc96;">
+                                ${t('تفعيل الوضع الآمن', 'Enable Safe Mode')}
+                                <small>${t('تأخير عشوائي 10–60 ثانية قبل كل إجراء لتجنب كشف البوت', 'Random 10–60s delay before each action to avoid bot detection')}</small>
+                            </div>
+                        </div>
+                        ${config.safeMode
+            ? `<span style="font-size:12px;background:rgba(100,220,150,0.15);color:#64dc96;border:1px solid rgba(100,220,150,0.3);padding:3px 10px;border-radius:20px;font-weight:700;"><i class="fas fa-check"></i> ${t('مفعّل', 'Active')}</span>`
+            : `<span style="font-size:12px;background:rgba(255,82,82,0.12);color:var(--red);border:1px solid rgba(255,82,82,0.3);padding:3px 10px;border-radius:20px;font-weight:700;"><i class="fas fa-times"></i> ${t('معطّل', 'Off')}</span>`
+        }
+                    </div>
+                    <div style="font-size:13px; color:var(--text-muted); line-height:2.2; padding:14px; background:var(--input-bg); border-radius:10px; border:1px solid var(--card-border);">
+                        <div><i class="fas fa-times-circle" style="color:var(--red);"></i> <strong style="color:var(--text);">${t('إيقاف:', 'Off:')}</strong> ${t('إجراءات فورية — أسرع ولكن تُعرّض حسابك للحظر', 'Instant actions — faster but risks getting your account banned')}</div>
+                        <div><i class="fas fa-shield-alt" style="color:#64dc96;"></i> <strong style="color:var(--text);">${t('تشغيل:', 'On:')}</strong> ${t('تأخير عشوائي 10–60 ث — يحاكي سلوك الإنسان ويقلل خطر الحظر بشكل كبير', 'Random 10–60s delay — mimics human behaviour, greatly reduces ban risk')}</div>
+                        <div><i class="fas fa-info-circle" style="color:var(--blue);"></i> <strong style="color:var(--text);">${t('يؤثر على:', 'Covers:')}</strong> ${t('الطرد، الحذف، التصويت، الإبلاغ، رسائل الترحيب', 'Kicks, deletes, polls, reports, welcome messages')}</div>
+                    </div>
+                </div>
+
+
                 <div class="card-grid">
                     <div class="card">
                         <div class="card-header"><h3><i class="fas fa-filter"></i> ${t('فلتر الكلمات الممنوعة', 'Forbidden Word Filter')}</h3></div>
@@ -845,6 +912,7 @@ app.get('/', (req, res) => {
                 enableQAFeature: groupsConfigObj[key].enableQAFeature || false,
                 qaList: groupsConfigObj[key].qaList || [],
                 eventDate: groupsConfigObj[key].eventDate || '',
+                qaLanguage: groupsConfigObj[key].qaLanguage || 'ar',
                 currentQAQuestions: []
             }));
 
@@ -989,7 +1057,7 @@ app.get('/', (req, res) => {
                     { id: 'lists',   icon: 'fa-list',       label: currentLang==='en'?'Lists':'القوائم' },
                 ];
                 const tabButtons = tabs.map((tab, i) =>
-                    \`<button type="button" class="group-tab \${i===0?'active':''}" onclick="switchGroupTab(\${groupIndex},'\${tab.id}',this)"><i class="fas \${tab.icon}"></i> \${tab.label}</button>\`
+                    \`<button type="button" class="group-tab \${i===0?'active':''}" onclick="switchGroupTab(\${groupIndex},'\${tab.id}',this)\${tab.id==='qa'?';loadGroupMedia('+groupIndex+')':\'\'}"\><i class="fas \${tab.icon}"></i> \${tab.label}</button>\`
                 ).join('');
 
                 container.innerHTML = \`
@@ -1086,31 +1154,62 @@ app.get('/', (req, res) => {
                                 <div class="sub-panel blue" style="margin-bottom:16px;">
                                     <h4 style="color:var(--blue);">\${currentLang==='en'?'Dynamic Fields Reference':'مرجع الحقول الديناميكية'}</h4>
                                     <div style="font-size:13px;color:var(--text-muted);line-height:1.8;">
-                                        <div><strong style="color:var(--blue);">{date}</strong> - \${currentLang==='en'?'Current date (DD/MM/YYYY)':'التاريخ الحالي'}</div>
                                         <div><strong style="color:var(--blue);">{eventdate}</strong> - \${currentLang==='en'?'Event/deadline with days remaining (e.g., 5 days left - 25/03/2026)':'الحدث/الموعد النهائي مع الأيام المتبقية'}</div>
                                         <div><strong style="color:var(--blue);">{user}</strong> - \${currentLang==='en'?'Sender username':'اسم المرسل'}</div>
                                     </div>
                                 </div>
-                                
+
                                 <label class="field-label">\${currentLang==='en'?'Set Event/Deadline Date':'حدد تاريخ الحدث/الموعد النهائي'}</label>
                                 <div class="field-row" style="margin-bottom:16px;">
                                     <div class="field-group" style="margin-bottom:0;">
                                         <label class="field-label" style="margin-bottom:4px;">\${currentLang==='en'?'Date (Test, Assignment, etc.)':'التاريخ (اختبار، مهمة، إلخ)'}</label>
-                                        <input type="date" id="newQAEventDate_\${groupIndex}" value="\${group.eventDate || ''}" onchange="updateGroupData(\${groupIndex}, 'eventDate', this.value)">
+                                        <input type="date" id="newQAEventDate_\${groupIndex}" value="\${group.eventDate || ''}" onchange="updateGroupData(\${groupIndex}, 'eventDate', this.value)" style="color-scheme: dark; font-family: var(--font);">
+                                    </div>
+                                    <div class="field-group" style="margin-bottom:0;">
+                                        <label class="field-label" style="margin-bottom:4px;">\${currentLang==='en'?'Days-Left Language':'لغة عرض الأيام المتبقية'}</label>
+                                        <select id="qaLang_\${groupIndex}" onchange="updateGroupData(\${groupIndex}, 'qaLanguage', this.value)">
+                                            <option value="ar" \${(group.qaLanguage||'ar')==='ar'?'selected':''}>\${currentLang==='en'?'Arabic (عربي)':'العربية'}</option>
+                                            <option value="en" \${(group.qaLanguage||'ar')==='en'?'selected':''}>English</option>
+                                        </select>
                                     </div>
                                 </div>
-                                
+
                                 <label class="field-label">\${currentLang==='en'?'Add Questions for This Answer':'أضف أسئلة لهذه الإجابة'}</label>
                                 <div class="field-group" style="margin-bottom:10px;">
                                     <input type="text" id="newQAQuestion_\${groupIndex}" placeholder="\${currentLang==='en'?'Enter a question variant (e.g., when is the test)...':'أدخل صيغة السؤال...'}" style="margin-bottom:10px;" onkeypress="if(event.key==='Enter'){event.preventDefault();addQuestionToQA(\${groupIndex});}">
-                                    <button type="button" class="btn btn-primary btn-sm" onclick="addQuestionToQA(\${groupIndex})" style="width:100%;margin-bottom:10px;"><i class="fas fa-plus"></i> \${currentLang==='en'?'Add Question Variant':'إضافة صيغة سؤال'}</button>
+                                    <button type="button" class="btn btn-full" onclick="addQuestionToQA(\${groupIndex})" style="margin-bottom:10px;background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700;"><i class="fas fa-plus"></i> \${currentLang==='en'?'Add Question Variant':'إضافة صيغة سؤال'}</button>
                                     <div class="chip-container" id="qa_questions_container_\${groupIndex}" style="min-height:40px;">\${(group.currentQAQuestions || []).map((q, qIdx) => \`<div class="chip"><span>\${q}</span><span class="chip-remove" onclick="removeQuestionFromQA(\${groupIndex}, \${qIdx})">×</span></div>\`).join('')}</div>
                                 </div>
-                                <label class="field-label">\${currentLang==='en'?'Answer (Use {date}, {time}, {user} for dynamic values)':'الإجابة (استخدم {date}, {time}, {user} للحقول الديناميكية)'}</label>
+                                <label class="field-label">\${currentLang==='en'?'Answer (Use {date}, {eventdate}, {user} for dynamic values)':'الإجابة (استخدم {date}, {eventdate}, {user} للحقول الديناميكية)'}</label>
                                 <div class="field-group" style="margin-bottom:10px;">
                                     <textarea id="newQAAnswer_\${groupIndex}" placeholder="\${currentLang==='en'?'Enter answer with optional dynamic fields...':'أدخل الإجابة مع الحقول الديناميكية الاختيارية...'}" rows="3" style="margin-bottom:10px;"></textarea>
-                                    <button type="button" class="btn btn-primary btn-sm btn-full" onclick="addGroupQA(\${groupIndex})"><i class="fas fa-save"></i> \${currentLang==='en'?'Save Q&A Pair':'حفظ زوج س و ج'}</button>
+                                    <button type="button" id="saveQABtn_\${groupIndex}" class="btn btn-full" onclick="addGroupQA(\${groupIndex})" style="background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700;"><i class="fas fa-save"></i> \${currentLang==='en'?'Save Q&A Pair':'حفظ زوج س و ج'}</button>
                                 </div>
+
+                                <!-- Media Attachment Section -->
+                                <div class="sub-panel" style="margin-bottom:16px;border-color:rgba(100,220,150,0.3);background:rgba(100,220,150,0.04);">
+                                    <h4 style="color:#64dc96;margin-bottom:12px;"><i class="fas fa-paperclip"></i> \${currentLang==='en'?'Attach Media to This Answer':'إرفاق وسائط بهذه الإجابة'}</h4>
+                                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">\${currentLang==='en'?'Select a file to automatically attach it when saving the Q&A pair. The bot will send the file + answer caption.':'اختر ملفاً ليُرفق تلقائياً عند حفظ الزوج. سيرسل البوت الملف مع نص الإجابة كتعليق.'}</p>
+                                    <!-- Selected file indicator -->
+                                    <div id="qa_media_selected_\${groupIndex}" style="display:none;align-items:center;gap:10px;background:rgba(100,220,150,0.1);border:1px solid rgba(100,220,150,0.3);border-radius:8px;padding:10px 14px;margin-bottom:12px;">
+                                        <i class="fas fa-paperclip" style="color:#64dc96;"></i>
+                                        <span id="qa_media_selected_name_\${groupIndex}" style="font-size:13px;color:#64dc96;flex:1;"></span>
+                                        <button type="button" onclick="clearQAMedia(\${groupIndex})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;">×</button>
+                                    </div>
+                                    <!-- Upload area -->
+                                    <div style="display:flex;gap:10px;margin-bottom:14px;">
+                                        <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;background:var(--input-bg);border:1.5px dashed rgba(100,220,150,0.4);border-radius:10px;cursor:pointer;font-size:13px;color:var(--text-muted);transition:all 0.2s;" onmouseover="this.style.borderColor='#64dc96'" onmouseout="this.style.borderColor='rgba(100,220,150,0.4)'">
+                                            <i class="fas fa-cloud-upload-alt" style="color:#64dc96;font-size:18px;"></i>
+                                            <span>\${currentLang==='en'?'Click to upload a file':'انقر لرفع ملف'}</span>
+                                            <input type="file" id="qa_file_input_\${groupIndex}" style="display:none;" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar" onchange="uploadGroupMedia(\${groupIndex}, this)">
+                                        </label>
+                                    </div>
+                                    <!-- Upload progress -->
+                                    <div id="qa_upload_status_\${groupIndex}" style="display:none;font-size:12px;color:var(--text-muted);margin-bottom:10px;"></div>
+                                    <!-- File grid -->
+                                    <div id="qa_media_grid_\${groupIndex}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;"></div>
+                                </div>
+
                                 <label class="field-label" style="margin-top:16px;">\${currentLang==='en'?'Q&A Pairs':'أزواج الأسئلة والأجوبة'}</label>
                                 <div id="qa_container_\${groupIndex}">
                                     \${(group.qaList || []).map((qa, qaIdx) => \`
@@ -1119,17 +1218,23 @@ app.get('/', (req, res) => {
                                                 <div class="group-card-title" style="font-size:14px;">
                                                     <i class="fas fa-question" style="color:var(--blue);"></i> \${currentLang==='en'?'Question Variations':'صيغ الأسئلة'} (\${(qa.questions || []).length})
                                                 </div>
-                                                <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);">
-                                                    <i class="fas fa-trash"></i>
-                                                </button>
+                                                <div style="display:flex;gap:8px;">
+                                                    <button type="button" class="icon-btn" onclick="editGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="\${currentLang==='en'?'Edit':'تعديل'}">
+                                                        <i class="fas fa-edit"></i>
+                                                    </button>
+                                                    <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);" title="\${currentLang==='en'?'Delete':'حذف'}">
+                                                        <i class="fas fa-trash"></i>
+                                                    </button>
+                                                </div>
                                             </div>
                                             <div class="group-card-body" style="padding:12px;">
                                                 <div style="margin-bottom:10px;">
-                                                    <div class="chip-container" style="background:rgba(64,196,255,0.05);border-color:rgba(64,196,255,0.2);">\${(qa.questions || []).map((q, qIdx) => \`<div class="chip" style="background:rgba(64,196,255,0.15);color:var(--blue);border-color:rgba(64,196,255,0.3);"><i class="fas fa-search"></i> \${q}</div>\`).join('')}</div>
+                                                    <div class="chip-container" style="background:rgba(64,196,255,0.05);border-color:rgba(64,196,255,0.2);">\${(qa.questions || []).map((q) => \`<div class="chip" style="background:rgba(64,196,255,0.15);color:var(--blue);border-color:rgba(64,196,255,0.3);"><i class="fas fa-search"></i> \${q}</div>\`).join('')}</div>
                                                 </div>
                                                 <div style="color:var(--text-muted);font-size:13px;">
                                                     <strong>\${currentLang==='en'?'Answer':'الإجابة'}:</strong> \${qa.answer || '(empty)'}
                                                 </div>
+                                                \${qa.mediaFile ? \`<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;color:#64dc96;"><i class="fas fa-paperclip"></i> \${qa.mediaFile}</div>\` : ''}
                                             </div>
                                         </div>
                                     \`).join('')}
@@ -1413,7 +1518,7 @@ app.get('/', (req, res) => {
                     spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
                     spamLimits: {text:7, image:3, video:2, audio:3, document:3, sticker:3},
                     enablePanicMode: false, panicMessageLimit: 10, panicTimeWindow: 5, panicLockoutDuration: 10, panicAlertTarget: 'both', panicAlertMessage: '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}',
-                    enableQAFeature: false, qaList: [], eventDate: '', currentQAQuestions: []
+                    enableQAFeature: false, qaList: [], eventDate: '', qaLanguage: 'ar', currentQAQuestions: []
                 });
                 openGroupDetail(groupsArr.length - 1);
             }
@@ -1490,19 +1595,35 @@ app.get('/', (req, res) => {
                 const answerInput = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
                 const answer = answerInput.value.trim();
                 const questions = groupsArr[groupIndex].currentQAQuestions || [];
+                const mediaFile = groupsArr[groupIndex].pendingMediaFile || '';
                 
-                if (questions.length > 0 && answer) {
+                if (questions.length > 0 && (answer || mediaFile)) {
                     if (!groupsArr[groupIndex].qaList) groupsArr[groupIndex].qaList = [];
-                    groupsArr[groupIndex].qaList.push({ questions: questions, answer: answer });
+                    const newPair = { questions: questions, answer: answer };
+                    if (mediaFile) newPair.mediaFile = mediaFile;
+                    groupsArr[groupIndex].qaList.push(newPair);
                     answerInput.value = '';
                     groupsArr[groupIndex].currentQAQuestions = [];
+                    // Clear media selection
+                    groupsArr[groupIndex].pendingMediaFile = '';
+                    const indicator = document.getElementById(\`qa_media_selected_\${groupIndex}\`);
+                    if (indicator) indicator.style.display = 'none';
+                    loadGroupMedia(groupIndex); // refresh grid (deselects all)
                     renderQAQuestions(groupIndex);
                     renderGroupQA(groupIndex);
+                    // Reset save button back to normal
+                    const saveBtn = document.getElementById(\`saveQABtn_\${groupIndex}\`);
+                    if (saveBtn) {
+                        saveBtn.innerHTML = '<i class="fas fa-save"></i> ' + (currentLang==='en' ? 'Save Q&A Pair' : 'حفظ زوج س و ج');
+                        saveBtn.style.background = '';
+                        saveBtn.style.color = '';
+                    }
                 } else {
-                    const msg = currentLang === 'en' ? 'Please add at least one question variant and fill in the answer' : 'يرجى إضافة صيغة سؤال واحدة على الأقل وملء الإجابة';
+                    const msg = currentLang === 'en' ? 'Please add at least one question variant and an answer or attach a media file' : 'يرجى إضافة صيغة سؤال واحدة على الأقل وملء الإجابة أو إرفاق وسائط';
                     alert(msg);
                 }
             }
+
             
             function removeGroupQA(groupIndex, qaIndex) {
                 if (groupsArr[groupIndex].qaList) {
@@ -1519,22 +1640,150 @@ app.get('/', (req, res) => {
                     <div class="group-card" style="margin-bottom:10px;">
                         <div class="group-card-header" style="padding:12px;">
                             <div class="group-card-title" style="font-size:14px;">
-                                <i class="fas fa-question" style="color:var(--blue);"></i> \${currentLang==='en'?'Question Variations':'صيغ الأسئلة'} (\${(qa.questions || []).length})
+                                <i class="fas fa-question" style="color:var(--blue);"></i> \${currentLang==='en'?'Question Variations':'\u0635\u064a\u063a \u0627\u0644\u0623\u0633\u0626\u0644\u0629'} (\${(qa.questions || []).length})
                             </div>
-                            <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);">
-                                <i class="fas fa-trash"></i>
-                            </button>
+                            <div style="display:flex;gap:8px;">
+                                <button type="button" class="icon-btn" onclick="editGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="\${currentLang==='en'?'Edit':'\u062a\u0639\u062f\u064a\u0644'}">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);" title="\${currentLang==='en'?'Delete':'\u062d\u0630\u0641'}">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
                         </div>
                         <div class="group-card-body" style="padding:12px;">
                             <div style="margin-bottom:10px;">
-                                <div class="chip-container" style="background:rgba(64,196,255,0.05);border-color:rgba(64,196,255,0.2);">\${(qa.questions || []).map((q, qIdx) => \`<div class="chip" style="background:rgba(64,196,255,0.15);color:var(--blue);border-color:rgba(64,196,255,0.3);"><i class="fas fa-search"></i> \${q}</div>\`).join('')}</div>
+                                <div class="chip-container" style="background:rgba(64,196,255,0.05);border-color:rgba(64,196,255,0.2);">\${(qa.questions || []).map(q => \`<div class="chip" style="background:rgba(64,196,255,0.15);color:var(--blue);border-color:rgba(64,196,255,0.3);"><i class="fas fa-search"></i> \${q}</div>\`).join('')}</div>
                             </div>
-                            <div style="color:var(--text-muted);font-size:13px;">
-                                <strong>\${currentLang==='en'?'Answer':'الإجابة'}:</strong> \${qa.answer || '(empty)'}
+                            <div style="color:var(--text-muted);font-size:13px;margin-bottom:6px;">
+                                <strong>\${currentLang==='en'?'Answer':'\u0627\u0644\u0625\u062c\u0627\u0628\u0629'}:</strong> \${qa.answer || '(empty)'}
                             </div>
+                            \${qa.mediaFile ? \`<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#64dc96;"><i class="fas fa-paperclip"></i> \${qa.mediaFile}</div>\` : ''}
                         </div>
                     </div>
                 \`).join('');
+            }
+
+            // ── Media management for Q&A ──────────────────────────────────────
+            function loadGroupMedia(groupIndex) {
+                const group = groupsArr[groupIndex];
+                const groupId = encodeURIComponent(group.id);
+                fetch(\`/api/media/list/\${groupId}\`)
+                    .then(r => r.json())
+                    .then(files => renderMediaGrid(groupIndex, files))
+                    .catch(() => {});
+            }
+
+            function renderMediaGrid(groupIndex, files) {
+                const grid = document.getElementById(\`qa_media_grid_\${groupIndex}\`);
+                if (!grid) return;
+                if (files.length === 0) { grid.innerHTML = \`<p style="font-size:12px;color:var(--text-muted);grid-column:1/-1;">\${currentLang==='en'?'No files uploaded yet.':'لا توجد ملفات محملة بعد.'}</p>\`; return; }
+                const imgExts = ['jpg','jpeg','png','gif','webp','bmp','svg'];
+                const vidExts = ['mp4','mov','webm','mkv','avi'];
+                const audExts = ['mp3','ogg','wav','m4a','aac'];
+                grid.innerHTML = files.map(f => {
+                    const ext = f.name.split('.').pop().toLowerCase();
+                    const groupId = encodeURIComponent(groupsArr[groupIndex].id);
+                    let preview;
+                    if (imgExts.includes(ext)) {
+                        preview = \`<img src="/media/\${groupId}/\${encodeURIComponent(f.name)}" style="width:100%;height:72px;object-fit:cover;border-radius:6px 6px 0 0;">\`;
+                    } else {
+                        const icons = { mp4:'fa-film', mov:'fa-film', webm:'fa-film', mkv:'fa-film', mp3:'fa-music', ogg:'fa-music', wav:'fa-music', pdf:'fa-file-pdf', doc:'fa-file-word', docx:'fa-file-word', zip:'fa-file-archive', rar:'fa-file-archive' };
+                        const icon = icons[ext] || 'fa-file';
+                        preview = \`<div style="width:100%;height:72px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);border-radius:6px 6px 0 0;"><i class="fas \${icon}" style="font-size:28px;color:var(--text-muted);"></i></div>\`;
+                    }
+                    const kb = (f.size/1024).toFixed(1);
+                    const isSelected = groupsArr[groupIndex].pendingMediaFile === f.name;
+                    return \`<div style="background:var(--card-bg);border:1.5px solid \${isSelected ? '#64dc96' : 'var(--card-border)'};border-radius:8px;overflow:hidden;">
+                        \${preview}
+                        <div style="padding:6px 8px;">
+                            <div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="\${f.name}">\${f.name}</div>
+                            <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">\${kb} KB</div>
+                            <div style="display:flex;gap:4px;">
+                                <button type="button" onclick="selectQAMedia(\${groupIndex},'\${f.name}')" style="flex:1;font-size:11px;padding:4px;background:\${isSelected ? 'rgba(100,220,150,0.15)' : 'var(--input-bg)'};color:\${isSelected ? '#64dc96' : 'var(--text-muted)'};border:1px solid \${isSelected ? 'rgba(100,220,150,0.4)' : 'var(--card-border)'};border-radius:5px;cursor:pointer;">
+                                    <i class="fas \${isSelected ? 'fa-check' : 'fa-link'}"></i> \${isSelected ? (currentLang==='en'?'Selected':'محدد') : (currentLang==='en'?'Select':'اختر')}
+                                </button>
+                                <button type="button" onclick="deleteGroupMedia(\${groupIndex},'\${f.name}')" style="padding:4px 6px;background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.3);border-radius:5px;cursor:pointer;font-size:11px;">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>\`;
+                }).join('');
+            }
+
+            function uploadGroupMedia(groupIndex, input) {
+                const file = input.files[0];
+                if (!file) return;
+                const group = groupsArr[groupIndex];
+                const groupId = encodeURIComponent(group.id);
+                const statusEl = document.getElementById(\`qa_upload_status_\${groupIndex}\`);
+                statusEl.style.display = 'block';
+                statusEl.textContent = currentLang==='en' ? '⏳ Uploading...' : '⏳ جاري الرفع...';
+                const fd = new FormData();
+                fd.append('file', file);
+                fetch(\`/api/media/upload/\${groupId}\`, { method:'POST', body:fd })
+                    .then(r => r.json())
+                    .then(data => {
+                        statusEl.textContent = currentLang==='en' ? '✅ Uploaded: ' + data.filename : '✅ تم الرفع: ' + data.filename;
+                        setTimeout(() => { statusEl.style.display='none'; }, 3000);
+                        loadGroupMedia(groupIndex);
+                        input.value = '';
+                    })
+                    .catch(() => { statusEl.textContent = currentLang==='en' ? '❌ Upload failed' : '❌ فشل الرفع'; });
+            }
+
+            function selectQAMedia(groupIndex, filename) {
+                const wasSelected = groupsArr[groupIndex].pendingMediaFile === filename;
+                groupsArr[groupIndex].pendingMediaFile = wasSelected ? '' : filename;
+                // Update selected indicator
+                const indicator = document.getElementById(\`qa_media_selected_\${groupIndex}\`);
+                const nameEl = document.getElementById(\`qa_media_selected_name_\${groupIndex}\`);
+                if (!wasSelected && filename) {
+                    indicator.style.display = 'flex';
+                    nameEl.textContent = '📎 ' + filename;
+                } else {
+                    indicator.style.display = 'none';
+                }
+                // Re-render grid to update button states
+                fetch(\`/api/media/list/\${encodeURIComponent(groupsArr[groupIndex].id)}\`)
+                    .then(r => r.json()).then(files => renderMediaGrid(groupIndex, files)).catch(()=>{});
+            }
+
+            function clearQAMedia(groupIndex) { selectQAMedia(groupIndex, ''); }
+
+            function deleteGroupMedia(groupIndex, filename) {
+                if (!confirm(currentLang==='en' ? \`Delete \${filename}?\` : \`حذف \${filename}؟\`)) return;
+                const groupId = encodeURIComponent(groupsArr[groupIndex].id);
+                fetch(\`/api/media/delete/\${groupId}/\${encodeURIComponent(filename)}\`, { method:'DELETE' })
+                    .then(() => {
+                        if (groupsArr[groupIndex].pendingMediaFile === filename) selectQAMedia(groupIndex, '');
+                        loadGroupMedia(groupIndex);
+                    });
+            }
+
+            function editGroupQA(groupIndex, qaIndex) {
+                const qa = groupsArr[groupIndex].qaList[qaIndex];
+                if (!qa) return;
+                // Pre-fill questions
+                groupsArr[groupIndex].currentQAQuestions = [...(qa.questions || [])];
+                renderQAQuestions(groupIndex);
+                // Pre-fill answer
+                const answerEl = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
+                if (answerEl) answerEl.value = qa.answer || '';
+                // Remove the old entry so saving creates a fresh one
+                groupsArr[groupIndex].qaList.splice(qaIndex, 1);
+                renderGroupQA(groupIndex);
+                // Update save button appearance to indicate edit mode
+                const saveBtn = document.getElementById(\`saveQABtn_\${groupIndex}\`);
+                if (saveBtn) {
+                    saveBtn.innerHTML = '<i class="fas fa-check"></i> ' + (currentLang==='en' ? 'Update Q&A Pair' : 'تحديث زوج س و ج');
+                    saveBtn.style.background = 'var(--orange)';
+                    saveBtn.style.color = '#000';
+                }
+                // Scroll to form
+                const questionInput = document.getElementById(\`newQAQuestion_\${groupIndex}\`);
+                if (questionInput) questionInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
 
             function addGroupBlacklist(gIndex) {
@@ -1630,6 +1879,7 @@ app.get('/', (req, res) => {
 
                 const newConfig = {
                     enableAntiSpam: document.getElementById('enableAntiSpam').checked,
+                    safeMode: document.getElementById('safeMode').checked,
                     spamDuplicateLimit: parseInt(document.getElementById('spamDuplicateLimit').value) || 3,
                     spamAction: document.getElementById('spamAction').value,
                     spamTypes: gSpamTypes,
@@ -1694,45 +1944,45 @@ app.get('/api/groups', (req, res) => {
     try {
         const groups = db.prepare('SELECT * FROM whatsapp_groups').all();
         res.json(groups);
-    } catch(e) { res.json([]); }
+    } catch (e) { res.json([]); }
 });
 
 app.post('/api/blacklist/add', (req, res) => {
-    if(req.body.number) {
+    if (req.body.number) {
         try {
             db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(req.body.number);
             console.log(`[أمان] تم إضافة رقم للقائمة السوداء عبر اللوحة: ${req.body.number}`);
-        } catch(e) {}
+        } catch (e) { }
     }
     res.sendStatus(200);
 });
 
 app.post('/api/whitelist/add', (req, res) => {
-    if(req.body.number) {
+    if (req.body.number) {
         try {
             db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)').run(req.body.number);
             console.log(`[أمان] تم إضافة رقم موثوق للقائمة البيضاء عبر اللوحة: ${req.body.number}`);
-        } catch(e) {}
+        } catch (e) { }
     }
     res.sendStatus(200);
 });
 
 app.post('/api/blacklist/remove', (req, res) => {
-    if(req.body.number) {
+    if (req.body.number) {
         try {
             db.prepare('DELETE FROM blacklist WHERE number = ?').run(req.body.number);
             console.log(`[أمان] تم إزالة رقم من القائمة السوداء عبر اللوحة: ${req.body.number}`);
-        } catch(e) {}
+        } catch (e) { }
     }
     res.sendStatus(200);
 });
 
 app.post('/api/whitelist/remove', (req, res) => {
-    if(req.body.number) {
+    if (req.body.number) {
         try {
             db.prepare('DELETE FROM whitelist WHERE number = ?').run(req.body.number);
             console.log(`[أمان] تم إزالة رقم من القائمة البيضاء عبر اللوحة: ${req.body.number}`);
-        } catch(e) {}
+        } catch (e) { }
     }
     res.sendStatus(200);
 });
@@ -1759,7 +2009,7 @@ app.post('/api/blacklist/purge', async (req, res) => {
                     const usersToKick = chat.participants
                         .map(p => p.id._serialized)
                         .filter(id => {
-                            const cleanId = id.replace(/:[0-9]+/, ''); 
+                            const cleanId = id.replace(/:[0-9]+/, '');
                             return blacklistArr.includes(cleanId) || blacklistArr.includes(id);
                         });
                     if (usersToKick.length > 0) {
@@ -1767,8 +2017,8 @@ app.post('/api/blacklist/purge', async (req, res) => {
                             await chat.removeParticipants(usersToKick);
                             kickedCount += usersToKick.length;
                             console.log(`[أمان] تم طرد ${usersToKick.length} محظورين من: ${chat.name}`);
-                            await new Promise(resolve => setTimeout(resolve, 1500)); 
-                        } catch (e) {}
+                            await new Promise(resolve => setTimeout(resolve, 1500));
+                        } catch (e) { }
                     }
                 }
             }
@@ -1808,16 +2058,57 @@ app.post('/api/logout', async (req, res) => {
 app.post('/save', (req, res) => {
     try {
         saveConfigToDB(req.body);
-        config = loadConfigFromDB(); 
+        config = loadConfigFromDB();
         console.log('[فحص] تم حفظ الإعدادات بنجاح.');
         res.sendStatus(200);
-    } catch(e) {
+    } catch (e) {
         console.error('[خطأ] تعذر الحفظ في قاعدة البيانات:', e.message);
         res.sendStatus(500);
     }
 });
 
 app.listen(3000, () => console.log('لوحة التحكم تعمل عبر المنفذ 3000...'));
+
+// ── Media API ────────────────────────────────────────────────────────────────
+// Serve uploaded media files statically
+app.use('/media', express.static(path.join(__dirname, 'media')));
+
+// Upload a file for a group
+app.post('/api/media/upload/:groupId', upload.single('file'), (req, res) => {
+    if (!req.file) return res.status(400).json({ error: 'No file received' });
+    res.json({ filename: req.file.filename, size: req.file.size });
+});
+
+// List files for a group
+app.get('/api/media/list/:groupId', (req, res) => {
+    const dir = path.join('./media', req.params.groupId);
+    if (!fs.existsSync(dir)) return res.json([]);
+    try {
+        const files = fs.readdirSync(dir).map(name => {
+            const stat = fs.statSync(path.join(dir, name));
+            return { name, size: stat.size, modified: stat.mtimeMs };
+        });
+        res.json(files);
+    } catch (e) { res.json([]); }
+});
+
+// Delete a file for a group
+app.delete('/api/media/delete/:groupId/:filename', (req, res) => {
+    const filePath = path.join('./media', req.params.groupId, req.params.filename);
+    try {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        res.sendStatus(200);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Safe Mode: random delay 10-60s to mimic human behaviour and avoid WhatsApp bot detection
+async function safeDelay() {
+    if (!config.safeMode) return;
+    const ms = (Math.floor(Math.random() * 51) + 10) * 1000; // 10–60 seconds
+    console.log(`[أمان] وضع آمن: تأخير ${ms / 1000} ثانية قبل الإجراء...`);
+    await new Promise(r => setTimeout(r, ms));
+};
 
 const client = new Client({
     authStrategy: new LocalAuth(),
@@ -1858,7 +2149,7 @@ client.on('authenticated', () => {
 client.on('disconnected', async (reason) => {
     botStatus = '<i class="fas fa-sign-out-alt"></i> تم تسجيل الخروج من الحساب...';
     currentQR = '';
-    try { await client.destroy(); } catch(e) {}
+    try { await client.destroy(); } catch (e) { }
     setTimeout(() => { client.initialize(); }, 3000);
 });
 
@@ -1866,13 +2157,13 @@ client.on('group_join', async (notification) => {
     try {
         const chat = await notification.getChat();
         const groupId = chat.id._serialized;
-        try { db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)').run(groupId, chat.name); } catch(e) {}
+        try { db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)').run(groupId, chat.name); } catch (e) { }
 
         const groupConfig = config.groupsConfig[groupId];
         let isBlacklistEnabledForGroup = config.enableBlacklist;
         let isWhitelistEnabledForGroup = config.enableWhitelist;
         let targetAdminGroup = config.defaultAdminGroup;
-        
+
         if (groupConfig) {
             if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabledForGroup = groupConfig.enableBlacklist;
             if (typeof groupConfig.enableWhitelist !== 'undefined') isWhitelistEnabledForGroup = groupConfig.enableWhitelist;
@@ -1886,7 +2177,7 @@ client.on('group_join', async (notification) => {
                     const contact = await client.getContactById(participantId);
                     if (contact && contact.number) cleanJoinedId = `${contact.number}@c.us`;
                     else cleanJoinedId = cleanJoinedId.replace('@lid', '@c.us');
-                } catch(e) { cleanJoinedId = cleanJoinedId.replace('@lid', '@c.us'); }
+                } catch (e) { cleanJoinedId = cleanJoinedId.replace('@lid', '@c.us'); }
             }
 
             let isWhitelisted = false;
@@ -1896,7 +2187,7 @@ client.on('group_join', async (notification) => {
                 const inCustom = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanJoinedId) : false;
                 if ((useGlobal && globalWl) || inCustom) isWhitelisted = true;
             }
-            
+
             let isKicked = false;
 
             if (isBlacklistEnabledForGroup && !isWhitelisted) {
@@ -1909,10 +2200,11 @@ client.on('group_join', async (notification) => {
                     isKicked = true;
                     setTimeout(async () => {
                         try {
+                            await safeDelay();
                             await chat.removeParticipants([participantId]);
                             const reportText = `🛡️ *حماية (قائمة سوداء)*\nحاول رقم محظور الدخول لمجموعة "${chat.name}" وتم طرده.\nالرقم: @${cleanJoinedId.split('@')[0]}`;
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanJoinedId] });
-                        } catch(err) {}
+                        } catch (err) { }
                     }, 2000);
                 }
             }
@@ -1920,20 +2212,21 @@ client.on('group_join', async (notification) => {
             if (!isKicked && groupConfig && groupConfig.enableWelcomeMessage && groupConfig.welcomeMessageText) {
                 setTimeout(async () => {
                     try {
+                        await safeDelay();
                         const welcomeText = groupConfig.welcomeMessageText.replace(/{user}/g, `@${cleanJoinedId.split('@')[0]}`);
                         await client.sendMessage(groupId, welcomeText, { mentions: [cleanJoinedId] });
-                    } catch (err) {}
-                }, 3500); 
+                    } catch (err) { }
+                }, 3500);
             }
         }
-    } catch (error) {}
+    } catch (error) { }
 });
 
 client.on('group_update', async (notification) => {
     try {
         const chat = await notification.getChat();
         db.prepare('UPDATE whatsapp_groups SET name = ? WHERE id = ?').run(chat.name, chat.id._serialized);
-    } catch(e) {}
+    } catch (e) { }
 });
 
 const pendingBans = new Map();
@@ -1954,12 +2247,12 @@ client.on('message', async msg => {
                     const contact = await msg.getContact();
                     if (contact && contact.number) cleanAuthorId = `${contact.number}@c.us`;
                     else cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us');
-                } catch(e) { cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us'); }
+                } catch (e) { cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us'); }
             }
 
             const groupId = chat.id._serialized;
             const groupConfig = config.groupsConfig[groupId];
-            
+
             let isWhitelistEnabled = config.enableWhitelist;
             if (groupConfig && typeof groupConfig.enableWhitelist !== 'undefined') {
                 isWhitelistEnabled = groupConfig.enableWhitelist;
@@ -2023,10 +2316,10 @@ client.on('message', async msg => {
 
             let targetAdminGroup = config.defaultAdminGroup;
             let isWordFilterEnabled = config.enableWordFilter;
-            let isAIFilterEnabled = config.enableAIFilter; 
-            let isAIMediaEnabled = config.enableAIMedia; 
-            let isAutoActionEnabled = config.autoAction; 
-            let isBlacklistEnabled = config.enableBlacklist; 
+            let isAIFilterEnabled = config.enableAIFilter;
+            let isAIMediaEnabled = config.enableAIMedia;
+            let isAutoActionEnabled = config.autoAction;
+            let isBlacklistEnabled = config.enableBlacklist;
             let isAntiSpamEnabled = config.enableAntiSpam;
             let spamDuplicateLimit = config.spamDuplicateLimit;
             let spamAction = config.spamAction;
@@ -2062,37 +2355,39 @@ client.on('message', async msg => {
                 const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanAuthorId) : false;
                 if ((useGlobal && globalBl) || inCustom) {
                     console.log(`[أمان] رقم محظور أرسل رسالة. سيتم حذفه.`);
+                    await safeDelay();
                     await msg.delete(true);
                     await chat.removeParticipants([rawAuthorId]);
-                    return; 
+                    return;
                 }
             }
 
             if (blockedTypes.includes(internalMsgType)) {
                 console.log(`[أمان] رصد نوع ممنوع قطعي (${internalMsgType}). يتم الحذف.`);
-                try { await msg.delete(true); } catch(e){}
+                await safeDelay();
+                try { await msg.delete(true); } catch (e) { }
                 if (blockedAction === 'auto') {
                     try {
                         await chat.removeParticipants([rawAuthorId]);
                         if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanAuthorId);
                         const reportText = `🚨 *حظر تلقائي (نوع ممنوع)*\nأرسل العضو ملف (${internalMsgType}) في "${chat.name}" وتم طرده.\n👤 *المرسل:* @${cleanAuthorId.split('@')[0]}`;
                         await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanAuthorId] });
-                    } catch(e){}
+                    } catch (e) { }
                 } else if (blockedAction === 'poll') {
                     const pollTitle = `🚨 إشعار بمخالفة في "${chat.name}"\nالمرسل: @${cleanAuthorId.split('@')[0]}\nالسبب: إرسال نوع ممنوع (${internalMsgType})\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
                     const poll = new Poll(pollTitle, isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا'] : ['نعم، طرد', 'لا']);
                     const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [cleanAuthorId] });
                     pendingBans.set(pollMsg.id._serialized, { senderId: cleanAuthorId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
                 }
-                return; 
+                return;
             }
 
             if (isAntiSpamEnabled) {
                 const trackerKey = `${groupId}_${cleanAuthorId}`;
                 if (spamMutedUsers.has(trackerKey)) {
                     if (Date.now() < spamMutedUsers.get(trackerKey)) {
-                        try { await msg.delete(true); } catch(e) {}
-                        return; 
+                        try { await msg.delete(true); } catch (e) { }
+                        return;
                     } else { spamMutedUsers.delete(trackerKey); }
                 }
 
@@ -2100,7 +2395,7 @@ client.on('message', async msg => {
                 let tracker = userTrackers.get(trackerKey);
                 const messageTime = msg.timestamp * 1000;
                 tracker.push({ text: msg.body, time: messageTime, msgObj: msg, id: msgId, type: internalMsgType });
-                tracker = tracker.filter(m => messageTime - m.time < 15000); 
+                tracker = tracker.filter(m => messageTime - m.time < 15000);
                 userTrackers.set(trackerKey, tracker);
 
                 let isSpamFlagged = false;
@@ -2108,10 +2403,10 @@ client.on('message', async msg => {
 
                 if (spamTypes.includes(internalMsgType)) {
                     const typeCount = tracker.filter(m => m.type === internalMsgType).length;
-                    const typeLimit = spamLimits[internalMsgType] || 5; 
+                    const typeLimit = spamLimits[internalMsgType] || 5;
                     if (typeCount >= typeLimit) {
                         isSpamFlagged = true;
-                        const arNames = {text:'نصوص', image:'صور', video:'فيديو', audio:'صوتيات', document:'ملفات', sticker:'ملصقات'};
+                        const arNames = { text: 'نصوص', image: 'صور', video: 'فيديو', audio: 'صوتيات', document: 'ملفات', sticker: 'ملصقات' };
                         spamFlagReason = `إرسال (${arNames[internalMsgType] || internalMsgType}) بسرعة تتجاوز الحد المسموح (${typeLimit} خلال 15ث)`;
                     }
                 }
@@ -2134,24 +2429,25 @@ client.on('message', async msg => {
                     console.log(`[أمان] تم رصد مزعج في (${chat.name}): ${spamFlagReason}`);
                     spamMutedUsers.set(trackerKey, Date.now() + 60000);
                     for (const m of tracker) abortedMessages.add(m.id);
-                    try { await msg.delete(true); } catch(e) {}
+                    await safeDelay();
+                    try { await msg.delete(true); } catch (e) { }
                     for (const m of tracker) {
-                        if (m.id !== msgId) { 
-                            try { await m.msgObj.delete(true); await new Promise(r => setTimeout(r, 500)); } catch(err) {}
+                        if (m.id !== msgId) {
+                            try { await m.msgObj.delete(true); await new Promise(r => setTimeout(r, 500)); } catch (err) { }
                         }
                     }
                     try {
                         const recentMsgs = await chat.fetchMessages({ limit: 15 });
                         for (const rMsg of recentMsgs) {
                             if ((rMsg.author || rMsg.from) === rawAuthorId) {
-                                try { await rMsg.delete(true); await new Promise(r => setTimeout(r, 200)); } catch(e) {}
+                                try { await rMsg.delete(true); await new Promise(r => setTimeout(r, 200)); } catch (e) { }
                             }
                         }
-                    } catch(err) {}
-                    userTrackers.delete(trackerKey); 
+                    } catch (err) { }
+                    userTrackers.delete(trackerKey);
 
                     const contact = await msg.getContact();
-                    let senderId = cleanAuthorId; 
+                    let senderId = cleanAuthorId;
                     if (contact && contact.number) senderId = `${contact.number}@c.us`;
 
                     if (spamAction === 'auto') {
@@ -2162,7 +2458,7 @@ client.on('message', async msg => {
                             }
                             const reportText = `🚨 *حظر تلقائي (إزعاج)*\nتم طرد العضو من "${chat.name}"${isBlacklistEnabled ? ' وإدراجه في القائمة السوداء' : ''}.\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${spamFlagReason}`;
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
-                        } catch(e) {}
+                        } catch (e) { }
                     } else {
                         const pollOptions = isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا، اكتف بالحذف'] : ['نعم، طرد العضو', 'لا'];
                         const pollTitle = `🚨 إشعار إزعاج في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${spamFlagReason}\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
@@ -2170,7 +2466,7 @@ client.on('message', async msg => {
                         const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
                         pendingBans.set(pollMsg.id._serialized, { senderId: senderId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
                     }
-                    return; 
+                    return;
                 }
             }
 
@@ -2189,32 +2485,32 @@ client.on('message', async msg => {
             // Q&A Feature Check
             let isQAMatched = false;
             let qaAnswer = '';
+            let matchedQA = null;
             if (groupConfig && groupConfig.enableQAFeature && groupConfig.qaList && groupConfig.qaList.length > 0 && msg.body && internalMsgType === 'text') {
                 const messageText = msg.body.toLowerCase().trim();
                 for (const qa of groupConfig.qaList) {
-                    const questions = qa.questions || [qa.question]; // Support both new format (array) and old format (string)
-                    // Check if message contains any of the question variations (case-insensitive)
+                    const questions = qa.questions || [qa.question];
                     const matchedQuestion = questions.find(q => messageText.includes(q.toLowerCase().trim()));
                     if (matchedQuestion) {
                         isQAMatched = true;
-                        qaAnswer = qa.answer;
+                        qaAnswer = qa.answer || '';
+                        matchedQA = qa;
                         console.log(`[Q&A] تم رصد سؤال مطابق في "${chat.name}": "${matchedQuestion}"`);
                         break;
                     }
                 }
-                
-                // Send Q&A response if matched
-                if (isQAMatched && qaAnswer) {
+
+                // Send Q&A response (with optional media attachment)
+                if (isQAMatched && (qaAnswer || (matchedQA && matchedQA.mediaFile))) {
                     try {
-                        // Replace dynamic fields
                         let finalAnswer = qaAnswer;
-                        
+
                         // Replace {date}
                         const now = new Date();
                         const dateStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
                         finalAnswer = finalAnswer.replace(/{date}/g, dateStr);
-                        
-                        // Replace {eventdate} with days remaining and event date
+
+                        // Replace {eventdate}
                         if (groupConfig.eventDate) {
                             const eventDate = new Date(groupConfig.eventDate);
                             const today = new Date();
@@ -2222,22 +2518,40 @@ client.on('message', async msg => {
                             eventDate.setHours(0, 0, 0, 0);
                             const daysLeft = Math.ceil((eventDate - today) / (1000 * 60 * 60 * 24));
                             const eventDateStr = `${String(eventDate.getDate()).padStart(2, '0')}/${String(eventDate.getMonth() + 1).padStart(2, '0')}/${eventDate.getFullYear()}`;
-                            const eventdateStr = daysLeft > 0 ? `${daysLeft} days left - ${eventDateStr}` : (daysLeft === 0 ? `Today - ${eventDateStr}` : `${Math.abs(daysLeft)} days ago - ${eventDateStr}`);
+                            const isArabic = (groupConfig.qaLanguage || 'ar') === 'ar';
+                            let eventdateStr;
+                            if (isArabic) {
+                                eventdateStr = daysLeft > 0 ? `${daysLeft} أيام متبقية - ${eventDateStr}` : (daysLeft === 0 ? `اليوم - ${eventDateStr}` : `منذ ${Math.abs(daysLeft)} أيام - ${eventDateStr}`);
+                            } else {
+                                eventdateStr = daysLeft > 0 ? `${daysLeft} days left - ${eventDateStr}` : (daysLeft === 0 ? `Today - ${eventDateStr}` : `${Math.abs(daysLeft)} days ago - ${eventDateStr}`);
+                            }
                             finalAnswer = finalAnswer.replace(/{eventdate}/g, eventdateStr);
                         }
-                        
+
                         // Replace {user}
                         const contact = await msg.getContact();
                         const userName = contact ? (contact.name || contact.number) : cleanAuthorId.split('@')[0];
                         finalAnswer = finalAnswer.replace(/{user}/g, userName);
-                        
-                        await chat.sendMessage(finalAnswer);
+
+                        // Send media + caption, or plain text
+                        if (matchedQA && matchedQA.mediaFile) {
+                            const mediaPath = path.join(__dirname, 'media', groupId, matchedQA.mediaFile);
+                            if (fs.existsSync(mediaPath)) {
+                                const media = MessageMedia.fromFilePath(mediaPath);
+                                await chat.sendMessage(media, { caption: finalAnswer || undefined });
+                            } else {
+                                if (finalAnswer) await chat.sendMessage(finalAnswer);
+                            }
+                        } else {
+                            await chat.sendMessage(finalAnswer);
+                        }
                     } catch (err) {
                         console.error(`[Q&A] خطأ في إرسال الإجابة: ${err.message}`);
                     }
-                    return; // Exit after responding to Q&A
+                    return;
                 }
             }
+
 
             let canSendToAI = false;
             let base64Image = null;
@@ -2252,11 +2566,11 @@ client.on('message', async msg => {
                             try {
                                 const media = await msg.downloadMedia();
                                 if (media && media.data) base64Image = media.data;
-                            } catch (err) {}
+                            } catch (err) { }
                         }
                     } else if (msg.body && msg.body.trim().length > 0) {
                         canSendToAI = true;
-                    } 
+                    }
                 }
             }
 
@@ -2264,14 +2578,14 @@ client.on('message', async msg => {
                 try {
                     const msgText = msg.body || '[صورة بدون نص مرفق]';
                     const aiPromptText = `أنت مشرف مجموعة صارم. تعليماتك هي: ${config.aiPrompt}\n\nبناء على التعليمات، هل هذا المحتوى يعتبر مخالف؟ أجب بكلمة "نعم" أو "لا" فقط.\nالمحتوى: "${msgText}"`;
-                    
+
                     const payload = { model: config.ollamaModel, prompt: aiPromptText, stream: false };
                     if (base64Image) payload.images = [base64Image];
 
                     const response = await fetch(`${config.ollamaUrl}/api/generate`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
                     });
-                    
+
                     if (abortedMessages.has(msgId)) { abortedMessages.delete(msgId); return; }
 
                     const data = await response.json();
@@ -2279,16 +2593,17 @@ client.on('message', async msg => {
                         isViolating = true;
                         violationReason = 'تم التصنيف كمخالفة عبر الذكاء الاصطناعي';
                     }
-                } catch (error) {}
+                } catch (error) { }
             }
 
             if (isViolating) {
                 const contact = await msg.getContact();
-                let senderId = cleanAuthorId; 
+                let senderId = cleanAuthorId;
                 if (contact && contact.number) senderId = `${contact.number}@c.us`;
 
                 const messageContent = msg.body || '[مرفق وسائط]';
-                await msg.delete(true); 
+                await safeDelay();
+                await msg.delete(true);
 
                 if (isAutoActionEnabled) {
                     try {
@@ -2297,18 +2612,18 @@ client.on('message', async msg => {
 
                         const reportText = `🚨 *تقرير إجراء وحظر تلقائي*\nتم مسح محتوى مخالف وطرد العضو من "${chat.name}".\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${violationReason}\n📝 *النص الممسوح:*\n"${messageContent}"`;
                         await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
-                    } catch(e) {}
+                    } catch (e) { }
                 } else {
                     const pollOptions = isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا، اكتف بالحذف'] : ['نعم، طرد', 'لا'];
                     const pollTitle = `🚨 إشعار بمحتوى مخالف في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${violationReason}\nالنص:\n"${messageContent}"\n\nهل ترغب في طرده؟`;
                     const poll = new Poll(pollTitle, pollOptions);
-                    
+
                     const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
                     pendingBans.set(pollMsg.id._serialized, { senderId: senderId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
                 }
             }
         }
-    } catch (error) {}
+    } catch (error) { }
 });
 
 client.on('vote_update', async vote => {
@@ -2321,7 +2636,7 @@ client.on('vote_update', async vote => {
 
             if (selectedOption.includes('نعم')) {
                 if (data.isBlacklistEnabled) {
-                    try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan); } catch(e) {}
+                    try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan); } catch (e) { }
                 }
                 const botId = client.info.wid._serialized;
                 const chats = await client.getChats();
@@ -2331,8 +2646,8 @@ client.on('vote_update', async vote => {
                         if (botData && (botData.isAdmin || botData.isSuperAdmin)) {
                             try {
                                 await chat.removeParticipants([userToBan]);
-                                await new Promise(resolve => setTimeout(resolve, 1000)); 
-                            } catch(e) {}
+                                await new Promise(resolve => setTimeout(resolve, 1000));
+                            } catch (e) { }
                         }
                     }
                 }
