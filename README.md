@@ -138,7 +138,7 @@ version: '3.8'
 
 services:
   bot:
-    image: ghcr.io/your-username/your-repo-name:latest
+    image: ghcr.io/az2oo1/wa-bot:latest
     working_dir: /app
     ports:
       - "3000:3000"
