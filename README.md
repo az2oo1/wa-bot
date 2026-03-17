@@ -143,14 +143,10 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - ./node_modules:/app/node_modules
-      - ./.wwebjs_auth:/app/.wwebjs_auth
-      - ./.wwebjs_cache:/app/.wwebjs_cache
-      - ./bot_data.sqlite:/app/bot_data.sqlite
+      - /DATA/wa-bot/.wwebjs_auth:/app/.wwebjs_auth
+      - /DATA/wa-bot/.wwebjs_cache:/app/.wwebjs_cache
+      - /DATA/wa-bot/media:/app/media
     restart: unless-stopped
-    environment:
-      - NODE_ENV=production
-      - PORT=3000
 ```
 
 **Volume Explanations:**
