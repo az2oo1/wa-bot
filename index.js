@@ -42,7 +42,8 @@ const colsToAdd = [
     'enable_panic_mode INTEGER', 'panic_message_limit INTEGER', 'panic_time_window INTEGER',
     'panic_lockout_duration INTEGER', 'panic_alert_target TEXT', 'panic_alert_message TEXT',
     'enable_whitelist INTEGER', 'custom_blacklist TEXT', 'custom_whitelist TEXT',
-    'use_global_blacklist INTEGER', 'use_global_whitelist INTEGER'
+    'use_global_blacklist INTEGER', 'use_global_whitelist INTEGER',
+    'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT'
 ];
 colsToAdd.forEach(col => {
     try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch(e){}
@@ -87,7 +88,8 @@ function loadConfigFromDB() {
             spamLimits: JSON.parse(g.spam_limits || '{"text":7,"image":3,"video":2,"audio":3,"document":3,"sticker":3}'),
             enablePanicMode: g.enable_panic_mode === 1, panicMessageLimit: g.panic_message_limit || 10,
             panicTimeWindow: g.panic_time_window || 5, panicLockoutDuration: g.panic_lockout_duration || 10,
-            panicAlertTarget: g.panic_alert_target || 'both', panicAlertMessage: g.panic_alert_message || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.'
+            panicAlertTarget: g.panic_alert_target || 'both', panicAlertMessage: g.panic_alert_message || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.',
+            enableQAFeature: g.enable_qa_feature === 1, qaList: JSON.parse(g.custom_qa || '[]'), eventDate: g.qa_event_date || ''
         };
     });
     return newConfig;
@@ -123,8 +125,9 @@ function saveConfigToDB(conf) {
                 spam_action, enable_welcome_message, welcome_message_text, custom_words,
                 blocked_types, blocked_action, spam_types, spam_limits,
                 enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
-                panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist,
+                enable_qa_feature, custom_qa, qa_event_date
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
@@ -138,7 +141,8 @@ function saveConfigToDB(conf) {
                 gData.enablePanicMode ? 1 : 0, gData.panicMessageLimit, gData.panicTimeWindow,
                 gData.panicLockoutDuration, gData.panicAlertTarget, gData.panicAlertMessage,
                 JSON.stringify(gData.customBlacklist || []), JSON.stringify(gData.customWhitelist || []),
-                gData.useGlobalBlacklist ? 1 : 0, gData.useGlobalWhitelist ? 1 : 0
+                gData.useGlobalBlacklist ? 1 : 0, gData.useGlobalWhitelist ? 1 : 0,
+                gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || ''
             );
         }
     });
@@ -837,7 +841,11 @@ app.get('/', (req, res) => {
                 panicTimeWindow: groupsConfigObj[key].panicTimeWindow || 5,
                 panicLockoutDuration: groupsConfigObj[key].panicLockoutDuration || 10,
                 panicAlertTarget: groupsConfigObj[key].panicAlertTarget || 'both',
-                panicAlertMessage: groupsConfigObj[key].panicAlertMessage || '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}'
+                panicAlertMessage: groupsConfigObj[key].panicAlertMessage || '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}',
+                enableQAFeature: groupsConfigObj[key].enableQAFeature || false,
+                qaList: groupsConfigObj[key].qaList || [],
+                eventDate: groupsConfigObj[key].eventDate || '',
+                currentQAQuestions: []
             }));
 
             let currentDetailIndex = null;
@@ -975,6 +983,7 @@ app.get('/', (req, res) => {
                 const tabs = [
                     { id: 'general', icon: 'fa-cog',        label: currentLang==='en'?'General':'عام' },
                     { id: 'filters', icon: 'fa-filter',     label: currentLang==='en'?'Filters':'فلاتر' },
+                    { id: 'qa',      icon: 'fa-question',   label: currentLang==='en'?'Q&A':'س و ج' },
                     { id: 'spam',    icon: 'fa-shield-alt', label: currentLang==='en'?'Anti-Spam':'سبام' },
                     { id: 'panic',   icon: 'fa-radiation',  label: currentLang==='en'?'Panic':'طوارئ' },
                     { id: 'lists',   icon: 'fa-list',       label: currentLang==='en'?'Lists':'القوائم' },
@@ -1061,6 +1070,70 @@ app.get('/', (req, res) => {
                             <div class="toggle-left">
                                 <label class="switch"><input type="checkbox" \${group.enableAIMedia?'checked':''} onchange="updateGroupToggle(\${groupIndex},'enableAIMedia',this.checked)"><span class="slider"></span></label>
                                 <div class="toggle-label purple">\${dict.ai_vision}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="group-tab-panel" id="gtab_\${groupIndex}_qa">
+                        <div class="card info">
+                            <div class="toggle-row blue" style="margin-bottom:0;border-radius:10px;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.enableQAFeature?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'qa',this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label blue">\${currentLang==='en'?'Enable Q&A Feature':'تفعيل ميزة الأسئلة والأجوبة'}<small>\${currentLang==='en'?'Auto-respond to predefined questions with dynamic fields':'الإجابة التلقائية على الأسئلة المحددة مع حقول ديناميكية'}</small></div>
+                                </div>
+                            </div>
+                            <div id="group_qa_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enableQAFeature?'1200px':'0px'};opacity:\${group.enableQAFeature?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableQAFeature?'20px':'0px'};">
+                                <div class="sub-panel blue" style="margin-bottom:16px;">
+                                    <h4 style="color:var(--blue);">\${currentLang==='en'?'Dynamic Fields Reference':'مرجع الحقول الديناميكية'}</h4>
+                                    <div style="font-size:13px;color:var(--text-muted);line-height:1.8;">
+                                        <div><strong style="color:var(--blue);">{date}</strong> - \${currentLang==='en'?'Current date (DD/MM/YYYY)':'التاريخ الحالي'}</div>
+                                        <div><strong style="color:var(--blue);">{eventdate}</strong> - \${currentLang==='en'?'Event/deadline with days remaining (e.g., 5 days left - 25/03/2026)':'الحدث/الموعد النهائي مع الأيام المتبقية'}</div>
+                                        <div><strong style="color:var(--blue);">{user}</strong> - \${currentLang==='en'?'Sender username':'اسم المرسل'}</div>
+                                    </div>
+                                </div>
+                                
+                                <label class="field-label">\${currentLang==='en'?'Set Event/Deadline Date':'حدد تاريخ الحدث/الموعد النهائي'}</label>
+                                <div class="field-row" style="margin-bottom:16px;">
+                                    <div class="field-group" style="margin-bottom:0;">
+                                        <label class="field-label" style="margin-bottom:4px;">\${currentLang==='en'?'Date (Test, Assignment, etc.)':'التاريخ (اختبار، مهمة، إلخ)'}</label>
+                                        <input type="date" id="newQAEventDate_\${groupIndex}" value="\${group.eventDate || ''}" onchange="updateGroupData(\${groupIndex}, 'eventDate', this.value)">
+                                    </div>
+                                </div>
+                                
+                                <label class="field-label">\${currentLang==='en'?'Add Questions for This Answer':'أضف أسئلة لهذه الإجابة'}</label>
+                                <div class="field-group" style="margin-bottom:10px;">
+                                    <input type="text" id="newQAQuestion_\${groupIndex}" placeholder="\${currentLang==='en'?'Enter a question variant (e.g., when is the test)...':'أدخل صيغة السؤال...'}" style="margin-bottom:10px;" onkeypress="if(event.key==='Enter'){event.preventDefault();addQuestionToQA(\${groupIndex});}">
+                                    <button type="button" class="btn btn-primary btn-sm" onclick="addQuestionToQA(\${groupIndex})" style="width:100%;margin-bottom:10px;"><i class="fas fa-plus"></i> \${currentLang==='en'?'Add Question Variant':'إضافة صيغة سؤال'}</button>
+                                    <div class="chip-container" id="qa_questions_container_\${groupIndex}" style="min-height:40px;">\${(group.currentQAQuestions || []).map((q, qIdx) => \`<div class="chip"><span>\${q}</span><span class="chip-remove" onclick="removeQuestionFromQA(\${groupIndex}, \${qIdx})">×</span></div>\`).join('')}</div>
+                                </div>
+                                <label class="field-label">\${currentLang==='en'?'Answer (Use {date}, {time}, {user} for dynamic values)':'الإجابة (استخدم {date}, {time}, {user} للحقول الديناميكية)'}</label>
+                                <div class="field-group" style="margin-bottom:10px;">
+                                    <textarea id="newQAAnswer_\${groupIndex}" placeholder="\${currentLang==='en'?'Enter answer with optional dynamic fields...':'أدخل الإجابة مع الحقول الديناميكية الاختيارية...'}" rows="3" style="margin-bottom:10px;"></textarea>
+                                    <button type="button" class="btn btn-primary btn-sm btn-full" onclick="addGroupQA(\${groupIndex})"><i class="fas fa-save"></i> \${currentLang==='en'?'Save Q&A Pair':'حفظ زوج س و ج'}</button>
+                                </div>
+                                <label class="field-label" style="margin-top:16px;">\${currentLang==='en'?'Q&A Pairs':'أزواج الأسئلة والأجوبة'}</label>
+                                <div id="qa_container_\${groupIndex}">
+                                    \${(group.qaList || []).map((qa, qaIdx) => \`
+                                        <div class="group-card" style="margin-bottom:10px;">
+                                            <div class="group-card-header" style="padding:12px;">
+                                                <div class="group-card-title" style="font-size:14px;">
+                                                    <i class="fas fa-question" style="color:var(--blue);"></i> \${currentLang==='en'?'Question Variations':'صيغ الأسئلة'} (\${(qa.questions || []).length})
+                                                </div>
+                                                <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                            <div class="group-card-body" style="padding:12px;">
+                                                <div style="margin-bottom:10px;">
+                                                    <div class="chip-container" style="background:rgba(64,196,255,0.05);border-color:rgba(64,196,255,0.2);">\${(qa.questions || []).map((q, qIdx) => \`<div class="chip" style="background:rgba(64,196,255,0.15);color:var(--blue);border-color:rgba(64,196,255,0.3);"><i class="fas fa-search"></i> \${q}</div>\`).join('')}</div>
+                                                </div>
+                                                <div style="color:var(--text-muted);font-size:13px;">
+                                                    <strong>\${currentLang==='en'?'Answer':'الإجابة'}:</strong> \${qa.answer || '(empty)'}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    \`).join('')}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1302,9 +1375,9 @@ app.get('/', (req, res) => {
             }
 
             function toggleGroupPanel(groupIndex, type, enabled) {
-                const panelMap = { spam: 'spam', welcome: 'welcome', words: 'words', panic: 'panic', blacklist: 'blacklist', whitelist: 'whitelist' };
-                const fieldMap = { spam: 'enableAntiSpam', welcome: 'enableWelcomeMessage', words: 'enableWordFilter', panic: 'enablePanicMode', blacklist: 'enableBlacklist', whitelist: 'enableWhitelist' };
-                const maxHeightMap = { spam: '600px', welcome: '200px', words: '600px', panic: '800px', blacklist: '600px', whitelist: '600px' };
+                const panelMap = { spam: 'spam', welcome: 'welcome', words: 'words', qa: 'qa', panic: 'panic', blacklist: 'blacklist', whitelist: 'whitelist' };
+                const fieldMap = { spam: 'enableAntiSpam', welcome: 'enableWelcomeMessage', words: 'enableWordFilter', qa: 'enableQAFeature', panic: 'enablePanicMode', blacklist: 'enableBlacklist', whitelist: 'enableWhitelist' };
+                const maxHeightMap = { spam: '600px', welcome: '200px', words: '600px', qa: '1200px', panic: '800px', blacklist: '600px', whitelist: '600px' };
 
                 if (groupIndex !== 'global') {
                     groupsArr[groupIndex][fieldMap[type]] = enabled;
@@ -1339,7 +1412,8 @@ app.get('/', (req, res) => {
                     blockedTypes: [], blockedAction: 'delete', 
                     spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
                     spamLimits: {text:7, image:3, video:2, audio:3, document:3, sticker:3},
-                    enablePanicMode: false, panicMessageLimit: 10, panicTimeWindow: 5, panicLockoutDuration: 10, panicAlertTarget: 'both', panicAlertMessage: '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}'
+                    enablePanicMode: false, panicMessageLimit: 10, panicTimeWindow: 5, panicLockoutDuration: 10, panicAlertTarget: 'both', panicAlertMessage: '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}',
+                    enableQAFeature: false, qaList: [], eventDate: '', currentQAQuestions: []
                 });
                 openGroupDetail(groupsArr.length - 1);
             }
@@ -1376,6 +1450,91 @@ app.get('/', (req, res) => {
             function removeGroupWord(groupIndex, wordIndex) {
                 groupsArr[groupIndex].words.splice(wordIndex, 1);
                 renderGroupChips(groupIndex, 'words');
+            }
+
+            function addQuestionToQA(groupIndex) {
+                const input = document.getElementById(\`newQAQuestion_\${groupIndex}\`);
+                const question = input.value.trim().toLowerCase();
+                if (question) {
+                    if (!groupsArr[groupIndex].currentQAQuestions) groupsArr[groupIndex].currentQAQuestions = [];
+                    if (!groupsArr[groupIndex].currentQAQuestions.includes(question)) {
+                        groupsArr[groupIndex].currentQAQuestions.push(question);
+                        input.value = '';
+                        renderQAQuestions(groupIndex);
+                    } else {
+                        alert(currentLang === 'en' ? 'This question variant already exists' : 'صيغة السؤال هذه موجودة بالفعل');
+                    }
+                }
+            }
+            
+            function removeQuestionFromQA(groupIndex, questionIndex) {
+                if (groupsArr[groupIndex].currentQAQuestions) {
+                    groupsArr[groupIndex].currentQAQuestions.splice(questionIndex, 1);
+                    renderQAQuestions(groupIndex);
+                }
+            }
+            
+            function renderQAQuestions(groupIndex) {
+                const container = document.getElementById(\`qa_questions_container_\${groupIndex}\`);
+                if (!container) return;
+                const questions = groupsArr[groupIndex].currentQAQuestions || [];
+                container.innerHTML = questions.map((q, qIdx) => \`
+                    <div class="chip">
+                        <span>\${q}</span>
+                        <span class="chip-remove" onclick="removeQuestionFromQA(\${groupIndex}, \${qIdx})">×</span>
+                    </div>
+                \`).join('');
+            }
+
+            function addGroupQA(groupIndex) {
+                const answerInput = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
+                const answer = answerInput.value.trim();
+                const questions = groupsArr[groupIndex].currentQAQuestions || [];
+                
+                if (questions.length > 0 && answer) {
+                    if (!groupsArr[groupIndex].qaList) groupsArr[groupIndex].qaList = [];
+                    groupsArr[groupIndex].qaList.push({ questions: questions, answer: answer });
+                    answerInput.value = '';
+                    groupsArr[groupIndex].currentQAQuestions = [];
+                    renderQAQuestions(groupIndex);
+                    renderGroupQA(groupIndex);
+                } else {
+                    const msg = currentLang === 'en' ? 'Please add at least one question variant and fill in the answer' : 'يرجى إضافة صيغة سؤال واحدة على الأقل وملء الإجابة';
+                    alert(msg);
+                }
+            }
+            
+            function removeGroupQA(groupIndex, qaIndex) {
+                if (groupsArr[groupIndex].qaList) {
+                    groupsArr[groupIndex].qaList.splice(qaIndex, 1);
+                    renderGroupQA(groupIndex);
+                }
+            }
+            
+            function renderGroupQA(groupIndex) {
+                const container = document.getElementById(\`qa_container_\${groupIndex}\`);
+                if (!container) return;
+                const qaList = groupsArr[groupIndex].qaList || [];
+                container.innerHTML = qaList.map((qa, qaIdx) => \`
+                    <div class="group-card" style="margin-bottom:10px;">
+                        <div class="group-card-header" style="padding:12px;">
+                            <div class="group-card-title" style="font-size:14px;">
+                                <i class="fas fa-question" style="color:var(--blue);"></i> \${currentLang==='en'?'Question Variations':'صيغ الأسئلة'} (\${(qa.questions || []).length})
+                            </div>
+                            <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);">
+                                <i class="fas fa-trash"></i>
+                            </button>
+                        </div>
+                        <div class="group-card-body" style="padding:12px;">
+                            <div style="margin-bottom:10px;">
+                                <div class="chip-container" style="background:rgba(64,196,255,0.05);border-color:rgba(64,196,255,0.2);">\${(qa.questions || []).map((q, qIdx) => \`<div class="chip" style="background:rgba(64,196,255,0.15);color:var(--blue);border-color:rgba(64,196,255,0.3);"><i class="fas fa-search"></i> \${q}</div>\`).join('')}</div>
+                            </div>
+                            <div style="color:var(--text-muted);font-size:13px;">
+                                <strong>\${currentLang==='en'?'Answer':'الإجابة'}:</strong> \${qa.answer || '(empty)'}
+                            </div>
+                        </div>
+                    </div>
+                \`).join('');
             }
 
             function addGroupBlacklist(gIndex) {
@@ -2024,6 +2183,59 @@ client.on('message', async msg => {
                 if (matchedWord) {
                     isViolating = true;
                     violationReason = `تطابق تام مع الكلمة المحظورة: [${matchedWord}]`;
+                }
+            }
+
+            // Q&A Feature Check
+            let isQAMatched = false;
+            let qaAnswer = '';
+            if (groupConfig && groupConfig.enableQAFeature && groupConfig.qaList && groupConfig.qaList.length > 0 && msg.body && internalMsgType === 'text') {
+                const messageText = msg.body.toLowerCase().trim();
+                for (const qa of groupConfig.qaList) {
+                    const questions = qa.questions || [qa.question]; // Support both new format (array) and old format (string)
+                    // Check if message contains any of the question variations (case-insensitive)
+                    const matchedQuestion = questions.find(q => messageText.includes(q.toLowerCase().trim()));
+                    if (matchedQuestion) {
+                        isQAMatched = true;
+                        qaAnswer = qa.answer;
+                        console.log(`[Q&A] تم رصد سؤال مطابق في "${chat.name}": "${matchedQuestion}"`);
+                        break;
+                    }
+                }
+                
+                // Send Q&A response if matched
+                if (isQAMatched && qaAnswer) {
+                    try {
+                        // Replace dynamic fields
+                        let finalAnswer = qaAnswer;
+                        
+                        // Replace {date}
+                        const now = new Date();
+                        const dateStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+                        finalAnswer = finalAnswer.replace(/{date}/g, dateStr);
+                        
+                        // Replace {eventdate} with days remaining and event date
+                        if (groupConfig.eventDate) {
+                            const eventDate = new Date(groupConfig.eventDate);
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+                            eventDate.setHours(0, 0, 0, 0);
+                            const daysLeft = Math.ceil((eventDate - today) / (1000 * 60 * 60 * 24));
+                            const eventDateStr = `${String(eventDate.getDate()).padStart(2, '0')}/${String(eventDate.getMonth() + 1).padStart(2, '0')}/${eventDate.getFullYear()}`;
+                            const eventdateStr = daysLeft > 0 ? `${daysLeft} days left - ${eventDateStr}` : (daysLeft === 0 ? `Today - ${eventDateStr}` : `${Math.abs(daysLeft)} days ago - ${eventDateStr}`);
+                            finalAnswer = finalAnswer.replace(/{eventdate}/g, eventdateStr);
+                        }
+                        
+                        // Replace {user}
+                        const contact = await msg.getContact();
+                        const userName = contact ? (contact.name || contact.number) : cleanAuthorId.split('@')[0];
+                        finalAnswer = finalAnswer.replace(/{user}/g, userName);
+                        
+                        await chat.sendMessage(finalAnswer);
+                    } catch (err) {
+                        console.error(`[Q&A] خطأ في إرسال الإجابة: ${err.message}`);
+                    }
+                    return; // Exit after responding to Q&A
                 }
             }
 
