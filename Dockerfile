@@ -10,17 +10,23 @@ RUN apt-get update && apt-get install -y \
 ENV PUPPETEER_SKIP_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
-WORKDIR /app
-
-# Copy package files FIRST to cache the npm install step
+# 1. Put everything in a safe STAGING folder first (not /app)
+WORKDIR /app_staging
 COPY package*.json ./
-
-# Install dependencies and rebuild sqlite3 during the GitHub Action
 RUN npm install
 RUN npm rebuild better-sqlite3
-
-# Copy the rest of your bot's code into the image
 COPY . .
 
-# The command to start the bot
-CMD ["node", "index.js"]
+# 2. Create the Magic Startup Script
+# This script checks if index.js is missing from your CasaOS folder. 
+# If it's missing, it dumps all the pre-compiled code into it!
+RUN echo '#!/bin/sh\n\
+if [ ! -f /app/index.js ]; then\n\
+  echo "First run detected! Copying files to your CasaOS server..."\n\
+  cp -r /app_staging/* /app/\n\
+fi\n\
+cd /app\n\
+exec node index.js' > /start.sh && chmod +x /start.sh
+
+# 3. Tell the container to run the script when it starts
+CMD ["/start.sh"]
