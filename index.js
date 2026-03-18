@@ -414,6 +414,139 @@ app.delete('/api/media/delete/:groupId/:filename', (req, res) => {
 });
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── Import/Export API ─────────────────────────────────────────────────────────
+// Export dataset with selected options
+app.post('/api/export', (req, res) => {
+    try {
+        const selected = req.body.selected || {};
+        const dataset = {};
+
+        if (selected.global_settings) {
+            dataset.global_settings = db.prepare('SELECT * FROM global_settings').all();
+        }
+        if (selected.llm_settings) {
+            dataset.llm_settings = db.prepare('SELECT * FROM llm_settings').all();
+        }
+        if (selected.blacklist) {
+            dataset.blacklist = db.prepare('SELECT * FROM blacklist').all();
+        }
+        if (selected.whitelist) {
+            dataset.whitelist = db.prepare('SELECT * FROM whitelist').all();
+        }
+        if (selected.blocked_extensions) {
+            dataset.blocked_extensions = db.prepare('SELECT * FROM blocked_extensions').all();
+        }
+        if (selected.whatsapp_groups) {
+            dataset.whatsapp_groups = db.prepare('SELECT * FROM whatsapp_groups').all();
+        }
+        if (selected.custom_groups) {
+            dataset.custom_groups = db.prepare('SELECT * FROM custom_groups').all();
+        }
+
+        const exportData = {
+            version: '6.1',
+            timestamp: new Date().toISOString(),
+            data: dataset
+        };
+
+        res.json(exportData);
+    } catch (error) {
+        console.error('[خطأ] فشل التصدير:', error);
+        res.status(500).json({ error: 'Export failed: ' + error.message });
+    }
+});
+
+// Import dataset with selected options
+app.post('/api/import', (req, res) => {
+    try {
+        const { dataset, selected } = req.body;
+        
+        if (!dataset || !selected) {
+            return res.status(400).json({ error: 'Invalid import data' });
+        }
+
+        const importTx = db.transaction(() => {
+            if (selected.global_settings && dataset.global_settings) {
+                const stmt = db.prepare('INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)');
+                for (const row of dataset.global_settings) {
+                    stmt.run(row.key, row.value);
+                }
+            }
+            if (selected.llm_settings && dataset.llm_settings) {
+                const stmt = db.prepare('INSERT OR REPLACE INTO llm_settings (key, value) VALUES (?, ?)');
+                for (const row of dataset.llm_settings) {
+                    stmt.run(row.key, row.value);
+                }
+            }
+            if (selected.blacklist && dataset.blacklist) {
+                if (selected.blacklist_clear) db.prepare('DELETE FROM blacklist').run();
+                const stmt = db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)');
+                for (const row of dataset.blacklist) {
+                    stmt.run(row.number);
+                }
+            }
+            if (selected.whitelist && dataset.whitelist) {
+                if (selected.whitelist_clear) db.prepare('DELETE FROM whitelist').run();
+                const stmt = db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)');
+                for (const row of dataset.whitelist) {
+                    stmt.run(row.number);
+                }
+            }
+            if (selected.blocked_extensions && dataset.blocked_extensions) {
+                if (selected.blocked_extensions_clear) db.prepare('DELETE FROM blocked_extensions').run();
+                const stmt = db.prepare('INSERT OR IGNORE INTO blocked_extensions (ext) VALUES (?)');
+                for (const row of dataset.blocked_extensions) {
+                    stmt.run(row.ext);
+                }
+            }
+            if (selected.whatsapp_groups && dataset.whatsapp_groups) {
+                const stmt = db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)');
+                for (const row of dataset.whatsapp_groups) {
+                    stmt.run(row.id, row.name);
+                }
+            }
+            if (selected.custom_groups && dataset.custom_groups) {
+                if (selected.custom_groups_clear) db.prepare('DELETE FROM custom_groups').run();
+                const stmt = db.prepare(`
+                    INSERT OR REPLACE INTO custom_groups (
+                        group_id, admin_group, use_default_words, enable_word_filter, enable_ai_filter, 
+                        enable_ai_media, auto_action, enable_blacklist, enable_whitelist, enable_anti_spam, 
+                        spam_duplicate_limit, spam_action, enable_welcome_message, welcome_message_text, custom_words,
+                        blocked_types, blocked_action, spam_types, spam_limits,
+                        enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
+                        panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, 
+                        use_global_blacklist, use_global_whitelist, enable_qa_feature, custom_qa, qa_event_date, 
+                        qa_language, qa_event_dates
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `);
+                for (const row of dataset.custom_groups) {
+                    stmt.run(
+                        row.group_id, row.admin_group, row.use_default_words, row.enable_word_filter,
+                        row.enable_ai_filter, row.enable_ai_media, row.auto_action, row.enable_blacklist,
+                        row.enable_whitelist, row.enable_anti_spam, row.spam_duplicate_limit, row.spam_action,
+                        row.enable_welcome_message, row.welcome_message_text, row.custom_words,
+                        row.blocked_types, row.blocked_action, row.spam_types, row.spam_limits,
+                        row.enable_panic_mode, row.panic_message_limit, row.panic_time_window,
+                        row.panic_lockout_duration, row.panic_alert_target, row.panic_alert_message,
+                        row.custom_blacklist, row.custom_whitelist, row.use_global_blacklist,
+                        row.use_global_whitelist, row.enable_qa_feature, row.custom_qa, row.qa_event_date,
+                        row.qa_language, row.qa_event_dates
+                    );
+                }
+            }
+        });
+
+        importTx();
+        config = loadConfigFromDB();
+        console.log('[استيراد] تم استيراد البيانات بنجاح');
+        res.json({ success: true, message: 'Import completed successfully' });
+    } catch (error) {
+        console.error('[خطأ] فشل الاستيراد:', error);
+        res.status(500).json({ error: 'Import failed: ' + error.message });
+    }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Safe Mode: random delay 10-60s to mimic human behaviour and avoid WhatsApp bot detection
 async function safeDelay() {
     if (!config.safeMode) return;

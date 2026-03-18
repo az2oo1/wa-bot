@@ -54,6 +54,9 @@ module.exports = function renderDashboard(req, db, config) {
             <button class="nav-item" onclick="openDebuggerModal()">
                 <span class="nav-icon"><i class="fas fa-bug"></i></span> ${t('سجل الأحداث', 'Event Logs')}
             </button>
+            <button class="nav-item" onclick="showPage('page-import-export', this)">
+                <span class="nav-icon"><i class="fas fa-exchange-alt"></i></span> ${t('استيراد/تصدير', 'Import/Export')}
+            </button>
 
             <div class="sidebar-footer">
                 <button id="logoutBtn" onclick="logoutBot()" style="display:none; background: var(--red-dim); border-color: rgba(248,81,73,0.4); color: var(--red);"><i class="fas fa-sign-out-alt"></i> ${t('قطع الاتصال', 'Disconnect')}</button>
@@ -469,6 +472,122 @@ module.exports = function renderDashboard(req, db, config) {
 
             </div>
 
+            <div class="page" id="page-import-export">
+                <div class="page-header">
+                    <h2><i class="fas fa-exchange-alt"></i> ${t('استيراد/تصدير البيانات', 'Import/Export Dataset')}</h2>
+                    <p>${t('قم بتصدير واستيراد إعدادات البوت والقوائم المختلفة', 'Export and import bot settings and lists')}</p>
+                </div>
+
+                <div class="card-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-download"></i> ${t('تصدير البيانات', 'Export Data')}</h3>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('اختر البيانات المراد تصديرها', 'Select data to export')}</label>
+                            <div class="cb-group" id="exportOptions">
+                                <label class="cb-label">
+                                    <input type="checkbox" id="export_global_settings" checked>
+                                    ${t('الإعدادات العامة', 'Global Settings')}
+                                </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="export_llm_settings" checked>
+                                    ${t('إعدادات الذكاء الاصطناعي', 'AI Settings')}
+                                </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="export_blacklist" checked>
+                                    ${t('القائمة السوداء', 'Blacklist')}
+                                </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="export_whitelist" checked>
+                                    ${t('القائمة البيضاء', 'Whitelist')}
+                                </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="export_blocked_extensions" checked>
+                                    ${t('الرموز المحظورة', 'Blocked Extensions')}
+                                </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="export_whatsapp_groups" checked>
+                                    ${t('مجموعات واتساب', 'WhatsApp Groups')}
+                                </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="export_custom_groups" checked>
+                                    ${t('الإعدادات المخصصة للمجموعات', 'Custom Group Settings')}
+                                </label>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary btn-full" onclick="exportData()">
+                            <i class="fas fa-download"></i> ${t('تصدير الآن', 'Export Now')}
+                        </button>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <h3><i class="fas fa-upload"></i> ${t('استيراد البيانات', 'Import Data')}</h3>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('حدد ملف الاستيراد', 'Select import file')}</label>
+                            <input type="file" id="importFile" accept=".json" style="cursor:pointer;">
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('اختر البيانات المراد استيرادها', 'Select data to import')}</label>
+                            <div class="cb-group" id="importOptions">
+                                <label class="cb-label">
+                                    <input type="checkbox" id="import_global_settings" checked>
+                                    ${t('الإعدادات العامة', 'Global Settings')}
+                                </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="import_llm_settings" checked>
+                                    ${t('إعدادات الذكاء الاصطناعي', 'AI Settings')}
+                                </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="import_blacklist" checked>
+                                    ${t('القائمة السوداء', 'Blacklist')}
+                                </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="import_whitelist" checked>
+                                    ${t('القائمة البيضاء', 'Whitelist')}
+                                </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="import_blocked_extensions" checked>
+                                    ${t('الرموز المحظورة', 'Blocked Extensions')}
+                                </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="import_whatsapp_groups" checked>
+                                    ${t('مجموعات واتساب', 'WhatsApp Groups')}
+                                </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="import_custom_groups" checked>
+                                    ${t('الإعدادات المخصصة للمجموعات', 'Custom Group Settings')}
+                                </label>
+                            </div>
+                        </div>
+                        <div class="sub-panel" style="margin-top:16px;">
+                            <h4><i class="fas fa-exclamation-circle"></i> ${t('خيارات متقدمة', 'Advanced Options')}</h4>
+                            <label class="cb-label" style="margin-bottom:10px;">
+                                <input type="checkbox" id="import_blacklist_clear">
+                                ${t('مسح القائمة السوداء الحالية قبل الاستيراد', 'Clear current blacklist before import')}
+                            </label>
+                            <label class="cb-label" style="margin-bottom:10px;">
+                                <input type="checkbox" id="import_whitelist_clear">
+                                ${t('مسح القائمة البيضاء الحالية قبل الاستيراد', 'Clear current whitelist before import')}
+                            </label>
+                            <label class="cb-label" style="margin-bottom:10px;">
+                                <input type="checkbox" id="import_blocked_extensions_clear">
+                                ${t('مسح الرموز المحظورة الحالية قبل الاستيراد', 'Clear current blocked extensions before import')}
+                            </label>
+                            <label class="cb-label">
+                                <input type="checkbox" id="import_custom_groups_clear">
+                                ${t('مسح إعدادات المجموعات المخصصة الحالية قبل الاستيراد', 'Clear current custom group settings before import')}
+                            </label>
+                        </div>
+                        <button class="btn btn-primary btn-full" onclick="importData()" style="margin-top:14px;">
+                            <i class="fas fa-upload"></i> ${t('استيراد الآن', 'Import Now')}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <div id="saveMsgToast" class="toast"><i class="fas fa-check-circle"></i> ${t('تم الحفظ في قاعدة البيانات بنجاح!', 'Saved to database successfully!')}</div>
 
             </form>
@@ -684,7 +803,8 @@ module.exports = function renderDashboard(req, db, config) {
                 'page-spam': '${t("مكافحة الإزعاج", "Anti-Spam")}',
                 'page-media': '${t("فلتر الوسائط", "Media Filter")}',
                 'page-ai': '${t("الذكاء الاصطناعي", "AI Moderator")}',
-                'page-groups': '${t("المجموعات المخصصة", "Custom Groups")}'
+                'page-groups': '${t("المجموعات المخصصة", "Custom Groups")}',
+                'page-import-export': '${t("استيراد/تصدير", "Import/Export")}'
             };
             function showPage(pageId, btn) {
                 document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -1798,6 +1918,103 @@ module.exports = function renderDashboard(req, db, config) {
                     }
                 } catch(e) {}
             }, 2000);
+
+            async function exportData() {
+                const selected = {
+                    global_settings: document.getElementById('export_global_settings').checked,
+                    llm_settings: document.getElementById('export_llm_settings').checked,
+                    blacklist: document.getElementById('export_blacklist').checked,
+                    whitelist: document.getElementById('export_whitelist').checked,
+                    blocked_extensions: document.getElementById('export_blocked_extensions').checked,
+                    whatsapp_groups: document.getElementById('export_whatsapp_groups').checked,
+                    custom_groups: document.getElementById('export_custom_groups').checked
+                };
+
+                try {
+                    const res = await fetch('/api/export', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ selected })
+                    });
+
+                    if (!res.ok) {
+                        showToast(currentLang==='en' ? '❌ Export failed' : '❌ فشل التصدير');
+                        return;
+                    }
+
+                    const data = await res.json();
+                    const json = JSON.stringify(data, null, 2);
+                    const blob = new Blob([json], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = \`automod_backup_\${new Date().toISOString().split('T')[0]}.json\`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    showToast(currentLang==='en' ? '✅ Export successful!' : '✅ تم التصدير بنجاح!');
+                } catch (error) {
+                    console.error('Export error:', error);
+                    showToast(currentLang==='en' ? '❌ Export error: ' + error.message : '❌ خطأ التصدير: ' + error.message);
+                }
+            }
+
+            async function importData() {
+                const fileInput = document.getElementById('importFile');
+                if (!fileInput.files.length) {
+                    showToast(currentLang==='en' ? '⚠️ Please select a file' : '⚠️ يرجى اختيار ملف');
+                    return;
+                }
+
+                const file = fileInput.files[0];
+                try {
+                    const json = await file.text();
+                    const importedData = JSON.parse(json);
+
+                    if (!importedData.data) {
+                        showToast(currentLang==='en' ? '❌ Invalid file format' : '❌ صيغة الملف غير صحيحة');
+                        return;
+                    }
+
+                    const selected = {
+                        global_settings: document.getElementById('import_global_settings').checked,
+                        llm_settings: document.getElementById('import_llm_settings').checked,
+                        blacklist: document.getElementById('import_blacklist').checked,
+                        blacklist_clear: document.getElementById('import_blacklist_clear').checked,
+                        whitelist: document.getElementById('import_whitelist').checked,
+                        whitelist_clear: document.getElementById('import_whitelist_clear').checked,
+                        blocked_extensions: document.getElementById('import_blocked_extensions').checked,
+                        blocked_extensions_clear: document.getElementById('import_blocked_extensions_clear').checked,
+                        whatsapp_groups: document.getElementById('import_whatsapp_groups').checked,
+                        custom_groups: document.getElementById('import_custom_groups').checked,
+                        custom_groups_clear: document.getElementById('import_custom_groups_clear').checked
+                    };
+
+                    if (!confirm(currentLang==='en' ? 'Confirm import? This action may override existing data.' : 'هل تؤكد الاستيراد؟ قد يؤدي هذا إلى إلغاء البيانات الموجودة.')) {
+                        return;
+                    }
+
+                    const res = await fetch('/api/import', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ dataset: importedData.data, selected })
+                    });
+
+                    if (!res.ok) {
+                        const errorData = await res.json();
+                        showToast(currentLang==='en' ? '❌ Import failed: ' + errorData.error : '❌ فشل الاستيراد: ' + errorData.error);
+                        return;
+                    }
+
+                    showToast(currentLang==='en' ? '✅ Import successful! Reloading...' : '✅ تم الاستيراد بنجاح! جاري إعادة التحميل...');
+                    fileInput.value = '';
+                    setTimeout(() => window.location.reload(), 1500);
+                } catch (error) {
+                    console.error('Import error:', error);
+                    showToast(currentLang==='en' ? '❌ Import error: ' + error.message : '❌ خطأ الاستيراد: ' + error.message);
+                }
+            }
 
             async function saveConfig() {
                 let finalGroupsObj = {};
