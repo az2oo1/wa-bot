@@ -21,7 +21,7 @@ module.exports = function renderDashboard(req, db, config) {
         <nav class="sidebar" id="sidebar">
             <div class="sidebar-logo">
                 <div class="logo-icon"><i class="fas fa-robot"></i></div>
-                <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V6', 'Dashboard V6')}</small></div>
+                <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V6.4', 'Dashboard V6.4')}</small></div>
             </div>
 
             <div class="nav-section">${t('الرئيسية', 'Main')}</div>
@@ -56,6 +56,9 @@ module.exports = function renderDashboard(req, db, config) {
             </button>
             <button class="nav-item" onclick="showPage('page-import-export', this)">
                 <span class="nav-icon"><i class="fas fa-exchange-alt"></i></span> ${t('استيراد/تصدير', 'Import/Export')}
+            </button>
+            <button class="nav-item" onclick="showPage('page-about', this)">
+                <span class="nav-icon"><i class="fas fa-info-circle"></i></span> ${t('حول', 'About')}
             </button>
 
             <div class="sidebar-footer">
@@ -588,6 +591,129 @@ module.exports = function renderDashboard(req, db, config) {
                 </div>
             </div>
 
+            <div class="page" id="page-about">
+                <div class="page-header">
+                    <h2><i class="fas fa-shield-alt"></i> ${t('🛡️ المشرف الآلي - واتساب', '🛡️ WhatsApp Auto Mod')}</h2>
+                    <p>${t('نظام إدارة مجموعات متقدم مع الذكاء الاصطناعي المحلي', 'Advanced group management system with local AI')}</p>
+                </div>
+
+                <div class="card-grid" style="grid-template-columns: repeat(3, 1fr); gap:20px;">
+                    <div class="card info" style="margin-bottom:0;">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-user-circle"></i> ${t('المطور', 'Developer')}</h3>
+                        </div>
+                        <p style="font-size:15px; font-weight:700; color:var(--accent); margin:8px 0 0 0;">Abdulaziz Algassem</p>
+                        <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"><i class="fas fa-code-branch"></i> INTERSTELLAR</p>
+                        <p style="font-size:12px; color:var(--text); margin-bottom:10px; line-height:1.4;">
+                            ${t('متخصص في حلول واتساب', 'WhatsApp & AI solutions')}
+                        </p>
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                            <a href="https://github.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fab fa-github"></i> GitHub
+                            </a>
+                            <a href="https://instagram.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fab fa-instagram"></i> Instagram
+                            </a>
+                            <a href="https://github.com/az2oo1?tab=repositories" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fas fa-star"></i> ${t('المشاريع', 'Projects')}
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="card success" style="margin-bottom:0;">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-rocket"></i> ${t('الميزات', 'Features')}</h3>
+                        </div>
+                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
+                            <li>🧠 AI Moderation</li>
+                            <li>⚡ Anti-Spam</li>
+                            <li>🚫 Blacklist/Whitelist</li>
+                            <li>📂 Media Filter</li>
+                            <li>🛠️ Dashboard AR/EN</li>
+                            <li><i class="fas fa-check-circle"></i> v6.4.0</li>
+                        </ul>
+                    </div>
+
+                    <div class="card warning" style="margin-bottom:0;">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-microchip"></i> ${t('المكومات', 'Tech')}</h3>
+                        </div>
+                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
+                            <li>whatsapp-web.js</li>
+                            <li>better-sqlite3</li>
+                            <li>Ollama AI</li>
+                            <li>Express.js</li>
+                            <li>Node.js 16+</li>
+                            <li><i class="fas fa-check-circle" style="color:var(--accent);"></i> Active</li>
+                        </ul>
+                    </div>
+
+                    <div class="card" style="margin-bottom:0;">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-cube"></i> ${t('المتطلبات', 'Requirements')}</h3>
+                        </div>
+                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
+                            <li><strong>Min:</strong> 2GB RAM</li>
+                            <li><strong>Storage:</strong> 5GB+</li>
+                            <li><strong>AI:</strong> 8GB+ RAM</li>
+                            <li><strong>AI Storage:</strong> 10-20GB</li>
+                            <li><strong>OS:</strong> Linux/macOS/Windows</li>
+                        </ul>
+                    </div>
+
+                    <div class="card danger" style="margin-bottom:0;">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-link"></i> ${t('الروابط', 'Links')}</h3>
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                            <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fab fa-github"></i> GitHub Repo
+                            </a>
+                            <a href="https://github.com/az2oo1/wa-bot/issues" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fas fa-bug"></i> Report Issues
+                            </a>
+                            <a href="https://github.com/az2oo1/wa-bot/discussions" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fas fa-comments"></i> Discussions
+                            </a>
+                            <a href="https://github.com/az2oo1/wa-bot/releases" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fas fa-tags"></i> Releases
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="card purple" style="margin-bottom:0;">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-heart"></i> ${t('التبعيات', 'Dependencies')}</h3>
+                        </div>
+                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
+                            <li>whatsapp-web.js</li>
+                            <li>better-sqlite3</li>
+                            <li>Ollama</li>
+                            <li>Express</li>
+                            <li>qrcode</li>
+                            <li>multer</li>
+                        </ul>
+                    </div>
+
+                    <div class="card info" style="margin-bottom:0;">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-file-contract"></i> ${t('الترخيص', 'License')}</h3>
+                        </div>
+                        <p style="font-size:12px; margin:8px 0; line-height:1.5;">
+                            ${t('مشروع مفتوح المصدر', 'Open Source Project')}
+                        </p>
+                        <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
+                            <span style="background:var(--accent-dim); color:var(--accent); padding:3px 8px; border-radius:14px; font-size:11px; font-weight:600;">
+                                <i class="fas fa-star"></i> 2 Stars
+                            </span>
+                            <span style="background:var(--blue-dim); color:var(--blue); padding:3px 8px; border-radius:14px; font-size:11px; font-weight:600;">
+                                v6.4.0
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <div id="saveMsgToast" class="toast"><i class="fas fa-check-circle"></i> ${t('تم الحفظ في قاعدة البيانات بنجاح!', 'Saved to database successfully!')}</div>
 
             </form>
@@ -804,7 +930,8 @@ module.exports = function renderDashboard(req, db, config) {
                 'page-media': '${t("فلتر الوسائط", "Media Filter")}',
                 'page-ai': '${t("الذكاء الاصطناعي", "AI Moderator")}',
                 'page-groups': '${t("المجموعات المخصصة", "Custom Groups")}',
-                'page-import-export': '${t("استيراد/تصدير", "Import/Export")}'
+                'page-import-export': '${t("استيراد/تصدير", "Import/Export")}',
+                'page-about': '${t("حول", "About")}'
             };
             function showPage(pageId, btn) {
                 document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
