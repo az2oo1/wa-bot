@@ -139,13 +139,10 @@ version: '3.8'
 services:
   bot:
     image: ghcr.io/az2oo1/wa-bot:latest
-    working_dir: /app
     ports:
       - "3000:3000"
     volumes:
-      - /DATA/wa-bot/.wwebjs_auth:/app/.wwebjs_auth
-      - /DATA/wa-bot/.wwebjs_cache:/app/.wwebjs_cache
-      - /DATA/wa-bot/media:/app/media
+      - /DATA/wa-bot:/app
     restart: unless-stopped
 ```
 
