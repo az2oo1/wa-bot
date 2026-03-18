@@ -1025,13 +1025,13 @@ app.get('/', (req, res) => {
                 let html = '';
                 let containerId = '';
                 if (type === 'words') {
-                    html = group.words.map((word, wordIndex) => '<div class="chip">' + word + ' <span class="chip-remove" onclick="removeGroupWord(' + groupIndex + ', ' + wordIndex + ')">&times;</span></div>').join('');
+                    html = group.words.map((word, wordIndex) => \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`).join('');
                     containerId = 'chip_container_words_' + groupIndex;
                 } else if (type === 'blacklist') {
-                    html = group.customBlacklist.map((num, idx) => '<div class="chip red-chip">' + num + ' <span class="chip-remove" onclick="removeGroupBlacklist(' + groupIndex + ', ' + idx + ')">&times;</span></div>').join('');
+                    html = group.customBlacklist.map((num, idx) => \`<div class="chip red-chip">\${num} <span class="chip-remove" onclick="removeGroupBlacklist(\${groupIndex}, \${idx})">&times;</span></div>\`).join('');
                     containerId = 'chip_container_bl_' + groupIndex;
                 } else if (type === 'whitelist') {
-                    html = group.customWhitelist.map((num, idx) => '<div class="chip">' + num + ' <span class="chip-remove" onclick="removeGroupWhitelist(' + groupIndex + ', ' + idx + ')">&times;</span></div>').join('');
+                    html = group.customWhitelist.map((num, idx) => \`<div class="chip">\${num} <span class="chip-remove" onclick="removeGroupWhitelist(\${groupIndex}, \${idx})">&times;</span></div>\`).join('');
                     containerId = 'chip_container_wl_' + groupIndex;
                 }
                 const container = document.getElementById(containerId);
@@ -1043,25 +1043,29 @@ app.get('/', (req, res) => {
                 const container = document.getElementById('groupDetailBody');
 
                 let wordsHtml = group.words.map((word, wordIndex) => 
-                    '<div class="chip">' + word + ' <span class="chip-remove" onclick="removeGroupWord(' + groupIndex + ', ' + wordIndex + ')">&times;</span></div>'
+                    \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`
                 ).join('');
 
                 let blHtml = group.customBlacklist.map((num, idx) => 
-                    '<div class="chip red-chip">' + num + ' <span class="chip-remove" onclick="removeGroupBlacklist(' + groupIndex + ', ' + idx + ')">&times;</span></div>'
+                    \`<div class="chip red-chip">\${num} <span class="chip-remove" onclick="removeGroupBlacklist(\${groupIndex}, \${idx})">&times;</span></div>\`
                 ).join('');
 
                 let wlHtml = group.customWhitelist.map((num, idx) => 
-                    '<div class="chip">' + num + ' <span class="chip-remove" onclick="removeGroupWhitelist(' + groupIndex + ', ' + idx + ')">&times;</span></div>'
+                    \`<div class="chip">\${num} <span class="chip-remove" onclick="removeGroupWhitelist(\${groupIndex}, \${idx})">&times;</span></div>\`
                 ).join('');
 
                 const blockedChecks = metaTypes.map(t => 
-                    '<label class="cb-label"><input type="checkbox" value="' + t.id + '" ' + (group.blockedTypes.includes(t.id)?'checked':'') + ' onchange="updateGroupArray(' + groupIndex + ', \'blockedTypes\', \'' + t.id + '\', this.checked)"> ' + t.icon + ' ' + t.name + '</label>'
+                    \`<label class="cb-label"><input type="checkbox" value="\${t.id}" \${group.blockedTypes.includes(t.id)?'checked':''} onchange="updateGroupArray(\${groupIndex}, 'blockedTypes', '\${t.id}', this.checked)"> \${t.icon} \${t.name}</label>\`
                 ).join('');
 
                 const spamLimitGrid = metaTypes.map(t => {
                     const isChecked = group.spamTypes.includes(t.id) ? 'checked' : '';
                     const limitVal = group.spamLimits[t.id] || 5;
-                    return '<div class="limit-item"><input type="checkbox" value="' + t.id + '" ' + isChecked + ' onchange="updateGroupArray(' + groupIndex + ', \'spamTypes\', \'' + t.id + '\', this.checked)"><span style=\"font-size:13px;width:70px;\">' + t.icon + ' ' + t.name + '</span><input type="number" value="' + limitVal + '" min="1" onchange="updateSpamLimit(' + groupIndex + ', \'' + t.id + '\', this.value)"></div>';
+                    return \`<div class="limit-item">
+                        <input type="checkbox" value="\${t.id}" \${isChecked} onchange="updateGroupArray(\${groupIndex}, 'spamTypes', '\${t.id}', this.checked)">
+                        <span style="font-size:13px;width:70px;">\${t.icon} \${t.name}</span>
+                        <input type="number" value="\${limitVal}" min="1" onchange="updateSpamLimit(\${groupIndex}, '\${t.id}', this.value)">
+                    </div>\`;
                 }).join('');
 
                 const tabs = [
@@ -1073,18 +1077,18 @@ app.get('/', (req, res) => {
                     { id: 'lists',   icon: 'fa-list',       label: currentLang==='en'?'Lists':'القوائم' },
                 ];
                 const tabButtons = tabs.map((tab, i) =>
-                    '<button type="button" class="group-tab ' + (tab.id===activeTab?'active':'') + '" onclick="switchGroupTab(' + groupIndex + ',\'' + tab.id + '\',this)' + (tab.id==='qa'?';loadGroupMedia('+groupIndex+')':'') + '"><i class="fas ' + tab.icon + '"></i> ' + tab.label + '</button>'
+                    \`<button type="button" class="group-tab \${tab.id===activeTab?'active':''}" onclick="switchGroupTab(\${groupIndex},'\${tab.id}',this)\${tab.id==='qa'?';loadGroupMedia('+groupIndex+')':\'\'}"\><i class="fas \${tab.icon}"></i> \${tab.label}</button>\`
                 ).join('');
 
                 container.innerHTML = \`
                     <div class="field-row" style="margin-bottom:20px;">
                         <div class="field-group" style="margin-bottom:0;">
                             <label class="field-label">\${dict.target_group}</label>
-                            \${createGroupSelectHTML(group.id, \\\`updateGroupData(\${groupIndex}, 'id', this.value)\\\`, false)}
+                            \${createGroupSelectHTML(group.id, \`updateGroupData(\${groupIndex}, 'id', this.value)\`, false)}
                         </div>
                         <div class="field-group" style="margin-bottom:0;">
                             <label class="field-label">\${dict.admin_group}</label>
-                            \${createGroupSelectHTML(group.adminGroup, \\\`updateGroupData(\${groupIndex}, 'adminGroup', this.value)\\\`, true)}
+                            \${createGroupSelectHTML(group.adminGroup, \`updateGroupData(\${groupIndex}, 'adminGroup', this.value)\`, true)}
                         </div>
                     </div>
 
@@ -1176,22 +1180,24 @@ app.get('/', (req, res) => {
                                     </div>
                                 </div>
                                 
-                                <div class="sub-panel blue" style="margin-bottom: 24px;">
-                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-                                        <h4 style="color: var(--blue); margin-bottom: 0;"><i class="fas fa-calendar-alt"></i> \${currentLang === 'en' ? 'Manage Events/Deadlines' : 'إدارة الأحداث والمواعيد'}</h4>
-                                        <button type="button" class="btn btn-primary btn-sm" onclick="addEventDate(\${groupIndex})">
-                                            <i class="fas fa-plus"></i> \${currentLang === 'en' ? 'Add Event' : 'إضافة حدث'}
-                                        </button>
-                                    </div>
-                                    <div id="event_dates_container_\${groupIndex}">
-                                        \${(group.eventDates || []).map((ed, edIdx) => {
-                                            return '<div class="toggle-row blue" style="margin-bottom: 8px; padding: 12px; border-radius: 10px; border: 1.5px solid var(--card-border);"><div style="display: flex; gap: 12px; align-items: center; width: 100%;"><div style="flex: 1;"><label class="field-label" style="font-size: 10px; margin-bottom: 4px;">' + (currentLang === 'en' ? 'Label (e.g. Exam)' : 'العنوان (مثل: اختبار)') + '</label><input type="text" value="' + (ed.label || '') + '" placeholder="..." onchange="updateEventDate(' + groupIndex + ', ' + edIdx + ', \'label\', this.value)" style="padding: 8px 12px; font-size: 14px;"></div><div style="flex: 1;"><label class="field-label" style="font-size: 10px; margin-bottom: 4px;">' + (currentLang === 'en' ? 'Date' : 'التاريخ') + '</label><input type="date" value="' + (ed.date || '') + '" onchange="updateEventDate(' + groupIndex + ', ' + edIdx + ', \'date\', this.value)" style="color-scheme: dark; padding: 8px 12px; font-size: 14px;"></div><button type="button" class="icon-btn" onclick="removeEventDate(' + groupIndex + ', ' + edIdx + ')" style="background: var(--red-dim); color: var(--red); border-color: rgba(255,82,82,0.3); margin-top: 18px;" title="' + (currentLang === 'en' ? 'Delete' : 'حذف') + '"><i class="fas fa-trash"></i></button></div></div>';
-                                        }).join('')}
-                                        \${(!group.eventDates || group.eventDates.length === 0) ? \`<div style="font-size: 13px; color: var(--text-muted); padding: 20px; text-align: center; border: 1.5px dashed var(--card-border); border-radius: 10px; background: rgba(0,0,0,0.1);">
-                                            <i class="fas fa-calendar-times" style="font-size: 24px; display: block; margin-bottom: 8px; opacity: 0.5;"></i>
-                                            \${currentLang === 'en' ? 'No extra events added yet.' : 'لم يتم إضافة أحداث إضافية بعد.'}
-                                        </div>\` : ''}
-                                    </div>
+                                <label class="field-label">\${currentLang==='en'?'Manage Events/Deadlines':'إدارة الأحداث والمواعيد'} <small style="display:inline; margin-inline-start: 10px; color: var(--accent); cursor: pointer;" onclick="addEventDate(\${groupIndex})"><i class="fas fa-plus-circle"></i> \${currentLang==='en'?'Add New Event':'إضافة حدث جديد'}</small></label>
+                                <div id="event_dates_container_\${groupIndex}" style="margin-bottom: 20px;">
+                                    \${(group.eventDates || []).map((ed, edIdx) => {
+                                        return \`<div class="field-row" style="margin-bottom:10px; background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid var(--card-border); align-items: flex-end;">
+                                            <div class="field-group" style="margin-bottom:0; flex: 2;">
+                                                <label class="field-label" style="font-size:10px;">\${currentLang==='en'?'Label (e.g. Exam)':'العنوان (مثل: اختبار)'}</label>
+                                                <input type="text" value="\${ed.label || ''}" placeholder="..." onchange="updateEventDate(\${groupIndex}, \${edIdx}, 'label', this.value)">
+                                            </div>
+                                            <div class="field-group" style="margin-bottom:0; flex: 2;">
+                                                <label class="field-label" style="font-size:10px;">\${currentLang==='en'?'Date':'التاريخ'}</label>
+                                                <input type="date" value="\${ed.date || ''}" onchange="updateEventDate(\${groupIndex}, \${edIdx}, 'date', this.value)" style="color-scheme: dark;">
+                                            </div>
+                                            <div style="flex: 0;">
+                                                <button type="button" class="btn btn-danger btn-sm" onclick="removeEventDate(\${groupIndex}, \${edIdx})" style="height: 42px; width: 42px; justify-content: center; padding: 0;"><i class="fas fa-trash"></i></button>
+                                            </div>
+                                        </div>\`;
+                                    }).join('')}
+                                    \${(!group.eventDates || group.eventDates.length === 0) ? \`<div style="font-size:12px; color:var(--text-muted); padding:10px; text-align:center; border: 1px dashed var(--card-border); border-radius: 8px;">\${currentLang==='en'?'No extra events added yet.':'لم يتم إضافة أحداث إضافية بعد.'}</div>\` : ''}
                                 </div>
 
                                 <div class="field-row" style="margin-bottom:16px;">
@@ -1212,7 +1218,7 @@ app.get('/', (req, res) => {
                                 <div class="field-group" style="margin-bottom:10px;">
                                     <input type="text" id="newQAQuestion_\${groupIndex}" placeholder="\${currentLang==='en'?'Enter a question variant (e.g., when is the test)...':'أدخل صيغة السؤال...'}" style="margin-bottom:10px;" onkeypress="if(event.key==='Enter'){event.preventDefault();addQuestionToQA(\${groupIndex});}">
                                     <button type="button" class="btn btn-full" onclick="addQuestionToQA(\${groupIndex})" style="margin-bottom:10px;background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700;"><i class="fas fa-plus"></i> \${currentLang==='en'?'Add Question Variant':'إضافة صيغة سؤال'}</button>
-                                    <div class="chip-container" id="qa_questions_container_\${groupIndex}" style="min-height:40px;">\${(group.currentQAQuestions || []).map((q, qIdx) => '<div class="chip"><span>' + q + '</span><span class="chip-remove" onclick="removeQuestionFromQA(' + groupIndex + ', ' + qIdx + ')">×</span></div>').join('')}</div>
+                                    <div class="chip-container" id="qa_questions_container_\${groupIndex}" style="min-height:40px;">\${(group.currentQAQuestions || []).map((q, qIdx) => \`<div class="chip"><span>\${q}</span><span class="chip-remove" onclick="removeQuestionFromQA(\${groupIndex}, \${qIdx})">×</span></div>\`).join('')}</div>
                                 </div>
                                 <label class="field-label">\${currentLang==='en'?'Answer (Use {date}, {eventdate}, {user} for dynamic values)':'الإجابة (استخدم {date}, {eventdate}, {user} للحقول الديناميكية)'}</label>
                                 <div class="field-group" style="margin-bottom:10px;">
@@ -1253,22 +1259,22 @@ app.get('/', (req, res) => {
                                                     <i class="fas fa-question" style="color:var(--blue);"></i> \${currentLang==='en'?'Question Variations':'صيغ الأسئلة'} (\${(qa.questions || []).length})
                                                 </div>
                                                 <div style="display:flex;gap:8px;">
-                                                    <button type="button" class="icon-btn" onclick="editGroupQA(\${groupIndex}, \${qaIdx})" title="\${currentLang==='en'?'Edit':'تعديل'}" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);">
+                                                    <button type="button" class="icon-btn" onclick="editGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="\${currentLang==='en'?'Edit':'تعديل'}">
                                                         <i class="fas fa-edit"></i>
                                                     </button>
-                                                    <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" title="\${currentLang==='en'?'Delete':'حذف'}" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);">
+                                                    <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);" title="\${currentLang==='en'?'Delete':'حذف'}">
                                                         <i class="fas fa-trash"></i>
                                                     </button>
                                                 </div>
                                             </div>
                                             <div class="group-card-body" style="padding:12px;">
                                                 <div style="margin-bottom:10px;">
-                                                    <div class="chip-container" style="background:rgba(64,196,255,0.05);border-color:rgba(64,196,255,0.2);">\${(qa.questions || []).map((q) => '<div class="chip" style="background:rgba(64,196,255,0.15);color:var(--blue);border-color:rgba(64,196,255,0.3);"><i class="fas fa-search"></i> ' + q + '</div>').join('')}</div>
+                                                    <div class="chip-container" style="background:rgba(64,196,255,0.05);border-color:rgba(64,196,255,0.2);">\${(qa.questions || []).map((q) => \`<div class="chip" style="background:rgba(64,196,255,0.15);color:var(--blue);border-color:rgba(64,196,255,0.3);"><i class="fas fa-search"></i> \${q}</div>\`).join('')}</div>
                                                 </div>
                                                 <div style="color:var(--text-muted);font-size:13px;">
                                                     <strong>\${currentLang==='en'?'Answer':'الإجابة'}:</strong> \${qa.answer || '(empty)'}
                                                 </div>
-                                                \${qa.mediaFile ? '<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;color:#64dc96;"><i class="fas fa-paperclip"></i> ' + qa.mediaFile + '</div>' : ''}
+                                                \${qa.mediaFile ? \`<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;color:#64dc96;"><i class="fas fa-paperclip"></i> \${qa.mediaFile}</div>\` : ''}
                                             </div>
                                         </div>
                                     \`).join('')}
@@ -1277,7 +1283,7 @@ app.get('/', (req, res) => {
                         </div>
                     </div>
 
-                    <div class="group-tab-panel \${activeTab==='spam'?'active':''}" id="gtab_\${groupIndex}_spam">
+                    <div class="group-tab-panel" id="gtab_\${groupIndex}_spam">
                         <div class="card warning">
                             <div class="toggle-row warning" style="margin-bottom:0;border-radius:10px;">
                                 <div class="toggle-left">
@@ -1307,7 +1313,7 @@ app.get('/', (req, res) => {
                         </div>
                     </div>
 
-                    <div class="group-tab-panel \${activeTab==='panic'?'active':''}" id="gtab_\${groupIndex}_panic">
+                    <div class="group-tab-panel" id="gtab_\${groupIndex}_panic">
                         <div class="card danger">
                             <div class="toggle-row danger" style="margin-bottom:0;border-radius:10px;">
                                 <div class="toggle-left">
@@ -1339,7 +1345,7 @@ app.get('/', (req, res) => {
                         </div>
                     </div>
 
-                    <div class="group-tab-panel \${activeTab==='lists'?'active':''}" id="gtab_\${groupIndex}_lists">
+                    <div class="group-tab-panel" id="gtab_\${groupIndex}_lists">
                         <div class="card danger">
                             <div class="toggle-row danger" style="margin-bottom:0;border-radius:10px;">
                                 <div class="toggle-left">
@@ -1384,8 +1390,11 @@ app.get('/', (req, res) => {
                                 <div class="chip-container" id="chip_container_wl_\${groupIndex}">\${wlHtml}</div>
                             </div>
                         </div>
-                    </div>\`;
-            }function updateGroupArray(gIndex, arrName, val, isChecked) {
+                    </div>
+                \`;
+            }
+
+            function updateGroupArray(gIndex, arrName, val, isChecked) {
                 let arr = groupsArr[gIndex][arrName];
                 if (isChecked && !arr.includes(val)) arr.push(val);
                 if (!isChecked) {
