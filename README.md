@@ -142,7 +142,7 @@ services:
     ports:
       - "3000:3000"
     volumes:
-      - /DATA/wa-bot:/app
+      - /DATA/AppData/wa-bot:/app
     restart: unless-stopped
 ```
 

@@ -46,6 +46,7 @@ db.exec(`
     CREATE TABLE IF NOT EXISTS global_settings (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE IF NOT EXISTS llm_settings (key TEXT PRIMARY KEY, value TEXT);
     CREATE TABLE IF NOT EXISTS blacklist (number TEXT PRIMARY KEY);
+    CREATE TABLE IF NOT EXISTS blocked_extensions (ext TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS whitelist (number TEXT PRIMARY KEY); 
     CREATE TABLE IF NOT EXISTS whatsapp_groups (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE IF NOT EXISTS custom_groups (
@@ -63,7 +64,7 @@ const colsToAdd = [
     'panic_lockout_duration INTEGER', 'panic_alert_target TEXT', 'panic_alert_message TEXT',
     'enable_whitelist INTEGER', 'custom_blacklist TEXT', 'custom_whitelist TEXT',
     'use_global_blacklist INTEGER', 'use_global_whitelist INTEGER',
-    'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT', 'qa_language TEXT'
+    'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT', 'qa_language TEXT', 'qa_event_dates TEXT'
 ];
 colsToAdd.forEach(col => {
     try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch (e) { }
@@ -110,7 +111,7 @@ function loadConfigFromDB() {
             enablePanicMode: g.enable_panic_mode === 1, panicMessageLimit: g.panic_message_limit || 10,
             panicTimeWindow: g.panic_time_window || 5, panicLockoutDuration: g.panic_lockout_duration || 10,
             panicAlertTarget: g.panic_alert_target || 'both', panicAlertMessage: g.panic_alert_message || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.',
-            enableQAFeature: g.enable_qa_feature === 1, qaList: JSON.parse(g.custom_qa || '[]'), eventDate: g.qa_event_date || '', qaLanguage: g.qa_language || 'ar'
+            enableQAFeature: g.enable_qa_feature === 1, qaList: JSON.parse(g.custom_qa || '[]'), eventDate: g.qa_event_date || '', qaLanguage: g.qa_language || 'ar', eventDates: JSON.parse(g.qa_event_dates || '[]')
         };
     });
     return newConfig;
@@ -148,8 +149,8 @@ function saveConfigToDB(conf) {
                 blocked_types, blocked_action, spam_types, spam_limits,
                 enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
                 panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist,
-                enable_qa_feature, custom_qa, qa_event_date, qa_language
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                enable_qa_feature, custom_qa, qa_event_date, qa_language, qa_event_dates
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
@@ -164,7 +165,7 @@ function saveConfigToDB(conf) {
                 gData.panicLockoutDuration, gData.panicAlertTarget, gData.panicAlertMessage,
                 JSON.stringify(gData.customBlacklist || []), JSON.stringify(gData.customWhitelist || []),
                 gData.useGlobalBlacklist ? 1 : 0, gData.useGlobalWhitelist ? 1 : 0,
-                gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || '', gData.qaLanguage || 'ar'
+                gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || '', gData.qaLanguage || 'ar', JSON.stringify(gData.eventDates || [])
             );
         }
     });
@@ -197,9 +198,10 @@ app.get('/', (req, res) => {
         { id: 'sticker', icon: '<i class="fas fa-smile"></i>', name: t('ملصقات', 'Stickers') }
     ];
     const blacklistArr = db.prepare('SELECT number FROM blacklist').all().map(r => r.number);
+    const blockedExtensionsArr = db.prepare('SELECT ext FROM blocked_extensions').all().map(r => r.ext);
     const whitelistArr = db.prepare('SELECT number FROM whitelist').all().map(r => r.number);
 
-    const html = `<!DOCTYPE html><html dir="${dir}" lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${t('لوحة تحكم المشرف الآلي', 'Auto Mod Dashboard')}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><style>*{box-sizing:border-box;margin:0;padding:0}:root{--bg:#080c10;--sidebar-bg:#0e1318;--card-bg:#131920;--card-border:#1e2830;--input-bg:#0a0f14;--input-border:#1e2830;--text:#dce8f5;--text-muted:#6b8099;--accent:#00c853;--accent-dim:rgba(0,200,83,0.1);--accent-hover:#00a846;--red:#ff5252;--red-dim:rgba(255,82,82,0.1);--orange:#ffab40;--orange-dim:rgba(255,171,64,0.1);--blue:#40c4ff;--blue-dim:rgba(64,196,255,0.1);--purple:#d18cff;--purple-dim:rgba(209,140,255,0.1);--modal-bg:rgba(0,0,0,0.8);--topbar-bg:rgba(8,12,16,0.92);--radius:12px;--font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px}html[lang="ar"]{--font:'IBM Plex Sans Arabic',sans-serif}html.light{--bg:#f0f4f8;--sidebar-bg:#fff;--card-bg:#fff;--card-border:#dde3eb;--input-bg:#f5f8fb;--input-border:#dde3eb;--text:#0f1923;--text-muted:#5a7289;--accent:#00a846;--accent-dim:rgba(0,168,70,0.1);--accent-hover:#008c3a;--red:#e53935;--red-dim:rgba(229,57,53,0.1);--orange:#f57c00;--orange-dim:rgba(245,124,0,0.1);--blue:#0288d1;--blue-dim:rgba(2,136,209,0.1);--purple:#7b1fa2;--purple-dim:rgba(123,31,162,0.1);--modal-bg:rgba(0,0,0,0.55);--topbar-bg:rgba(240,244,248,0.94)}html.light .nav-item:hover{background:rgba(0,0,0,0.05);color:var(--text)}html.light .toggle-row{background:rgba(0,0,0,0.03)}html.light .toggle-row.danger{background:rgba(229,57,53,0.06)}html.light .toggle-row.warning{background:rgba(245,124,0,0.06)}html.light .toggle-row.blue{background:rgba(2,136,209,0.06)}html.light .toggle-row.purple{background:rgba(123,31,162,0.06)}html.light .toggle-row.pink{background:rgba(194,24,91,0.06)}html.light .toggle-row.green{background:rgba(0,150,80,0.06)}html.light .slider{background:#d0dae4;border-color:#b8c8d8}html.light .slider:before{background:#8fa8bf}html.light input:checked+.slider{background:rgba(0,168,70,0.18);border-color:var(--accent)}html.light input:checked+.slider:before{background:var(--accent)}html.light .sub-panel{background:rgba(0,0,0,0.03)}html.light #terminalOutput{background:#1a1a2e}html.light .card.danger,html.light .card.info,html.light .card.purple,html.light .card.success,html.light .card.warning{background:linear-gradient(180deg,var(--accent-dim) 0,var(--card-bg) 60%)}html.light .card.danger{background:linear-gradient(180deg,rgba(229,57,53,0.04) 0,var(--card-bg) 60%)}html.light .card.warning{background:linear-gradient(180deg,rgba(245,124,0,0.04) 0,var(--card-bg) 60%)}html.light .card.info{background:linear-gradient(180deg,rgba(2,136,209,0.04) 0,var(--card-bg) 60%)}html.light .card.success{background:linear-gradient(180deg,rgba(0,168,70,0.04) 0,var(--card-bg) 60%)}html.light .card.purple{background:linear-gradient(180deg,rgba(123,31,162,0.04) 0,var(--card-bg) 60%)}html.light .logo-icon{box-shadow:0 0 20px rgba(0,168,70,0.2)}html.light .btn-primary{box-shadow:none}html.light .qr-wrap{background:#e8edf3}html.light ::-webkit-scrollbar-track{background:var(--bg)}html.light ::-webkit-scrollbar-thumb{background:#c5d0db}html.light .group-list-card:hover{border-color:rgba(2,136,209,0.4)}.icon-btn{width:38px;height:38px;border-radius:10px;border:1.5px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:17px;transition:all .2s;flex-shrink:0}.icon-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}body,.card,.cb-label,.chip,.chip-container,.group-card,.group-list-card,.limit-item,.main,.modal-content,.nav-item,.qr-wrap,.sidebar,.sidebar-footer button,.status-pill,.sub-panel,.toggle-row,.topbar,input,select,textarea{transition:background .25s ease,border-color .25s ease,color .15s ease,box-shadow .25s ease}html{font-size:16px}body{font-family:var(--font);font-size:1rem;background:var(--bg);color:var(--text);min-height:100vh;display:flex;line-height:1.6}.sidebar{width:260px;min-height:100vh;background:var(--sidebar-bg);border-inline-end:1px solid var(--card-border);display:flex;flex-direction:column;position:fixed;inset-inline-start:0;top:0;z-index:100;transition:transform .3s}.sidebar-logo{padding:28px 22px 20px;border-bottom:1px solid var(--card-border);display:flex;align-items:center;gap:14px}.logo-icon{width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,#00e676,#00b0ff);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;box-shadow:0 0 20px rgba(0,230,118,0.3);color:#fff}.logo-text{font-size:15px;font-weight:700;color:var(--text);line-height:1.3}.logo-text small{display:block;font-weight:400;color:var(--text-muted);font-size:12px;margin-top:2px}.nav-section{padding:18px 16px 8px;font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase}.nav-item{display:flex;align-items:center;gap:12px;padding:12px 18px;margin:2px 10px;border-radius:10px;cursor:pointer;color:var(--text-muted);font-size:15px;transition:all .2s;border:none;background:0 0;width:calc(100% - 20px);text-align:start;font-family:var(--font)}.nav-item:hover{background:rgba(255,255,255,0.06);color:var(--text)}.nav-item.active{background:var(--accent-dim);color:var(--accent);font-weight:600;border:1px solid rgba(0,230,118,0.2)}.nav-item .nav-icon{font-size:18px;width:24px;text-align:center;flex-shrink:0}.nav-item .nav-badge{margin-inline-start:auto;background:var(--red);color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;min-width:22px;text-align:center}.sidebar-footer{margin-top:auto;padding:18px;border-top:1px solid var(--card-border);display:flex;gap:10px}.sidebar-footer button{flex:1;padding:11px 8px;border-radius:10px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;font-size:14px;transition:all .2s;font-family:var(--font);font-weight:600}.sidebar-footer button:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}.main{margin-inline-start:260px;flex:1;display:flex;flex-direction:column;min-height:100vh;min-width:0}.topbar{position:sticky;top:0;z-index:50;background:var(--topbar-bg);backdrop-filter:blur(16px);border-bottom:1px solid var(--card-border);padding:0 40px;height:66px;display:flex;align-items:center;justify-content:space-between}.topbar-title{font-size:18px;font-weight:700;color:var(--text)}.topbar-right{display:flex;align-items:center;gap:14px}.status-pill{display:flex;align-items:center;gap:10px;background:var(--card-bg);border:1px solid var(--card-border);padding:8px 18px;border-radius:24px;font-size:14px;color:var(--text-muted)}.status-dot{width:9px;height:9px;border-radius:50%;background:var(--text-muted);flex-shrink:0}.status-dot.online{background:var(--accent);box-shadow:0 0 10px var(--accent);animation:pulse 2s infinite}.status-dot.waiting{background:var(--orange);box-shadow:0 0 8px var(--orange)}@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 10px var(--accent)}50%{opacity:.6;box-shadow:0 0 4px var(--accent)}}.page{display:none;padding:32px 40px;width:100%;max-width:1400px}.page.active{display:block}.page-header{margin-bottom:28px}.page-header h2{font-size:26px;font-weight:700;color:var(--text);letter-spacing:-.3px;display:flex;align-items:center;gap:10px}.page-header p{color:var(--text-muted);font-size:15px;margin-top:5px}.card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius);padding:24px;margin-bottom:20px}.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--card-border)}.card-header h3{font-size:17px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.card.danger{border-color:rgba(255,82,82,0.35);background:linear-gradient(180deg,rgba(255,82,82,0.04) 0,var(--card-bg) 60%)}.card.warning{border-color:rgba(255,171,64,0.35);background:linear-gradient(180deg,rgba(255,171,64,0.04) 0,var(--card-bg) 60%)}.card.info{border-color:rgba(64,196,255,0.35);background:linear-gradient(180deg,rgba(64,196,255,0.04) 0,var(--card-bg) 60%)}.card.purple{border-color:rgba(209,140,255,0.35);background:linear-gradient(180deg,rgba(209,140,255,0.04) 0,var(--card-bg) 60%)}.card.success{border-color:rgba(0,230,118,0.35);background:linear-gradient(180deg,rgba(0,230,118,0.04) 0,var(--card-bg) 60%)}label.field-label{display:block;font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.8px}input[type=number],input[type=text],select,textarea{width:100%;padding:12px 16px;background:var(--input-bg);border:1.5px solid var(--input-border);border-radius:10px;color:var(--text);font-size:15px;font-family:var(--font);transition:border-color .2s,box-shadow .2s;outline:0}input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,230,118,0.12)}textarea{resize:vertical}select option{background:var(--card-bg);color:var(--text)}.field-group{margin-bottom:20px}.field-row{display:flex;gap:14px}.field-row>*{flex:1}.input-with-btn{display:flex;gap:10px}.input-with-btn input{margin:0}.btn{padding:11px 22px;border-radius:10px;border:1.5px solid transparent;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font);transition:all .2s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;letter-spacing:.2px}.btn-primary{background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700}.btn-primary:hover{background:rgba(0,230,118,0.18);border-color:rgba(0,230,118,0.7);transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,230,118,0.2)}.btn-danger{background:var(--red);color:#fff;border-color:transparent}.btn-danger:hover{background:#ff1744;transform:translateY(-1px);box-shadow:0 4px 14px rgba(255,82,82,0.4)}.btn-warning{background:var(--orange);color:#000;border-color:transparent}.btn-warning:hover{background:#ff9100;transform:translateY(-1px)}.btn-ghost{background:0 0;border:1.5px solid var(--card-border);color:var(--text-muted)}.btn-ghost:hover{border-color:var(--text);color:var(--text)}.btn-blue{background:var(--blue);color:#000;border-color:transparent}.btn-blue:hover{transform:translateY(-1px)}.btn-sm{padding:7px 14px;font-size:13px}.btn-full{width:100%;justify-content:center;padding:15px;font-size:16px}.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-radius:10px;background:rgba(255,255,255,0.03);border:1.5px solid var(--card-border);margin-bottom:12px;gap:14px}.toggle-row.danger{border-color:rgba(255,82,82,0.3);background:rgba(255,82,82,0.05)}.toggle-row.warning{border-color:rgba(255,171,64,0.3);background:rgba(255,171,64,0.05)}.toggle-row.blue{border-color:rgba(64,196,255,0.3);background:rgba(64,196,255,0.05)}.toggle-row.purple{border-color:rgba(209,140,255,0.3);background:rgba(209,140,255,0.05)}.toggle-row.pink{border-color:rgba(240,100,170,0.3);background:rgba(240,100,170,0.05)}.toggle-row.green{border-color:rgba(100,200,120,0.3);background:rgba(100,200,120,0.05)}.toggle-left{display:flex;align-items:center;gap:16px}.toggle-label{font-size:15px;font-weight:600;color:var(--text)}.toggle-label small{display:block;font-size:12px;color:var(--text-muted);font-weight:400;margin-top:2px}.toggle-label.danger{color:var(--red)}.toggle-label.warning{color:var(--orange)}.toggle-label.blue{color:var(--blue)}.toggle-label.purple{color:var(--purple)}.toggle-label.pink{color:#ff80ab}.toggle-label.green{color:#69f0ae}.switch{position:relative;display:inline-block;width:50px;height:28px;flex-shrink:0}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;cursor:pointer;inset:0;background:#1e2830;border:1.5px solid #2a3a4a;transition:.3s;border-radius:28px}.slider:before{position:absolute;content:"";height:20px;width:20px;bottom:2px;inset-inline-start:2px;background:#4a5a6a;transition:.3s;border-radius:50%}input:checked+.slider{background:rgba(0,230,118,0.2);border-color:var(--accent)}input:checked+.slider:before{background:var(--accent);box-shadow:0 0 8px rgba(0,230,118,0.6)}[dir=ltr] input:checked+.slider:before{transform:translateX(22px)}[dir=rtl] input:checked+.slider:before{transform:translateX(-22px)}.lang-slider:before{height:14px;width:14px;bottom:1.5px;inset-inline-start:1.5px}[dir=ltr] input:checked+.lang-slider:before{transform:translateX(20px)}[dir=rtl] input:checked+.lang-slider:before{transform:translateX(-20px)}.chip-container{display:flex;flex-wrap:wrap;gap:10px;padding:14px;background:var(--input-bg);border-radius:10px;min-height:52px;border:1.5px dashed var(--card-border);margin-top:10px}.chip{background:var(--accent-dim);color:var(--accent);padding:6px 14px;border-radius:20px;font-size:14px;display:flex;align-items:center;gap:8px;border:1px solid rgba(0,230,118,0.3);font-weight:500}.chip.red-chip{background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3)}.chip-remove{cursor:pointer;font-size:16px;font-weight:700;opacity:.6;line-height:1}.chip-remove:hover{opacity:1}.sub-panel{background:rgba(0,0,0,0.2);border:1.5px solid var(--card-border);border-radius:10px;padding:18px;margin-top:12px}.sub-panel.orange{border-color:rgba(255,171,64,0.3)}.sub-panel.red{border-color:rgba(255,82,82,0.3)}.sub-panel h4{font-size:14px;font-weight:700;color:var(--text-muted);margin-bottom:14px;display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.5px}.cb-group{display:flex;gap:10px;flex-wrap:wrap}.cb-label{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:8px;cursor:pointer;font-size:14px;color:var(--text-muted);transition:all .2s;user-select:none}.cb-label:hover{border-color:var(--accent);color:var(--text)}.cb-label input{accent-color:var(--accent);width:16px;height:16px;cursor:pointer}.limit-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}.limit-item{display:flex;align-items:center;gap:10px;background:var(--card-bg);padding:10px 14px;border-radius:9px;border:1.5px solid var(--card-border)}.limit-item input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:pointer;flex-shrink:0}.limit-item span{font-size:14px;flex:1;color:var(--text)}.limit-item input[type=number]{width:60px;padding:6px 8px;font-size:14px;margin:0;text-align:center}.group-list-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:14px;display:flex;align-items:center;gap:18px;padding:18px 22px;cursor:pointer;transition:border-color .2s,transform .2s}.group-list-card:hover{border-color:rgba(64,196,255,0.35);transform:translateY(-1px)}.group-list-card:hover .glc-arrow{opacity:1}.glc-avatar{width:52px;height:52px;border-radius:13px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:18px;font-weight:700;color:var(--accent)}.glc-avatar img{width:100%;height:100%;object-fit:cover;border-radius:11px}.glc-info{flex:1;min-width:0}.glc-name{font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.glc-id{font-family:monospace;font-size:11px;color:var(--text-muted);background:var(--input-bg);padding:2px 8px;border-radius:5px;border:1px solid var(--card-border);margin-top:4px;display:inline-block}.glc-chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.glc-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}.glc-chip.green{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,83,0.25)}.glc-chip.orange{background:var(--orange-dim);color:var(--orange);border:1px solid rgba(255,171,64,0.25)}.glc-chip.blue{background:var(--blue-dim);color:var(--blue);border:1px solid rgba(64,196,255,0.25)}.glc-chip.red{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.25)}.glc-chip.purple{background:var(--purple-dim);color:var(--purple);border:1px solid rgba(209,140,255,0.25)}.glc-arrow{font-size:16px;color:var(--blue);opacity:0;transition:opacity .2s;flex-shrink:0;margin-inline-start:4px}.group-detail-bar{display:flex;align-items:center;gap:16px;margin-bottom:28px;flex-wrap:wrap}.group-detail-identity{display:flex;align-items:center;gap:14px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:12px 20px;flex:1}.group-detail-avatar{width:46px;height:46px;border-radius:12px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:17px;font-weight:700;color:var(--accent)}.group-detail-avatar img{width:100%;height:100%;object-fit:cover;border-radius:10px}.group-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:16px;overflow:hidden;transition:border-color .2s}.group-card-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--card-border)}.group-card-title{font-size:16px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.group-card-body{padding:20px}.group-id-badge{font-family:monospace;font-size:12px;color:var(--text-muted);background:var(--input-bg);padding:3px 10px;border-radius:6px;border:1px solid var(--card-border)}.qr-wrap{display:flex;flex-direction:column;align-items:center;gap:20px;padding:36px;background:var(--input-bg);border-radius:12px;border:1.5px dashed var(--card-border)}#qr-image{max-width:230px;border-radius:12px;border:10px solid #fff;box-shadow:0 8px 30px rgba(0,0,0,0.5);display:none}.toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(24px);background:var(--accent);color:#000;padding:13px 28px;border-radius:40px;font-weight:700;font-size:15px;z-index:9999;opacity:0;transition:all .35s;pointer-events:none;box-shadow:0 4px 20px rgba(0,230,118,0.5)}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.modal{display:none;position:fixed;z-index:1000;inset:0;background:var(--modal-bg);backdrop-filter:blur(8px);align-items:center;justify-content:center}.modal.open{display:flex}.modal-content{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:16px;padding:32px;width:90%;max-width:640px;box-shadow:0 24px 80px rgba(0,0,0,0.7);animation:slideIn .25s ease;max-height:90vh;overflow-y:auto}.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.modal-header h3{font-size:20px;font-weight:700}.close-modal{background:0 0;border:none;color:var(--text-muted);font-size:26px;cursor:pointer;padding:4px;line-height:1}.close-modal:hover{color:var(--red)}@keyframes slideIn{from{transform:translateY(-24px);opacity:0}to{transform:translateY(0);opacity:1}}#terminalOutput{background:#000;color:#00ff88;font-family:'Courier New',monospace;height:400px;overflow-y:auto;padding:16px;border-radius:10px;font-size:13px;direction:ltr;text-align:start;border:1px solid #0a1a0a}#terminalOutput div{margin-bottom:5px;border-bottom:1px solid #0a1a0a;padding-bottom:5px;word-wrap:break-word;line-height:1.6}.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}.card-grid .card{margin-bottom:0}.card-grid-full{grid-column:1/-1}@media (max-width:1100px){.card-grid{grid-template-columns:1fr}}.section-sep{height:1px;background:var(--card-border);margin:20px 0}::-webkit-scrollbar{width:7px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:4px}.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99}.hamburger{display:none;background:0 0;border:none;color:var(--text);font-size:24px;cursor:pointer;padding:4px}.group-tabs{display:flex;gap:4px;border-bottom:1.5px solid var(--card-border);margin-bottom:20px}.group-tab{padding:10px 18px;border:none;background:0 0;color:var(--text-muted);font-size:14px;font-weight:600;font-family:var(--font);cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px;transition:all .2s;display:flex;align-items:center;gap:7px;border-radius:8px 8px 0 0}.group-tab:hover{color:var(--text);background:rgba(255,255,255,0.04)}.group-tab.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-dim)}.group-tab-panel{display:none}.group-tab-panel.active{display:block}.step-badge{display:inline-block;background:var(--blue-dim);color:var(--blue);padding:2px 9px;border-radius:12px;margin-inline-end:6px;font-weight:700;font-size:13px}@media (max-width:768px){.sidebar{transform:translateX(100%)}[dir=ltr] .sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.sidebar-overlay.open{display:block}.main{margin-inline-start:0}.hamburger{display:block}.page{padding:18px}.topbar{padding:0 18px}.limit-grid{grid-template-columns:1fr}.card-grid{grid-template-columns:1fr}.field-row{flex-direction:column}}</style>
+    const html = `<!DOCTYPE html><html dir="${dir}" lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${t('لوحة تحكم المشرف الآلي', 'Auto Mod Dashboard')}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><style>*{box-sizing:border-box;margin:0;padding:0}:root{--bg:#080c10;--sidebar-bg:#0e1318;--card-bg:#131920;--card-border:#1e2830;--input-bg:#0a0f14;--input-border:#1e2830;--text:#dce8f5;--text-muted:#6b8099;--accent:#00c853;--accent-dim:rgba(0,200,83,0.1);--accent-hover:#00a846;--red:#ff5252;--red-dim:rgba(255,82,82,0.1);--orange:#ffab40;--orange-dim:rgba(255,171,64,0.1);--blue:#40c4ff;--blue-dim:rgba(64,196,255,0.1);--purple:#d18cff;--purple-dim:rgba(209,140,255,0.1);--modal-bg:rgba(0,0,0,0.8);--topbar-bg:rgba(8,12,16,0.92);--radius:12px;--font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px}html[lang="ar"]{--font:'IBM Plex Sans Arabic',sans-serif}html.light{--bg:#f0f4f8;--sidebar-bg:#fff;--card-bg:#fff;--card-border:#dde3eb;--input-bg:#f5f8fb;--input-border:#dde3eb;--text:#0f1923;--text-muted:#5a7289;--accent:#00a846;--accent-dim:rgba(0,168,70,0.1);--accent-hover:#008c3a;--red:#e53935;--red-dim:rgba(229,57,53,0.1);--orange:#f57c00;--orange-dim:rgba(245,124,0,0.1);--blue:#0288d1;--blue-dim:rgba(2,136,209,0.1);--purple:#7b1fa2;--purple-dim:rgba(123,31,162,0.1);--modal-bg:rgba(0,0,0,0.55);--topbar-bg:rgba(240,244,248,0.94)}html.light .nav-item:hover{background:rgba(0,0,0,0.05);color:var(--text)}html.light .toggle-row{background:rgba(0,0,0,0.03)}html.light .toggle-row.danger{background:rgba(229,57,53,0.06)}html.light .toggle-row.warning{background:rgba(245,124,0,0.06)}html.light .toggle-row.blue{background:rgba(2,136,209,0.06)}html.light .toggle-row.purple{background:rgba(123,31,162,0.06)}html.light .toggle-row.pink{background:rgba(194,24,91,0.06)}html.light .toggle-row.green{background:rgba(0,150,80,0.06)}html.light .slider{background:#d0dae4;border-color:#b8c8d8}html.light .slider:before{background:#8fa8bf}html.light input:checked+.slider{background:rgba(0,168,70,0.18);border-color:var(--accent)}html.light input:checked+.slider:before{background:var(--accent)}html.light .sub-panel{background:rgba(0,0,0,0.03)}html.light #terminalOutput{background:#1a1a2e}html.light .card.danger,html.light .card.info,html.light .card.purple,html.light .card.success,html.light .card.warning{background:linear-gradient(180deg,var(--accent-dim) 0,var(--card-bg) 60%)}html.light .card.danger{background:linear-gradient(180deg,rgba(229,57,53,0.04) 0,var(--card-bg) 60%)}html.light .card.warning{background:linear-gradient(180deg,rgba(245,124,0,0.04) 0,var(--card-bg) 60%)}html.light .card.info{background:linear-gradient(180deg,rgba(2,136,209,0.04) 0,var(--card-bg) 60%)}html.light .card.success{background:linear-gradient(180deg,rgba(0,168,70,0.04) 0,var(--card-bg) 60%)}html.light .card.purple{background:linear-gradient(180deg,rgba(123,31,162,0.04) 0,var(--card-bg) 60%)}html.light .logo-icon{box-shadow:0 0 20px rgba(0,168,70,0.2)}html.light .btn-primary{box-shadow:none}html.light .qr-wrap{background:#e8edf3}html.light ::-webkit-scrollbar-track{background:var(--bg)}html.light ::-webkit-scrollbar-thumb{background:#c5d0db}html.light .group-list-card:hover{border-color:rgba(2,136,209,0.4)}.icon-btn{width:38px;height:38px;border-radius:10px;border:1.5px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:17px;transition:all .2s;flex-shrink:0}.icon-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}body,.card,.cb-label,.chip,.chip-container,.group-card,.group-list-card,.limit-item,.main,.modal-content,.nav-item,.qr-wrap,.sidebar,.sidebar-footer button,.status-pill,.sub-panel,.toggle-row,.topbar,input,select,textarea{transition:background .25s ease,border-color .25s ease,color .15s ease,box-shadow .25s ease}html{font-size:16px}body{font-family:var(--font);font-size:1rem;background:var(--bg);color:var(--text);min-height:100vh;display:flex;line-height:1.6}.sidebar{width:260px;min-height:100vh;background:var(--sidebar-bg);border-inline-end:1px solid var(--card-border);display:flex;flex-direction:column;position:fixed;inset-inline-start:0;top:0;z-index:100;transition:transform .3s}.sidebar-logo{padding:28px 22px 20px;border-bottom:1px solid var(--card-border);display:flex;align-items:center;gap:14px}.logo-icon{width:46px;height:46px;border-radius:14px;background:linear-gradient(135deg,#00e676,#00b0ff);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0;box-shadow:0 0 20px rgba(0,230,118,0.3);color:#fff}.logo-text{font-size:15px;font-weight:700;color:var(--text);line-height:1.3}.logo-text small{display:block;font-weight:400;color:var(--text-muted);font-size:12px;margin-top:2px}.nav-section{padding:18px 16px 8px;font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase}.nav-item{display:flex;align-items:center;gap:12px;padding:12px 18px;margin:2px 10px;border-radius:10px;cursor:pointer;color:var(--text-muted);font-size:15px;transition:all .2s;border:none;background:0 0;width:calc(100% - 20px);text-align:start;font-family:var(--font)}.nav-item:hover{background:rgba(255,255,255,0.06);color:var(--text)}.nav-item.active{background:var(--accent-dim);color:var(--accent);font-weight:600;border:1px solid rgba(0,230,118,0.2)}.nav-item .nav-icon{font-size:18px;width:24px;text-align:center;flex-shrink:0}.nav-item .nav-badge{margin-inline-start:auto;background:var(--red);color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;min-width:22px;text-align:center}.sidebar-footer{margin-top:auto;padding:18px;border-top:1px solid var(--card-border);display:flex;gap:10px}.sidebar-footer button{flex:1;padding:11px 8px;border-radius:10px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;font-size:14px;transition:all .2s;font-family:var(--font);font-weight:600}.sidebar-footer button:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}.main{margin-inline-start:260px;flex:1;display:flex;flex-direction:column;min-height:100vh;min-width:0}.topbar{position:sticky;top:0;z-index:50;background:var(--topbar-bg);backdrop-filter:blur(16px);border-bottom:1px solid var(--card-border);padding:0 40px;height:66px;display:flex;align-items:center;justify-content:space-between}.topbar-title{font-size:18px;font-weight:700;color:var(--text)}.topbar-right{display:flex;align-items:center;gap:14px}.status-pill{display:flex;align-items:center;gap:10px;background:var(--card-bg);border:1px solid var(--card-border);padding:8px 18px;border-radius:24px;font-size:14px;color:var(--text-muted)}.status-dot{width:9px;height:9px;border-radius:50%;background:var(--text-muted);flex-shrink:0}.status-dot.online{background:var(--accent);box-shadow:0 0 10px var(--accent);animation:pulse 2s infinite}.status-dot.waiting{background:var(--orange);box-shadow:0 0 8px var(--orange)}@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 10px var(--accent)}50%{opacity:.6;box-shadow:0 0 4px var(--accent)}}.page{display:none;padding:32px 40px;width:100%;max-width:1400px}.page.active{display:block}.page-header{margin-bottom:28px}.page-header h2{font-size:26px;font-weight:700;color:var(--text);letter-spacing:-.3px;display:flex;align-items:center;gap:10px}.page-header p{color:var(--text-muted);font-size:15px;margin-top:5px}.card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius);padding:24px;margin-bottom:20px}.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--card-border)}.card-header h3{font-size:17px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.card.danger{border-color:rgba(255,82,82,0.35);background:linear-gradient(180deg,rgba(255,82,82,0.04) 0,var(--card-bg) 60%)}.card.warning{border-color:rgba(255,171,64,0.35);background:linear-gradient(180deg,rgba(255,171,64,0.04) 0,var(--card-bg) 60%)}.card.info{border-color:rgba(64,196,255,0.35);background:linear-gradient(180deg,rgba(64,196,255,0.04) 0,var(--card-bg) 60%)}.card.purple{border-color:rgba(209,140,255,0.35);background:linear-gradient(180deg,rgba(209,140,255,0.04) 0,var(--card-bg) 60%)}.card.success{border-color:rgba(0,230,118,0.35);background:linear-gradient(180deg,rgba(0,230,118,0.04) 0,var(--card-bg) 60%)}label.field-label{display:block;font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.8px}input[type=number],input[type=text],select,textarea{width:100%;padding:12px 16px;background:var(--input-bg);border:1.5px solid var(--input-border);border-radius:10px;color:var(--text);font-size:15px;font-family:var(--font);transition:border-color .2s,box-shadow .2s;outline:0}input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,230,118,0.12)}textarea{resize:vertical}select option{background:var(--card-bg);color:var(--text)}.field-group{margin-bottom:20px}.field-row{display:flex;gap:14px}.field-row>*{flex:1}.input-with-btn{display:flex;gap:10px}.input-with-btn input{margin:0}.btn{padding:11px 22px;border-radius:10px;border:1.5px solid transparent;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font);transition:all .2s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;letter-spacing:.2px}.btn-primary{background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700}.btn-primary:hover{background:rgba(0,230,118,0.18);border-color:rgba(0,230,118,0.7);transform:translateY(-1px);box-shadow:0 4px 14px rgba(0,230,118,0.2)}.btn-danger{background:var(--red);color:#fff;border-color:transparent}.btn-danger:hover{background:#ff1744;transform:translateY(-1px);box-shadow:0 4px 14px rgba(255,82,82,0.4)}.btn-warning{background:var(--orange);color:#000;border-color:transparent}.btn-warning:hover{background:#ff9100;transform:translateY(-1px)}.btn-ghost{background:0 0;border:1.5px solid var(--card-border);color:var(--text-muted)}.btn-ghost:hover{border-color:var(--text);color:var(--text)}.btn-blue{background:var(--blue);color:#000;border-color:transparent}.btn-blue:hover{transform:translateY(-1px)}.btn-sm{padding:7px 14px;font-size:13px}.btn-full{width:100%;justify-content:center;padding:15px;font-size:16px}.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-radius:10px;background:rgba(255,255,255,0.03);border:1.5px solid var(--card-border);margin-bottom:12px;gap:14px}.toggle-row.danger{border-color:rgba(255,82,82,0.3);background:rgba(255,82,82,0.05)}.toggle-row.warning{border-color:rgba(255,171,64,0.3);background:rgba(255,171,64,0.05)}.toggle-row.blue{border-color:rgba(64,196,255,0.3);background:rgba(64,196,255,0.05)}.toggle-row.purple{border-color:rgba(209,140,255,0.3);background:rgba(209,140,255,0.05)}.toggle-row.pink{border-color:rgba(240,100,170,0.3);background:rgba(240,100,170,0.05)}.toggle-row.green{border-color:rgba(100,200,120,0.3);background:rgba(100,200,120,0.05)}.toggle-left{display:flex;align-items:center;gap:16px}.toggle-label{font-size:15px;font-weight:600;color:var(--text)}.toggle-label small{display:block;font-size:12px;color:var(--text-muted);font-weight:400;margin-top:2px}.toggle-label.danger{color:var(--red)}.toggle-label.warning{color:var(--orange)}.toggle-label.blue{color:var(--blue)}.toggle-label.purple{color:var(--purple)}.toggle-label.pink{color:#ff80ab}.toggle-label.green{color:#69f0ae}.switch{position:relative;display:inline-block;width:50px;height:28px;flex-shrink:0}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;cursor:pointer;inset:0;background:#1e2830;border:1.5px solid #2a3a4a;transition:.3s;border-radius:28px}.slider:before{position:absolute;content:"";height:20px;width:20px;bottom:2px;inset-inline-start:2px;background:#4a5a6a;transition:.3s;border-radius:50%}input:checked+.slider{background:rgba(0,230,118,0.2);border-color:var(--accent)}input:checked+.slider:before{background:var(--accent);box-shadow:0 0 8px rgba(0,230,118,0.6)}[dir=ltr] input:checked+.slider:before{transform:translateX(22px)}[dir=rtl] input:checked+.slider:before{transform:translateX(-22px)}.lang-slider:before{height:14px;width:14px;bottom:1.5px;inset-inline-start:1.5px}[dir=ltr] input:checked+.lang-slider:before{transform:translateX(20px)}[dir=rtl] input:checked+.lang-slider:before{transform:translateX(-20px)}.chip-container{display:flex;flex-wrap:wrap;gap:10px;padding:14px;background:var(--input-bg);border-radius:10px;min-height:52px;max-height:220px;overflow-y:auto;border:1.5px dashed var(--card-border);margin-top:10px}.chip{background:var(--accent-dim);color:var(--accent);padding:6px 14px;border-radius:20px;font-size:14px;display:flex;align-items:center;gap:8px;border:1px solid rgba(0,230,118,0.3);font-weight:500}.chip.red-chip{background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3)}.chip-remove{cursor:pointer;font-size:16px;font-weight:700;opacity:.6;line-height:1}.chip-remove:hover{opacity:1}.sub-panel{background:rgba(0,0,0,0.2);border:1.5px solid var(--card-border);border-radius:10px;padding:18px;margin-top:12px}.sub-panel.orange{border-color:rgba(255,171,64,0.3)}.sub-panel.red{border-color:rgba(255,82,82,0.3)}.sub-panel h4{font-size:14px;font-weight:700;color:var(--text-muted);margin-bottom:14px;display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.5px}.cb-group{display:flex;gap:10px;flex-wrap:wrap}.cb-label{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:8px;cursor:pointer;font-size:14px;color:var(--text-muted);transition:all .2s;user-select:none}.cb-label:hover{border-color:var(--accent);color:var(--text)}.cb-label input{accent-color:var(--accent);width:16px;height:16px;cursor:pointer}.limit-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}.limit-item{display:flex;align-items:center;gap:10px;background:var(--card-bg);padding:10px 14px;border-radius:9px;border:1.5px solid var(--card-border)}.limit-item input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:pointer;flex-shrink:0}.limit-item span{font-size:14px;flex:1;color:var(--text)}.limit-item input[type=number]{width:60px;padding:6px 8px;font-size:14px;margin:0;text-align:center}.group-list-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:14px;display:flex;align-items:center;gap:18px;padding:18px 22px;cursor:pointer;transition:border-color .2s,transform .2s}.group-list-card:hover{border-color:rgba(64,196,255,0.35);transform:translateY(-1px)}.group-list-card:hover .glc-arrow{opacity:1}.glc-avatar{width:52px;height:52px;border-radius:13px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:18px;font-weight:700;color:var(--accent)}.glc-avatar img{width:100%;height:100%;object-fit:cover;border-radius:11px}.glc-info{flex:1;min-width:0}.glc-name{font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.glc-id{font-family:monospace;font-size:11px;color:var(--text-muted);background:var(--input-bg);padding:2px 8px;border-radius:5px;border:1px solid var(--card-border);margin-top:4px;display:inline-block}.glc-chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.glc-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}.glc-chip.green{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,83,0.25)}.glc-chip.orange{background:var(--orange-dim);color:var(--orange);border:1px solid rgba(255,171,64,0.25)}.glc-chip.blue{background:var(--blue-dim);color:var(--blue);border:1px solid rgba(64,196,255,0.25)}.glc-chip.red{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.25)}.glc-chip.purple{background:var(--purple-dim);color:var(--purple);border:1px solid rgba(209,140,255,0.25)}.glc-arrow{font-size:16px;color:var(--blue);opacity:0;transition:opacity .2s;flex-shrink:0;margin-inline-start:4px}.group-detail-bar{display:flex;align-items:center;gap:16px;margin-bottom:28px;flex-wrap:wrap}.group-detail-identity{display:flex;align-items:center;gap:14px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:12px 20px;flex:1}.group-detail-avatar{width:46px;height:46px;border-radius:12px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:17px;font-weight:700;color:var(--accent)}.group-detail-avatar img{width:100%;height:100%;object-fit:cover;border-radius:10px}.group-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:16px;overflow:hidden;transition:border-color .2s}.group-card-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--card-border)}.group-card-title{font-size:16px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.group-card-body{padding:20px}.group-id-badge{font-family:monospace;font-size:12px;color:var(--text-muted);background:var(--input-bg);padding:3px 10px;border-radius:6px;border:1px solid var(--card-border)}.qr-wrap{display:flex;flex-direction:column;align-items:center;gap:20px;padding:36px;background:var(--input-bg);border-radius:12px;border:1.5px dashed var(--card-border)}#qr-image{max-width:230px;border-radius:12px;border:10px solid #fff;box-shadow:0 8px 30px rgba(0,0,0,0.5);display:none}.toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(24px);background:var(--accent);color:#000;padding:13px 28px;border-radius:40px;font-weight:700;font-size:15px;z-index:9999;opacity:0;transition:all .35s;pointer-events:none;box-shadow:0 4px 20px rgba(0,230,118,0.5)}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.modal{display:none;position:fixed;z-index:1000;inset:0;background:var(--modal-bg);backdrop-filter:blur(8px);align-items:center;justify-content:center}.modal.open{display:flex}.modal-content{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:16px;padding:32px;width:90%;max-width:640px;box-shadow:0 24px 80px rgba(0,0,0,0.7);animation:slideIn .25s ease;max-height:90vh;overflow-y:auto}.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.modal-header h3{font-size:20px;font-weight:700}.close-modal{background:0 0;border:none;color:var(--text-muted);font-size:26px;cursor:pointer;padding:4px;line-height:1}.close-modal:hover{color:var(--red)}@keyframes slideIn{from{transform:translateY(-24px);opacity:0}to{transform:translateY(0);opacity:1}}#terminalOutput{background:#000;color:#00ff88;font-family:'Courier New',monospace;height:400px;overflow-y:auto;padding:16px;border-radius:10px;font-size:13px;direction:ltr;text-align:start;border:1px solid #0a1a0a}#terminalOutput div{margin-bottom:5px;border-bottom:1px solid #0a1a0a;padding-bottom:5px;word-wrap:break-word;line-height:1.6}.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}.card-grid .card{margin-bottom:0}.card-grid-full{grid-column:1/-1}@media (max-width:1100px){.card-grid{grid-template-columns:1fr}}.section-sep{height:1px;background:var(--card-border);margin:20px 0}::-webkit-scrollbar{width:7px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:4px}.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99}.hamburger{display:none;background:0 0;border:none;color:var(--text);font-size:24px;cursor:pointer;padding:4px}.group-tabs{display:flex;gap:4px;border-bottom:1.5px solid var(--card-border);margin-bottom:20px}.group-tab{padding:10px 18px;border:none;background:0 0;color:var(--text-muted);font-size:14px;font-weight:600;font-family:var(--font);cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px;transition:all .2s;display:flex;align-items:center;gap:7px;border-radius:8px 8px 0 0}.group-tab:hover{color:var(--text);background:rgba(255,255,255,0.04)}.group-tab.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-dim)}.group-tab-panel{display:none}.group-tab-panel.active{display:block}.step-badge{display:inline-block;background:var(--blue-dim);color:var(--blue);padding:2px 9px;border-radius:12px;margin-inline-end:6px;font-weight:700;font-size:13px}@media (max-width:768px){.sidebar{transform:translateX(100%)}[dir=ltr] .sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.sidebar-overlay.open{display:block}.main{margin-inline-start:0}.hamburger{display:block}.page{padding:18px}.topbar{padding:0 18px}.limit-grid{grid-template-columns:1fr}.card-grid{grid-template-columns:1fr}.field-row{flex-direction:column}}</style>
     </head>
     <body>
         <nav class="sidebar" id="sidebar">
@@ -349,6 +351,22 @@ app.get('/', (req, res) => {
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    <div class="card danger">
+                        <div class="card-header">
+                            <h3 style="color:var(--red);"><i class="fas fa-globe"></i> ${t('رموز الدول المحظورة', 'Blocked Extensions')}</h3>
+                            <span style="font-size: 13px; color: var(--text-muted); background:var(--red-dim); padding:4px 10px; border-radius:20px;">${t('حظر دول كاملة', 'Ban Entire Countries')}</span>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('رمز الدولة (بدون +)', 'Country Code (without +)')}</label>
+                            <div class="input-with-btn">
+                                <input type="number" id="newBlockedExtension" placeholder="Ex: 1, 91" onkeypress="if(event.key==='Enter'){event.preventDefault();addBlockedExtension();}">
+                                <button type="button" class="btn btn-danger" onclick="addBlockedExtension()"><i class="fas fa-ban"></i> ${t('حظر', 'Ban')}</button>
+                            </div>
+                        </div>
+                        <label class="field-label">${t('رموز الدول المحظورة حالياً', 'Currently Blocked Extensions')}</label>
+                        <div id="blockedExtensionsContainer" class="chip-container"></div>
                     </div>
 
                     <div class="card success">
@@ -875,6 +893,7 @@ app.get('/', (req, res) => {
 
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
             let blacklistArr = ${JSON.stringify(blacklistArr)}; 
+            let blockedExtensionsArr = ${JSON.stringify(blockedExtensionsArr)}; 
             let whitelistArr = ${JSON.stringify(whitelistArr)}; 
             let groupsConfigObj = ${JSON.stringify(config.groupsConfig)};
             const metaTypes = ${JSON.stringify(mediaTypesMeta)};
@@ -912,6 +931,7 @@ app.get('/', (req, res) => {
                 enableQAFeature: groupsConfigObj[key].enableQAFeature || false,
                 qaList: groupsConfigObj[key].qaList || [],
                 eventDate: groupsConfigObj[key].eventDate || '',
+                eventDates: groupsConfigObj[key].eventDates || [],
                 qaLanguage: groupsConfigObj[key].qaLanguage || 'ar',
                 currentQAQuestions: []
             }));
@@ -1005,47 +1025,43 @@ app.get('/', (req, res) => {
                 let html = '';
                 let containerId = '';
                 if (type === 'words') {
-                    html = group.words.map((word, wordIndex) => \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`).join('');
+                    html = group.words.map((word, wordIndex) => '<div class="chip">' + word + ' <span class="chip-remove" onclick="removeGroupWord(' + groupIndex + ', ' + wordIndex + ')">&times;</span></div>').join('');
                     containerId = 'chip_container_words_' + groupIndex;
                 } else if (type === 'blacklist') {
-                    html = group.customBlacklist.map((num, idx) => \`<div class="chip red-chip">\${num} <span class="chip-remove" onclick="removeGroupBlacklist(\${groupIndex}, \${idx})">&times;</span></div>\`).join('');
+                    html = group.customBlacklist.map((num, idx) => '<div class="chip red-chip">' + num + ' <span class="chip-remove" onclick="removeGroupBlacklist(' + groupIndex + ', ' + idx + ')">&times;</span></div>').join('');
                     containerId = 'chip_container_bl_' + groupIndex;
                 } else if (type === 'whitelist') {
-                    html = group.customWhitelist.map((num, idx) => \`<div class="chip">\${num} <span class="chip-remove" onclick="removeGroupWhitelist(\${groupIndex}, \${idx})">&times;</span></div>\`).join('');
+                    html = group.customWhitelist.map((num, idx) => '<div class="chip">' + num + ' <span class="chip-remove" onclick="removeGroupWhitelist(' + groupIndex + ', ' + idx + ')">&times;</span></div>').join('');
                     containerId = 'chip_container_wl_' + groupIndex;
                 }
                 const container = document.getElementById(containerId);
                 if (container) container.innerHTML = html;
             }
 
-            function renderGroupDetailBody(groupIndex) {
+            function renderGroupDetailBody(groupIndex, activeTab = 'general') {
                 const group = groupsArr[groupIndex];
                 const container = document.getElementById('groupDetailBody');
 
                 let wordsHtml = group.words.map((word, wordIndex) => 
-                    \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`
+                    '<div class="chip">' + word + ' <span class="chip-remove" onclick="removeGroupWord(' + groupIndex + ', ' + wordIndex + ')">&times;</span></div>'
                 ).join('');
 
                 let blHtml = group.customBlacklist.map((num, idx) => 
-                    \`<div class="chip red-chip">\${num} <span class="chip-remove" onclick="removeGroupBlacklist(\${groupIndex}, \${idx})">&times;</span></div>\`
+                    '<div class="chip red-chip">' + num + ' <span class="chip-remove" onclick="removeGroupBlacklist(' + groupIndex + ', ' + idx + ')">&times;</span></div>'
                 ).join('');
 
                 let wlHtml = group.customWhitelist.map((num, idx) => 
-                    \`<div class="chip">\${num} <span class="chip-remove" onclick="removeGroupWhitelist(\${groupIndex}, \${idx})">&times;</span></div>\`
+                    '<div class="chip">' + num + ' <span class="chip-remove" onclick="removeGroupWhitelist(' + groupIndex + ', ' + idx + ')">&times;</span></div>'
                 ).join('');
 
                 const blockedChecks = metaTypes.map(t => 
-                    \`<label class="cb-label"><input type="checkbox" value="\${t.id}" \${group.blockedTypes.includes(t.id)?'checked':''} onchange="updateGroupArray(\${groupIndex}, 'blockedTypes', '\${t.id}', this.checked)"> \${t.icon} \${t.name}</label>\`
+                    '<label class="cb-label"><input type="checkbox" value="' + t.id + '" ' + (group.blockedTypes.includes(t.id)?'checked':'') + ' onchange="updateGroupArray(' + groupIndex + ', \'blockedTypes\', \'' + t.id + '\', this.checked)"> ' + t.icon + ' ' + t.name + '</label>'
                 ).join('');
 
                 const spamLimitGrid = metaTypes.map(t => {
                     const isChecked = group.spamTypes.includes(t.id) ? 'checked' : '';
                     const limitVal = group.spamLimits[t.id] || 5;
-                    return \`<div class="limit-item">
-                        <input type="checkbox" value="\${t.id}" \${isChecked} onchange="updateGroupArray(\${groupIndex}, 'spamTypes', '\${t.id}', this.checked)">
-                        <span style="font-size:13px;width:70px;">\${t.icon} \${t.name}</span>
-                        <input type="number" value="\${limitVal}" min="1" onchange="updateSpamLimit(\${groupIndex}, '\${t.id}', this.value)">
-                    </div>\`;
+                    return '<div class="limit-item"><input type="checkbox" value="' + t.id + '" ' + isChecked + ' onchange="updateGroupArray(' + groupIndex + ', \'spamTypes\', \'' + t.id + '\', this.checked)"><span style=\"font-size:13px;width:70px;\">' + t.icon + ' ' + t.name + '</span><input type="number" value="' + limitVal + '" min="1" onchange="updateSpamLimit(' + groupIndex + ', \'' + t.id + '\', this.value)"></div>';
                 }).join('');
 
                 const tabs = [
@@ -1057,24 +1073,24 @@ app.get('/', (req, res) => {
                     { id: 'lists',   icon: 'fa-list',       label: currentLang==='en'?'Lists':'القوائم' },
                 ];
                 const tabButtons = tabs.map((tab, i) =>
-                    \`<button type="button" class="group-tab \${i===0?'active':''}" onclick="switchGroupTab(\${groupIndex},'\${tab.id}',this)\${tab.id==='qa'?';loadGroupMedia('+groupIndex+')':\'\'}"\><i class="fas \${tab.icon}"></i> \${tab.label}</button>\`
+                    '<button type="button" class="group-tab ' + (tab.id===activeTab?'active':'') + '" onclick="switchGroupTab(' + groupIndex + ',\'' + tab.id + '\',this)' + (tab.id==='qa'?';loadGroupMedia('+groupIndex+')':'') + '"><i class="fas ' + tab.icon + '"></i> ' + tab.label + '</button>'
                 ).join('');
 
                 container.innerHTML = \`
                     <div class="field-row" style="margin-bottom:20px;">
                         <div class="field-group" style="margin-bottom:0;">
                             <label class="field-label">\${dict.target_group}</label>
-                            \${createGroupSelectHTML(group.id, \`updateGroupData(\${groupIndex}, 'id', this.value)\`, false)}
+                            \${createGroupSelectHTML(group.id, \\\`updateGroupData(\${groupIndex}, 'id', this.value)\\\`, false)}
                         </div>
                         <div class="field-group" style="margin-bottom:0;">
                             <label class="field-label">\${dict.admin_group}</label>
-                            \${createGroupSelectHTML(group.adminGroup, \`updateGroupData(\${groupIndex}, 'adminGroup', this.value)\`, true)}
+                            \${createGroupSelectHTML(group.adminGroup, \\\`updateGroupData(\${groupIndex}, 'adminGroup', this.value)\\\`, true)}
                         </div>
                     </div>
 
                     <div class="group-tabs" id="gtabs_\${groupIndex}">\${tabButtons}</div>
 
-                    <div class="group-tab-panel active" id="gtab_\${groupIndex}_general">
+                    <div class="group-tab-panel \${activeTab==='general'?'active':''}" id="gtab_\${groupIndex}_general">
                         <div class="sub-panel red" style="margin-bottom:16px;">
                             <h4 style="color:var(--red);">\${dict.blocked_types}</h4>
                             <div class="cb-group" style="margin-bottom:10px;">\${blockedChecks}</div>
@@ -1105,7 +1121,7 @@ app.get('/', (req, res) => {
                         </div>
                     </div>
 
-                    <div class="group-tab-panel" id="gtab_\${groupIndex}_filters">
+                    <div class="group-tab-panel \${activeTab==='filters'?'active':''}" id="gtab_\${groupIndex}_filters">
                         <div class="card warning">
                             <div class="toggle-row warning" style="margin-bottom:0;border-radius:10px;">
                                 <div class="toggle-left">
@@ -1142,7 +1158,7 @@ app.get('/', (req, res) => {
                         </div>
                     </div>
 
-                    <div class="group-tab-panel" id="gtab_\${groupIndex}_qa">
+                    <div class="group-tab-panel \${activeTab==='qa'?'active':''}" id="gtab_\${groupIndex}_qa">
                         <div class="card info">
                             <div class="toggle-row blue" style="margin-bottom:0;border-radius:10px;">
                                 <div class="toggle-left">
@@ -1154,15 +1170,33 @@ app.get('/', (req, res) => {
                                 <div class="sub-panel blue" style="margin-bottom:16px;">
                                     <h4 style="color:var(--blue);">\${currentLang==='en'?'Dynamic Fields Reference':'مرجع الحقول الديناميكية'}</h4>
                                     <div style="font-size:13px;color:var(--text-muted);line-height:1.8;">
-                                        <div><strong style="color:var(--blue);">{eventdate}</strong> - \${currentLang==='en'?'Event/deadline with days remaining (e.g., 5 days left - 25/03/2026)':'الحدث/الموعد النهائي مع الأيام المتبقية'}</div>
+                                        <div><strong style="color:var(--blue);">{eventdate}</strong> - \${currentLang==='en'?'Primary event/deadline (first in list)':'الحدث الأساسي (الأول في القائمة)'}</div>
+                                        <div><strong style="color:var(--blue);">{eventdate:Label}</strong> - \${currentLang==='en'?'Specific event by label':'حدث معين حسب العنوان'}</div>
                                         <div><strong style="color:var(--blue);">{user}</strong> - \${currentLang==='en'?'Sender username':'اسم المرسل'}</div>
                                     </div>
                                 </div>
+                                
+                                <div class="sub-panel blue" style="margin-bottom: 24px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                                        <h4 style="color: var(--blue); margin-bottom: 0;"><i class="fas fa-calendar-alt"></i> \${currentLang === 'en' ? 'Manage Events/Deadlines' : 'إدارة الأحداث والمواعيد'}</h4>
+                                        <button type="button" class="btn btn-primary btn-sm" onclick="addEventDate(\${groupIndex})">
+                                            <i class="fas fa-plus"></i> \${currentLang === 'en' ? 'Add Event' : 'إضافة حدث'}
+                                        </button>
+                                    </div>
+                                    <div id="event_dates_container_\${groupIndex}">
+                                        \${(group.eventDates || []).map((ed, edIdx) => {
+                                            return '<div class="toggle-row blue" style="margin-bottom: 8px; padding: 12px; border-radius: 10px; border: 1.5px solid var(--card-border);"><div style="display: flex; gap: 12px; align-items: center; width: 100%;"><div style="flex: 1;"><label class="field-label" style="font-size: 10px; margin-bottom: 4px;">' + (currentLang === 'en' ? 'Label (e.g. Exam)' : 'العنوان (مثل: اختبار)') + '</label><input type="text" value="' + (ed.label || '') + '" placeholder="..." onchange="updateEventDate(' + groupIndex + ', ' + edIdx + ', \'label\', this.value)" style="padding: 8px 12px; font-size: 14px;"></div><div style="flex: 1;"><label class="field-label" style="font-size: 10px; margin-bottom: 4px;">' + (currentLang === 'en' ? 'Date' : 'التاريخ') + '</label><input type="date" value="' + (ed.date || '') + '" onchange="updateEventDate(' + groupIndex + ', ' + edIdx + ', \'date\', this.value)" style="color-scheme: dark; padding: 8px 12px; font-size: 14px;"></div><button type="button" class="icon-btn" onclick="removeEventDate(' + groupIndex + ', ' + edIdx + ')" style="background: var(--red-dim); color: var(--red); border-color: rgba(255,82,82,0.3); margin-top: 18px;" title="' + (currentLang === 'en' ? 'Delete' : 'حذف') + '"><i class="fas fa-trash"></i></button></div></div>';
+                                        }).join('')}
+                                        \${(!group.eventDates || group.eventDates.length === 0) ? \`<div style="font-size: 13px; color: var(--text-muted); padding: 20px; text-align: center; border: 1.5px dashed var(--card-border); border-radius: 10px; background: rgba(0,0,0,0.1);">
+                                            <i class="fas fa-calendar-times" style="font-size: 24px; display: block; margin-bottom: 8px; opacity: 0.5;"></i>
+                                            \${currentLang === 'en' ? 'No extra events added yet.' : 'لم يتم إضافة أحداث إضافية بعد.'}
+                                        </div>\` : ''}
+                                    </div>
+                                </div>
 
-                                <label class="field-label">\${currentLang==='en'?'Set Event/Deadline Date':'حدد تاريخ الحدث/الموعد النهائي'}</label>
                                 <div class="field-row" style="margin-bottom:16px;">
                                     <div class="field-group" style="margin-bottom:0;">
-                                        <label class="field-label" style="margin-bottom:4px;">\${currentLang==='en'?'Date (Test, Assignment, etc.)':'التاريخ (اختبار، مهمة، إلخ)'}</label>
+                                        <label class="field-label" style="margin-bottom:4px;">\${currentLang==='en'?'Legacy Event Date (for {eventdate})':'تاريخ الحدث القديم (لحقل {eventdate})'}</label>
                                         <input type="date" id="newQAEventDate_\${groupIndex}" value="\${group.eventDate || ''}" onchange="updateGroupData(\${groupIndex}, 'eventDate', this.value)" style="color-scheme: dark; font-family: var(--font);">
                                     </div>
                                     <div class="field-group" style="margin-bottom:0;">
@@ -1178,7 +1212,7 @@ app.get('/', (req, res) => {
                                 <div class="field-group" style="margin-bottom:10px;">
                                     <input type="text" id="newQAQuestion_\${groupIndex}" placeholder="\${currentLang==='en'?'Enter a question variant (e.g., when is the test)...':'أدخل صيغة السؤال...'}" style="margin-bottom:10px;" onkeypress="if(event.key==='Enter'){event.preventDefault();addQuestionToQA(\${groupIndex});}">
                                     <button type="button" class="btn btn-full" onclick="addQuestionToQA(\${groupIndex})" style="margin-bottom:10px;background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700;"><i class="fas fa-plus"></i> \${currentLang==='en'?'Add Question Variant':'إضافة صيغة سؤال'}</button>
-                                    <div class="chip-container" id="qa_questions_container_\${groupIndex}" style="min-height:40px;">\${(group.currentQAQuestions || []).map((q, qIdx) => \`<div class="chip"><span>\${q}</span><span class="chip-remove" onclick="removeQuestionFromQA(\${groupIndex}, \${qIdx})">×</span></div>\`).join('')}</div>
+                                    <div class="chip-container" id="qa_questions_container_\${groupIndex}" style="min-height:40px;">\${(group.currentQAQuestions || []).map((q, qIdx) => '<div class="chip"><span>' + q + '</span><span class="chip-remove" onclick="removeQuestionFromQA(' + groupIndex + ', ' + qIdx + ')">×</span></div>').join('')}</div>
                                 </div>
                                 <label class="field-label">\${currentLang==='en'?'Answer (Use {date}, {eventdate}, {user} for dynamic values)':'الإجابة (استخدم {date}, {eventdate}, {user} للحقول الديناميكية)'}</label>
                                 <div class="field-group" style="margin-bottom:10px;">
@@ -1219,22 +1253,22 @@ app.get('/', (req, res) => {
                                                     <i class="fas fa-question" style="color:var(--blue);"></i> \${currentLang==='en'?'Question Variations':'صيغ الأسئلة'} (\${(qa.questions || []).length})
                                                 </div>
                                                 <div style="display:flex;gap:8px;">
-                                                    <button type="button" class="icon-btn" onclick="editGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="\${currentLang==='en'?'Edit':'تعديل'}">
+                                                    <button type="button" class="icon-btn" onclick="editGroupQA(\${groupIndex}, \${qaIdx})" title="\${currentLang==='en'?'Edit':'تعديل'}" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);">
                                                         <i class="fas fa-edit"></i>
                                                     </button>
-                                                    <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);" title="\${currentLang==='en'?'Delete':'حذف'}">
+                                                    <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" title="\${currentLang==='en'?'Delete':'حذف'}" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);">
                                                         <i class="fas fa-trash"></i>
                                                     </button>
                                                 </div>
                                             </div>
                                             <div class="group-card-body" style="padding:12px;">
                                                 <div style="margin-bottom:10px;">
-                                                    <div class="chip-container" style="background:rgba(64,196,255,0.05);border-color:rgba(64,196,255,0.2);">\${(qa.questions || []).map((q) => \`<div class="chip" style="background:rgba(64,196,255,0.15);color:var(--blue);border-color:rgba(64,196,255,0.3);"><i class="fas fa-search"></i> \${q}</div>\`).join('')}</div>
+                                                    <div class="chip-container" style="background:rgba(64,196,255,0.05);border-color:rgba(64,196,255,0.2);">\${(qa.questions || []).map((q) => '<div class="chip" style="background:rgba(64,196,255,0.15);color:var(--blue);border-color:rgba(64,196,255,0.3);"><i class="fas fa-search"></i> ' + q + '</div>').join('')}</div>
                                                 </div>
                                                 <div style="color:var(--text-muted);font-size:13px;">
                                                     <strong>\${currentLang==='en'?'Answer':'الإجابة'}:</strong> \${qa.answer || '(empty)'}
                                                 </div>
-                                                \${qa.mediaFile ? \`<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;color:#64dc96;"><i class="fas fa-paperclip"></i> \${qa.mediaFile}</div>\` : ''}
+                                                \${qa.mediaFile ? '<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;color:#64dc96;"><i class="fas fa-paperclip"></i> ' + qa.mediaFile + '</div>' : ''}
                                             </div>
                                         </div>
                                     \`).join('')}
@@ -1243,7 +1277,7 @@ app.get('/', (req, res) => {
                         </div>
                     </div>
 
-                    <div class="group-tab-panel" id="gtab_\${groupIndex}_spam">
+                    <div class="group-tab-panel \${activeTab==='spam'?'active':''}" id="gtab_\${groupIndex}_spam">
                         <div class="card warning">
                             <div class="toggle-row warning" style="margin-bottom:0;border-radius:10px;">
                                 <div class="toggle-left">
@@ -1273,7 +1307,7 @@ app.get('/', (req, res) => {
                         </div>
                     </div>
 
-                    <div class="group-tab-panel" id="gtab_\${groupIndex}_panic">
+                    <div class="group-tab-panel \${activeTab==='panic'?'active':''}" id="gtab_\${groupIndex}_panic">
                         <div class="card danger">
                             <div class="toggle-row danger" style="margin-bottom:0;border-radius:10px;">
                                 <div class="toggle-left">
@@ -1305,7 +1339,7 @@ app.get('/', (req, res) => {
                         </div>
                     </div>
 
-                    <div class="group-tab-panel" id="gtab_\${groupIndex}_lists">
+                    <div class="group-tab-panel \${activeTab==='lists'?'active':''}" id="gtab_\${groupIndex}_lists">
                         <div class="card danger">
                             <div class="toggle-row danger" style="margin-bottom:0;border-radius:10px;">
                                 <div class="toggle-left">
@@ -1350,11 +1384,8 @@ app.get('/', (req, res) => {
                                 <div class="chip-container" id="chip_container_wl_\${groupIndex}">\${wlHtml}</div>
                             </div>
                         </div>
-                    </div>
-                \`;
-            }
-
-            function updateGroupArray(gIndex, arrName, val, isChecked) {
+                    </div>\`;
+            }function updateGroupArray(gIndex, arrName, val, isChecked) {
                 let arr = groupsArr[gIndex][arrName];
                 if (isChecked && !arr.includes(val)) arr.push(val);
                 if (!isChecked) {
@@ -1390,6 +1421,16 @@ app.get('/', (req, res) => {
                 });
             }
 
+            function renderBlockedExtensions() {
+                const container = document.getElementById('blockedExtensionsContainer');
+                if(!container) return;
+                container.innerHTML = '';
+                blockedExtensionsArr.forEach((ext, index) => {
+                    container.innerHTML += \`<div class="chip red-chip">+\${ext} <span class="chip-remove" onclick="removeBlockedExtension(\${index})">&times;</span></div>\`;
+                });
+            }
+            window.addEventListener('DOMContentLoaded', () => { renderBlockedExtensions(); });
+
             async function addBlacklistNumber() {
                 const input = document.getElementById('newBlacklistNumber');
                 let justNumbers = input.value.replace(/\\D/g, ''); 
@@ -1404,6 +1445,30 @@ app.get('/', (req, res) => {
                     }
                 }
                 input.value = '';
+            }
+
+            async function addBlockedExtension() {
+                const input = document.getElementById('newBlockedExtension');
+                let justNumbers = input.value.replace(/\\D/g, '');
+                if (justNumbers) {
+                    if (!blockedExtensionsArr.includes(justNumbers)) {
+                        blockedExtensionsArr.push(justNumbers);
+                        renderBlockedExtensions();
+                        try {
+                            await fetch('/api/extensions/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ext: justNumbers}) });
+                        } catch(e) {}
+                    }
+                }
+                input.value = '';
+            }
+
+            async function removeBlockedExtension(index) {
+                const extToRemove = blockedExtensionsArr[index];
+                blockedExtensionsArr.splice(index, 1);
+                renderBlockedExtensions();
+                try {
+                    await fetch('/api/extensions/remove', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ext: extToRemove}) });
+                } catch(e) {}
             }
 
             async function addWhitelistNumber() {
@@ -1518,7 +1583,7 @@ app.get('/', (req, res) => {
                     spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
                     spamLimits: {text:7, image:3, video:2, audio:3, document:3, sticker:3},
                     enablePanicMode: false, panicMessageLimit: 10, panicTimeWindow: 5, panicLockoutDuration: 10, panicAlertTarget: 'both', panicAlertMessage: '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}',
-                    enableQAFeature: false, qaList: [], eventDate: '', qaLanguage: 'ar', currentQAQuestions: []
+                    enableQAFeature: false, qaList: [], eventDate: '', eventDates: [], qaLanguage: 'ar', currentQAQuestions: []
                 });
                 openGroupDetail(groupsArr.length - 1);
             }
@@ -1577,6 +1642,22 @@ app.get('/', (req, res) => {
                     groupsArr[groupIndex].currentQAQuestions.splice(questionIndex, 1);
                     renderQAQuestions(groupIndex);
                 }
+            }
+
+            function addEventDate(groupIndex) {
+                if (!groupsArr[groupIndex].eventDates) groupsArr[groupIndex].eventDates = [];
+                groupsArr[groupIndex].eventDates.push({ label: '', date: '' });
+                renderGroupDetailBody(groupIndex, 'qa');
+            }
+
+            function removeEventDate(groupIndex, dateIndex) {
+                groupsArr[groupIndex].eventDates.splice(dateIndex, 1);
+                renderGroupDetailBody(groupIndex, 'qa');
+            }
+
+            function updateEventDate(groupIndex, dateIndex, field, value) {
+                if (!groupsArr[groupIndex].eventDates[dateIndex]) return;
+                groupsArr[groupIndex].eventDates[dateIndex][field] = value;
             }
             
             function renderQAQuestions(groupIndex) {
@@ -1977,6 +2058,26 @@ app.post('/api/blacklist/remove', (req, res) => {
     res.sendStatus(200);
 });
 
+app.post('/api/extensions/add', (req, res) => {
+    if (req.body.ext) {
+        try {
+            db.prepare('INSERT OR IGNORE INTO blocked_extensions (ext) VALUES (?)').run(String(req.body.ext));
+            console.log(`[أمان] تم إضافة رمز دولة للقائمة السوداء: ${req.body.ext}`);
+        } catch (e) { }
+    }
+    res.sendStatus(200);
+});
+
+app.post('/api/extensions/remove', (req, res) => {
+    if (req.body.ext) {
+        try {
+            db.prepare('DELETE FROM blocked_extensions WHERE ext = ?').run(String(req.body.ext));
+            console.log(`[أمان] تم إزالة رمز دولة من القائمة السوداء: ${req.body.ext}`);
+        } catch (e) { }
+    }
+    res.sendStatus(200);
+});
+
 app.post('/api/whitelist/remove', (req, res) => {
     if (req.body.number) {
         try {
@@ -1995,11 +2096,14 @@ app.post('/api/blacklist/purge', async (req, res) => {
         console.log(`[تنظيف] بدأت عملية المسح الشامل للمجموعات...`);
         const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
         const blacklistArr = blacklistRows.map(r => r.number);
-        if (blacklistArr.length === 0) return res.json({ message: 'القائمة السوداء فارغة. / Blacklist is empty.' });
+        const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+        const blockedExtensionsArr = blockedExtensionsRows.map(r => r.ext);
+        if (blacklistArr.length === 0 && blockedExtensionsArr.length === 0) return res.json({ message: 'القائمة السوداء فارغة. / Blacklist is empty.' });
 
         const chats = await client.getChats();
         const botId = client.info.wid._serialized;
         let kickedCount = 0;
+        let rejectedCount = 0;
 
         for (const chat of chats) {
             if (chat.isGroup) {
@@ -2010,7 +2114,9 @@ app.post('/api/blacklist/purge', async (req, res) => {
                         .map(p => p.id._serialized)
                         .filter(id => {
                             const cleanId = id.replace(/:[0-9]+/, '');
-                            return blacklistArr.includes(cleanId) || blacklistArr.includes(id);
+                            const finalCleanId = cleanId.replace('@c.us', '');
+                            const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                            return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(id);
                         });
                     if (usersToKick.length > 0) {
                         try {
@@ -2020,12 +2126,47 @@ app.post('/api/blacklist/purge', async (req, res) => {
                             await new Promise(resolve => setTimeout(resolve, 1500));
                         } catch (e) { }
                     }
+
+                    try {
+                        const pendingReqs = await chat.getGroupMembershipRequests();
+                        if (pendingReqs && pendingReqs.length > 0) {
+                            let usersToReject = [];
+                            for (const req of pendingReqs) {
+                                let rawId = typeof req.id === 'string' ? req.id : (req.id._serialized || (req.id.user && req.id.server ? `${req.id.user}@${req.id.server}` : null));
+                                if (!rawId) continue;
+
+                                let cleanId = rawId.replace(/:[0-9]+/, '');
+                                if (cleanId.includes('@lid')) {
+                                    try {
+                                        const contact = await client.getContactById(rawId);
+                                        if (contact && contact.number) {
+                                            cleanId = `${contact.number}@c.us`;
+                                        }
+                                    } catch (err) { }
+                                }
+
+                                const finalCleanId = cleanId.replace(/:[0-9]+/, '').replace('@c.us', '');
+                                const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                                if (isExtBlocked || blacklistArr.includes(finalCleanId) || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId)) {
+                                    usersToReject.push(rawId);
+                                }
+                            }
+
+                            if (usersToReject.length > 0) {
+                                await chat.rejectGroupMembershipRequests({ requesterIds: usersToReject });
+                                rejectedCount += usersToReject.length;
+                                console.log(`[أمان] تم رفض ${usersToReject.length} طلبات انضمام لمحظورين في: ${chat.name}`);
+                                await new Promise(resolve => setTimeout(resolve, 1500));
+                            }
+                        }
+                    } catch (e) { console.error(`[خطأ] فشل رفض طلبات الانضمام في ${chat.name}:`, e.message); }
                 }
             }
         }
-        console.log(`[تنظيف] انتهت عملية المسح. طرد ${kickedCount} شخص.`);
-        res.json({ message: `تمت عملية المسح بنجاح! تم طرد (${kickedCount}) عضو محظور. / Purge complete! Kicked (${kickedCount}) banned users.` });
+        console.log(`[تنظيف] انتهت عملية المسح. طرد ${kickedCount} شخص ورفض ${rejectedCount} طلبات.`);
+        res.json({ message: `تمت عملية المسح بنجاح! تم طرد (${kickedCount}) محظور ورفض (${rejectedCount}) طلب. / Purge complete! Kicked (${kickedCount}), rejected (${rejectedCount}).` });
     } catch (error) {
+        console.error('[خطأ]', error);
         res.status(500).json({ error: 'حدث خطأ في السيرفر أثناء عملية المسح. / Server error during purge.' });
     }
 });
@@ -2192,10 +2333,12 @@ client.on('group_join', async (notification) => {
 
             if (isBlacklistEnabledForGroup && !isWhitelisted) {
                 const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanJoinedId);
+                const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+                const isExtBlocked = blockedExtensionsRows.some(r => cleanJoinedId.replace('@c.us', '').startsWith(r.ext));
                 const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
                 const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanJoinedId) : false;
 
-                if ((useGlobal && globalBl) || inCustom) {
+                if ((useGlobal && (globalBl || isExtBlocked)) || inCustom) {
                     console.log(`[أمان] محاولة دخول رقم محظور (${cleanJoinedId}). جاري الطرد...`);
                     isKicked = true;
                     setTimeout(async () => {
@@ -2351,9 +2494,11 @@ client.on('message', async msg => {
 
             if (isBlacklistEnabled) {
                 const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanAuthorId);
+                const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+                const isExtBlocked = blockedExtensionsRows.some(r => cleanAuthorId.replace('@c.us', '').startsWith(r.ext));
                 const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
                 const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanAuthorId) : false;
-                if ((useGlobal && globalBl) || inCustom) {
+                if ((useGlobal && (globalBl || isExtBlocked)) || inCustom) {
                     console.log(`[أمان] رقم محظور أرسل رسالة. سيتم حذفه.`);
                     await safeDelay();
                     await msg.delete(true);
@@ -2510,22 +2655,40 @@ client.on('message', async msg => {
                         const dateStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
                         finalAnswer = finalAnswer.replace(/{date}/g, dateStr);
 
-                        // Replace {eventdate}
-                        if (groupConfig.eventDate) {
-                            const eventDate = new Date(groupConfig.eventDate);
-                            const today = new Date();
-                            today.setHours(0, 0, 0, 0);
+                        // Replace {eventdate} and {eventdate:Label}
+                        const isArabic = (groupConfig.qaLanguage || 'ar') === 'ar';
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+
+                        function getEventDateStr(dateVal) {
+                            if (!dateVal) return '';
+                            const eventDate = new Date(dateVal);
                             eventDate.setHours(0, 0, 0, 0);
                             const daysLeft = Math.ceil((eventDate - today) / (1000 * 60 * 60 * 24));
                             const eventDateStr = `${String(eventDate.getDate()).padStart(2, '0')}/${String(eventDate.getMonth() + 1).padStart(2, '0')}/${eventDate.getFullYear()}`;
-                            const isArabic = (groupConfig.qaLanguage || 'ar') === 'ar';
-                            let eventdateStr;
                             if (isArabic) {
-                                eventdateStr = daysLeft > 0 ? `${daysLeft} أيام متبقية - ${eventDateStr}` : (daysLeft === 0 ? `اليوم - ${eventDateStr}` : `منذ ${Math.abs(daysLeft)} أيام - ${eventDateStr}`);
+                                return daysLeft > 0 ? `${daysLeft} أيام متبقية - ${eventDateStr}` : (daysLeft === 0 ? `اليوم - ${eventDateStr}` : `منذ ${Math.abs(daysLeft)} أيام - ${eventDateStr}`);
                             } else {
-                                eventdateStr = daysLeft > 0 ? `${daysLeft} days left - ${eventDateStr}` : (daysLeft === 0 ? `Today - ${eventDateStr}` : `${Math.abs(daysLeft)} days ago - ${eventDateStr}`);
+                                return daysLeft > 0 ? `${daysLeft} days left - ${eventDateStr}` : (daysLeft === 0 ? `Today - ${eventDateStr}` : `${Math.abs(daysLeft)} days ago - ${eventDateStr}`);
                             }
-                            finalAnswer = finalAnswer.replace(/{eventdate}/g, eventdateStr);
+                        }
+
+                        // Handle legacy {eventdate}
+                        if (groupConfig.eventDate) {
+                            finalAnswer = finalAnswer.replace(/{eventdate}/g, getEventDateStr(groupConfig.eventDate));
+                        } else if (groupConfig.eventDates && groupConfig.eventDates.length > 0) {
+                            // If no single eventDate, use the first one from eventDates array for {eventdate}
+                            finalAnswer = finalAnswer.replace(/{eventdate}/g, getEventDateStr(groupConfig.eventDates[0].date));
+                        }
+
+                        // Handle labeled {eventdate:Label}
+                        if (groupConfig.eventDates && groupConfig.eventDates.length > 0) {
+                            groupConfig.eventDates.forEach(ed => {
+                                if (ed.label && ed.date) {
+                                    const regex = new RegExp(`{eventdate:${ed.label}}`, 'g');
+                                    finalAnswer = finalAnswer.replace(regex, getEventDateStr(ed.date));
+                                }
+                            });
                         }
 
                         // Replace {user}
@@ -2534,6 +2697,7 @@ client.on('message', async msg => {
                         finalAnswer = finalAnswer.replace(/{user}/g, userName);
 
                         // Send media + caption, or plain text
+                        await safeDelay();
                         if (matchedQA && matchedQA.mediaFile) {
                             const mediaPath = path.join(__dirname, 'media', groupId, matchedQA.mediaFile);
                             if (fs.existsSync(mediaPath)) {
