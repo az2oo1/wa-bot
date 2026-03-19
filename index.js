@@ -1154,4 +1154,7 @@ client.on('vote_update', async vote => {
     }
 });
 
+// Start the client with retry logic
+initializeClientWithRetry();
+
 client.initialize();
