@@ -188,6 +188,21 @@ let botStatus = '<i class="fas fa-spinner fa-spin"></i> جاري تهيئة ال
 const userTrackers = new Map(); const abortedMessages = new Set(); const spamMutedUsers = new Map();
 const groupRaidTrackers = new Map(); const lockedGroups = new Set();
 
+// Client initialization tracking and debugging
+let isInitializing = false;
+let initializationTimeout = null;
+let initializationStartTime = null;
+let lastConnectionTimestamp = null;
+let clientConnectionHistory = [];
+
+function addConnectionLog(status, details = '') {
+    const timestamp = new Date().toLocaleTimeString('ar-SA', { hour12: false });
+    const logEntry = `[${timestamp}] Status: ${status}${details ? ` | Details: ${details}` : ''}`;
+    clientConnectionHistory.push(logEntry);
+    if (clientConnectionHistory.length > 100) clientConnectionHistory.shift();
+    console.log(`[اتصال] ${logEntry}`);
+}
+
 app.get('/', (req, res) => {
     const html = renderDashboard(req, db, config);
     res.send(html);
@@ -359,6 +374,22 @@ app.get('/api/status', (req, res) => {
 });
 
 app.get('/api/logs', (req, res) => res.json(logsHistory));
+
+// Get connection/initialization logs for debugging
+app.get('/api/connection-logs', (req, res) => {
+    const connectionData = {
+        currentStatus: botStatus,
+        isConnected: botStatus.includes('متصل'),
+        isInitializing,
+        connectionHistory: clientConnectionHistory,
+        lastConnectionTimestamp,
+        initializationStartTime,
+        uptime: initializationStartTime ? Math.floor((Date.now() - initializationStartTime) / 1000) : 'N/A',
+        totalConnectionLogs: clientConnectionHistory.length,
+        timestamp: new Date().toISOString()
+    };
+    res.json(connectionData);
+});
 
 app.post('/api/logout', async (req, res) => {
     try {
@@ -594,29 +625,89 @@ const client = new Client({
 });
 
 client.on('ready', async () => {
+    const readyStartTime = Date.now();
+    addConnectionLog('جاهز', 'البوت جاهز الآن والعميل مصرح');
+    isInitializing = false;
+    lastConnectionTimestamp = Date.now();
+    
+    if (initializationTimeout) {
+        clearTimeout(initializationTimeout);
+        initializationTimeout = null;
+    }
+    
     try {
+        console.log('[معلومة] بدء مزامنة المجموعات من قاعدة البيانات...');
         const chats = await client.getChats();
+        addConnectionLog('مزامنة مجموعات', `تم جلب ${chats.length} مجموعة`);
+        
+        console.log('[معلومة] بدء تحديث قاعدة البيانات...');
         syncTx(chats);
-        console.log('[معلومة] تمت مزامنة ' + chats.length + ' مجموعة بنجاح.');
+        
+        const syncDuration = Date.now() - readyStartTime;
+        const totalInitTime = initializationStartTime ? Date.now() - initializationStartTime : 0;
+        
+        console.log('[معلومة] تمت مزامنة ' + chats.length + ' مجموعة بنجاح.', {
+            syncDurationMs: syncDuration,
+            totalInitDurationMs: totalInitTime,
+            timestamp: new Date().toISOString()
+        });
+        
         botStatus = '<i class="fas fa-check-circle"></i> متصل وجاهز للعمل';
+        addConnectionLog('متصل', `متصل وجاهز - ${chats.length} مجموعة`);
     } catch (error) {
-        console.error('[خطأ] فشل مزامنة المجموعات: ' + error.message);
+        const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+        const errorStack = error && error.stack ? error.stack : 'No stack trace';
+        
+        addConnectionLog('خطأ في المزامنة', errorMsg);
+        console.error('[خطأ] فشل مزامنة المجموعات:', {
+            message: errorMsg,
+            stack: errorStack,
+            timestamp: new Date().toISOString(),
+            timeSinceReady: Date.now() - readyStartTime
+        });
     }
 });
 
 client.on('authenticated', () => {
+    addConnectionLog('مصرح', 'تم التحقق من الهوية بنجاح من خوادم WhatsApp');
+    lastConnectionTimestamp = Date.now();
     botStatus = '<i class="fas fa-sync fa-spin"></i> تم تسجيل الدخول بنجاح، جاري جلب البيانات...';
     currentQR = '';
+    
+    if (initializationTimeout) {
+        clearTimeout(initializationTimeout);
+        initializationTimeout = null;
+    }
+    
+    console.log('[معلومة] تم التحقق من الهوية بنجاح', {
+        authenticatedAt: new Date().toISOString(),
+        timeSinceInitialization: initializationStartTime ? `${Date.now() - initializationStartTime}ms` : 'N/A'
+    });
 });
 
 // Handle page errors that might cause frame detachment
 client.on('page_created', (page) => {
+    addConnectionLog('صفحة تم إنشاؤها', 'صفحة WhatsApp Web تم إنشاؤها بنجاح');
+    lastConnectionTimestamp = Date.now();
+    
     page.on('error', (error) => {
-        console.error('[خطأ] Page error:', error.message);
+        const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+        const errorStack = error && error.stack ? error.stack : 'No stack trace';
+        addConnectionLog('خطأ في الصفحة', `${errorMsg}`);
+        console.error('[خطأ] Page error details:', {
+            message: errorMsg,
+            stack: errorStack,
+            timestamp: new Date().toISOString()
+        });
     });
     
     page.on('close', () => {
+        addConnectionLog('صفحة مغلقة', 'تم إغلاق صفحة WhatsApp Web');
         console.log('[معلومة] تم إغلاق صفحة WhatsApp Web');
+    });
+    
+    page.on('framenavigated', () => {
+        addConnectionLog('انتقال إطار', 'تم التنقل إلى إطار جديد');
     });
 });
 
@@ -635,96 +726,109 @@ client.on('qr', (qr) => {
 });
 
 client.on('disconnected', async (reason) => {
+    const disconnectReason = reason || 'Unknown reason';
+    addConnectionLog('قطع الاتصال', disconnectReason);
+    
     botStatus = '<i class="fas fa-sign-out-alt"></i> تم تسجيل الخروج من الحساب...';
     currentQR = '';
     isInitializing = false;
+    
+    console.error('[تنبيه] توقع البوت، السبب:', {
+        reason: disconnectReason,
+        timestampOfDisconnect: new Date().toISOString(),
+        connectionDurationMs: lastConnectionTimestamp ? Date.now() - lastConnectionTimestamp : 'N/A'
+    });
+    
     if (initializationTimeout) {
         clearTimeout(initializationTimeout);
         initializationTimeout = null;
     }
-    try { await client.destroy(); } catch (e) { }
+    
+    try { 
+        console.log('[معلومة] تنظيف موارد العميل...');
+        await client.destroy(); 
+    } catch (e) { 
+        console.error('[خطأ] خطأ أثناء تنظيف العميل:', e.message);
+    }
+    
+    console.log('[معلومة] سيتم إعادة تهيئة الاتصال بعد 3 ثوانٍ...');
     setTimeout(() => { 
-        console.log('[معلومة] إعادة تهيئة الاتصال...');
+        console.log('[معلومة] بدء إعادة تهيئة الاتصال...');
         initializeClientWithRetry(); 
     }, 3000);
 });
 
-// Flag to prevent concurrent initialization attempts
-let isInitializing = false;
-let initializationTimeout = null;
 
-// Cleanup function to kill orphaned Chromium and related processes
-async function cleanupChromiumProcesses() {
-    return new Promise((resolve) => {
-        exec('pkill -9 -f chromium 2>/dev/null; pkill -9 -f chrome 2>/dev/null; pkill -9 -f puppet 2>/dev/null; sleep 2', () => {
-            setTimeout(resolve, 1500); // Wait for processes to fully terminate
-        });
+
+// Global error handler for client errors
+client.on('error', (error) => {
+    const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+    const errorStack = error && error.stack ? error.stack : 'No stack trace';
+    const errorName = error && error.name ? error.name : 'GenericError';
+    
+    console.error('[خطأ حرج] خطأ عام في العميل:', {
+        errorName,
+        message: errorMsg,
+        stack: errorStack,
+        timestamp: new Date().toISOString()
     });
-}
+    
+    addConnectionLog('خطأ حرج', `${errorName}: ${errorMsg}`);
+});
 
-// Cleanup function to remove old temporary directories and lock files
-async function cleanupOldTempDirs() {
-    return new Promise((resolve) => {
-        exec('rm -rf /tmp/chromium-* /tmp/.org.chromium.* /tmp/.pki /tmp/.X* 2>/dev/null || true', () => {
-            setTimeout(resolve, 500);
-        });
+// Handle authentication failures
+client.on('auth_failure', (msg) => {
+    const failureMsg = msg || 'Unknown authentication failure';
+    console.error('[خطأ] فشل المصادقة:', {
+        message: failureMsg,
+        timestamp: new Date().toISOString()
     });
-}
+    addConnectionLog('فشل المصادقة', failureMsg);
+    botStatus = '<i class="fas fa-exclamation-triangle"></i> خطأ في المصادقة: ' + failureMsg;
+});
 
-// Initialize client with retry logic
-async function initializeClientWithRetry(retries = 0, maxRetries = 5) {
-    if (isInitializing) {
-        console.log('[معلومة] محاولة تهيئة أخرى جارية، سيتم الانتظار...');
-        return;
+// Handle incoming call notifications
+client.on('call', (call) => {
+    console.log('[معلومة] تنبيه مكالمة واردة:', {
+        from: call.from,
+        isGroup: call.isGroup,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Monitor uncaught exceptions globally  
+process.on('unhandledRejection', (reason, promise) => {
+    const reasonMsg = reason ? (reason.message || reason.toString()) : 'Unknown rejection';
+    const reasonStack = reason && reason.stack ? reason.stack : 'No stack trace';
+    
+    console.error('[خطأ] رفض غير معالج:', {
+        reason: reasonMsg,
+        stack: reasonStack,
+        promise: promise.toString(),
+        timestamp: new Date().toISOString()
+    });
+    
+    addConnectionLog('رفض غير معالج', reasonMsg);
+    if (!isInitializing && botStatus.includes('متصل')) {
+        botStatus = '<i class="fas fa-exclamation-triangle"></i> حدث خطأ غير متوقع';
     }
+});
 
-    isInitializing = true;
-
-    if (initializationTimeout) {
-        clearTimeout(initializationTimeout);
-        initializationTimeout = null;
-    }
-
-    try {
-        console.log(`[معلومة] محاولة رقم ${retries + 1} للاتصال...`);
-        await client.initialize();
-        isInitializing = false;
-    } catch (error) {
-        console.error(`[خطأ] فشل الاتصال في المحاولة ${retries + 1}:`, error.message);
-        
-        if (retries < maxRetries) {
-            // Longer delay for frame detachment errors
-            let delayMs = Math.pow(2, retries) * 3000;
-            if (error.message.includes('Navigating frame was detached')) {
-                delayMs = Math.max(delayMs, 8000); // At least 8 seconds for frame detachment
-                console.log('[معلومة] تم رصد انفصال الإطار، زيادة وقت الانتظار...');
-            }
-            
-            console.log(`[معلومة] إعادة المحاولة خلال ${delayMs / 1000} ثانية...`);
-            botStatus = `<i class="fas fa-exclamation-triangle fa-spin"></i> محاولة إعادة الاتصال (${retries + 1}/${maxRetries})...`;
-            
-            isInitializing = false;
-            
-            initializationTimeout = setTimeout(async () => {
-                try { 
-                    await client.destroy(); 
-                } catch (e) { }
-                
-                // Cleanup before retry
-                await cleanupChromiumProcesses();
-                await cleanupOldTempDirs();
-                
-                // Wait before retry
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                await initializeClientWithRetry(retries + 1, maxRetries);
-            }, delayMs);
-        } else {
-            console.error('[خطأ] فشل الاتصال بعد جميع المحاولات');
-            botStatus = '<i class="fas fa-times-circle"></i> فشل الاتصال! يرجى إعادة تشغيل البوت.';
-            isInitializing = false;
-        }
-    }
-}
+// Monitor uncaught exceptions
+process.on('uncaughtException', (error) => {
+    const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+    const errorStack = error && error.stack ? error.stack : 'No stack trace';
+    const errorName = error && error.name ? error.name : 'Unknown';
+    
+    console.error('[خطأ حرج] استثناء غير معالج:', {
+        errorName,
+        message: errorMsg,
+        stack: errorStack,
+        timestamp: new Date().toISOString()
+    });
+    
+    addConnectionLog('استثناء حرج', `${errorName}: ${errorMsg}`);
+});
 
 client.on('group_join', async (notification) => {
     try {
@@ -777,7 +881,9 @@ client.on('group_join', async (notification) => {
                         try {
                             await safeDelay();
                             await chat.removeParticipants([participantId]);
-                            const reportText = `🛡️ *حماية (قائمة سوداء)*\nحاول رقم محظور الدخول لمجموعة "${chat.name}" وتم طرده.\nالرقم: @${cleanJoinedId.split('@')[0]}`;
+                            const reportText = `🛡️ *حماية (قائمة سوداء)*
+حاول رقم محظور الدخول لمجموعة "${chat.name}" وتم طرده.
+الرقم: @${cleanJoinedId.split('@')[0]}`;
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanJoinedId] });
                         } catch (err) { }
                     }, 2000);
@@ -864,13 +970,15 @@ client.on('message', async msg => {
                             let targetAdminGroup = (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') ? groupConfig.adminGroup.trim() : config.defaultAdminGroup;
 
                             if (alertTarget === 'group' || alertTarget === 'both') await client.sendMessage(groupId, alertMsgText);
-                            if (alertTarget === 'admin' || alertTarget === 'both') await client.sendMessage(targetAdminGroup, `🚨 *تنبيه طوارئ (Panic Mode)* 🚨\nتم رصد هجوم في مجموعة "${chat.name}" وإغلاقها تلقائياً لمدة ${lockMins} دقائق.`);
+                            if (alertTarget === 'admin' || alertTarget === 'both') await client.sendMessage(targetAdminGroup, `🚨 *تنبيه طوارئ (Panic Mode)* 🚨
+تم رصد هجوم في مجموعة "${chat.name}" وإغلاقها تلقائياً لمدة ${lockMins} دقائق.`);
 
                             setTimeout(async () => {
                                 try {
                                     await chat.setMessagesAdminsOnly(false);
                                     if (alertTarget === 'group' || alertTarget === 'both') await client.sendMessage(groupId, '🔓 *انتهت فترة الإغلاق التلقائي. يمكنكم إرسال الرسائل الآن.*');
-                                    if (alertTarget === 'admin' || alertTarget === 'both') await client.sendMessage(targetAdminGroup, `🔓 *تنبيه طوارئ*\nتم إعادة فتح مجموعة "${chat.name}" بعد انتهاء فترة الإغلاق التلقائي.`);
+                                    if (alertTarget === 'admin' || alertTarget === 'both') await client.sendMessage(targetAdminGroup, `🔓 *تنبيه طوارئ*
+تم إعادة فتح مجموعة "${chat.name}" بعد انتهاء فترة الإغلاق التلقائي.`);
                                 } catch (e) { console.error('[خطأ] فشل فتح المجموعة:', e); }
                                 lockedGroups.delete(groupId);
                             }, lockMins * 60 * 1000);
@@ -947,11 +1055,17 @@ client.on('message', async msg => {
                     try {
                         await chat.removeParticipants([rawAuthorId]);
                         if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanAuthorId);
-                        const reportText = `🚨 *حظر تلقائي (نوع ممنوع)*\nأرسل العضو ملف (${internalMsgType}) في "${chat.name}" وتم طرده.\n👤 *المرسل:* @${cleanAuthorId.split('@')[0]}`;
+                        const reportText = `🚨 *حظر تلقائي (نوع ممنوع)*
+أرسل العضو ملف (${internalMsgType}) في "${chat.name}" وتم طرده.
+👤 *المرسل:* @${cleanAuthorId.split('@')[0]}`;
                         await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanAuthorId] });
                     } catch (e) { }
                 } else if (blockedAction === 'poll') {
-                    const pollTitle = `🚨 إشعار بمخالفة في "${chat.name}"\nالمرسل: @${cleanAuthorId.split('@')[0]}\nالسبب: إرسال نوع ممنوع (${internalMsgType})\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
+                    const pollTitle = `🚨 إشعار بمخالفة في "${chat.name}"
+المرسل: @${cleanAuthorId.split('@')[0]}
+السبب: إرسال نوع ممنوع (${internalMsgType})
+
+هل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
                     const poll = new Poll(pollTitle, isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا'] : ['نعم، طرد', 'لا']);
                     const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [cleanAuthorId] });
                     pendingBans.set(pollMsg.id._serialized, { senderId: cleanAuthorId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
@@ -1033,12 +1147,20 @@ client.on('message', async msg => {
                             if (isBlacklistEnabled) {
                                 db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
                             }
-                            const reportText = `🚨 *حظر تلقائي (إزعاج)*\nتم طرد العضو من "${chat.name}"${isBlacklistEnabled ? ' وإدراجه في القائمة السوداء' : ''}.\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${spamFlagReason}`;
+                            const reportText = `🚨 *حظر تلقائي (إزعاج)*
+تم طرد العضو من "${chat.name}"${isBlacklistEnabled ? ' وإدراجه في القائمة السوداء' : ''}.
+
+👤 *المرسل:* @${senderId.split('@')[0]}
+📋 *السبب:* ${spamFlagReason}`;
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
                         } catch (e) { }
                     } else {
                         const pollOptions = isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا، اكتف بالحذف'] : ['نعم، طرد العضو', 'لا'];
-                        const pollTitle = `🚨 إشعار إزعاج في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${spamFlagReason}\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
+                        const pollTitle = `🚨 إشعار إزعاج في "${chat.name}"
+المرسل: @${senderId.split('@')[0]}
+السبب: ${spamFlagReason}
+
+هل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
                         const poll = new Poll(pollTitle, pollOptions);
                         const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
                         pendingBans.set(pollMsg.id._serialized, { senderId: senderId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
@@ -1173,7 +1295,10 @@ client.on('message', async msg => {
             if (canSendToAI) {
                 try {
                     const msgText = msg.body || '[صورة بدون نص مرفق]';
-                    const aiPromptText = `أنت مشرف مجموعة صارم. تعليماتك هي: ${config.aiPrompt}\n\nبناء على التعليمات، هل هذا المحتوى يعتبر مخالف؟ أجب بكلمة "نعم" أو "لا" فقط.\nالمحتوى: "${msgText}"`;
+                    const aiPromptText = `أنت مشرف مجموعة صارم. تعليماتك هي: ${config.aiPrompt}
+
+بناء على التعليمات، هل هذا المحتوى يعتبر مخالف؟ أجب بكلمة "نعم" أو "لا" فقط.
+المحتوى: "${msgText}"`;
 
                     const payload = { model: config.ollamaModel, prompt: aiPromptText, stream: false };
                     if (base64Image) payload.images = [base64Image];
@@ -1207,12 +1332,24 @@ client.on('message', async msg => {
                         await chat.removeParticipants([rawAuthorId]);
                         if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
 
-                        const reportText = `🚨 *تقرير إجراء وحظر تلقائي*\nتم مسح محتوى مخالف وطرد العضو من "${chat.name}".\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${violationReason}\n📝 *النص الممسوح:*\n"${messageContent}"`;
+                        const reportText = `🚨 *تقرير إجراء وحظر تلقائي*
+تم مسح محتوى مخالف وطرد العضو من "${chat.name}".
+
+👤 *المرسل:* @${senderId.split('@')[0]}
+📋 *السبب:* ${violationReason}
+📝 *النص الممسوح:*
+"${messageContent}"`;
                         await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
                     } catch (e) { }
                 } else {
                     const pollOptions = isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا، اكتف بالحذف'] : ['نعم، طرد', 'لا'];
-                    const pollTitle = `🚨 إشعار بمحتوى مخالف في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${violationReason}\nالنص:\n"${messageContent}"\n\nهل ترغب في طرده؟`;
+                    const pollTitle = `🚨 إشعار بمحتوى مخالف في "${chat.name}"
+المرسل: @${senderId.split('@')[0]}
+السبب: ${violationReason}
+النص:
+"${messageContent}"
+
+هل ترغب في طرده؟`;
                     const poll = new Poll(pollTitle, pollOptions);
 
                     const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
@@ -1258,41 +1395,91 @@ client.on('vote_update', async vote => {
     }
 });
 
-// Start the client with retry logic
-(async () => {
-    console.log('[معلومة] جاري تنظيف العمليات المتبقية...');
+// Initialize client with retry logic and detailed logging
+async function initializeClientWithRetry(retryCount = 0, maxRetries = 5) {
+    const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 30000); // Exponential backoff, max 30s
     
-    // Aggressive cleanup of any existing Chromium processes
-    await cleanupChromiumProcesses();
-    await cleanupOldTempDirs();
+    if (retryCount > 0) {
+        console.log(`[معلومة] المحاولة ${retryCount} لتهيئة الاتصال...`);
+        addConnectionLog(`اعادة محاولة #${retryCount}`, `انتظر ${retryDelay}ms قبل اعادة المحاولة`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+    }
     
-    // Clean only Chromium lock files, NOT the entire auth session
-    // LocalAuth needs the session data to persist across restarts
-    console.log('[معلومة] جاري حذف ملفات القفل...');
-    await new Promise((resolve) => {
-        exec('find /app/.wwebjs_auth -name "*lock*" -delete 2>/dev/null || true; find /app/.wwebjs_auth -name ".parent-lock" -delete 2>/dev/null || true', () => {
-            setTimeout(resolve, 500);
-        });
-    });
-    
-    // Wait to ensure all cleanup is complete
-    await new Promise(resolve => setTimeout(resolve, 1500));
-    
-    console.log('[معلومة] تم التنظيف، جاري بدء البوت...');
-    
-    // Add error handler for uncaught promise rejections during initialization
-    process.once('unhandledRejection', (reason, promise) => {
-        if (reason.message && (reason.message.includes('TargetCloseError') || reason.message.includes('Target closed') || reason.message.includes('Navigating frame was detached') || reason.message.includes('already running'))) {
-            console.error('[خطأ] حدث خطأ أثناء التهيئة:', reason.message);
-            isInitializing = false;
-            if (initializationTimeout) clearTimeout(initializationTimeout);
-            setTimeout(() => initializeClientWithRetry(0, 5), 3000);
-        } else {
-            console.error('[خطأ] استثناء غير معالج:', reason);
+    try {
+        if (retryCount === 0) {
+            console.log('[معلومة] جاري بدء البوت...');
+            addConnectionLog('بدء البوت', 'محاولة اولى للتهيئة');
+            initializationStartTime = Date.now();
         }
-    });
-    
-    initializeClientWithRetry();
+        
+        isInitializing = true;
+        console.log(`[معلومة] مرحلة 1: اوضاي التهيئة...`);
+        addConnectionLog('التهيئة الجارية', 'مرحلة 1/3: التهيئة');
+        
+        // Set initialization timeout to detect hangs
+        initializationTimeout = setTimeout(() => {
+            console.error('[خطأ] استنزاف وقت التهيئة (timeout)!');
+            addConnectionLog('انتهاء الوقت', 'انقضى وقت التهيئة المسموح به (60 ثانية)');
+            isInitializing = false;
+            botStatus = '<i class="fas fa-exclamation-triangle"></i> خطأ: انقضى وقت التهيئة';
+        }, 60000); // 60 second timeout
+        
+        await client.initialize();
+        
+        // Clear timeout if initialization completes successfully
+        if (initializationTimeout) {
+            clearTimeout(initializationTimeout);
+            initializationTimeout = null;
+        }
+        
+        console.log('[معلومة] تمت تهيئة البوت بنجاح في المحاولة ' + (retryCount + 1));
+        addConnectionLog('تهيئة ناجحة', `تمت التهيئة في المحاولة ${retryCount + 1}`);
+        
+    } catch (error) {
+        isInitializing = false;
+        
+        if (initializationTimeout) {
+            clearTimeout(initializationTimeout);
+            initializationTimeout = null;
+        }
+        
+        const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+        const errorStack = error && error.stack ? error.stack : 'No stack trace available';
+        const errorName = error && error.name ? error.name : 'Unknown';
+        
+        console.error(`[خطأ] فشلت تهيئة البوت مرة ${retryCount + 1}:`, {
+            errorName,
+            message: errorMsg,
+            stack: errorStack,
+            retryAttempt: retryCount + 1,
+            maxRetries,
+            timestamp: new Date().toISOString(),
+            elapsedMs: initializationStartTime ? Date.now() - initializationStartTime : 'N/A'
+        });
+        
+        addConnectionLog(`خطأ #${retryCount + 1}`, `${errorName}: ${errorMsg}`);
+        
+        if (retryCount < maxRetries) {
+            console.log(`[معلومة] سيتم إعادة المحاولة (رقم ${retryCount + 2} من ${maxRetries + 1})`);
+            botStatus = `<i class="fas fa-spin fa-spinner"></i> خطأ - اعادة محاولة (${retryCount + 1}/${maxRetries})`;
+            
+            // Retry with exponential backoff
+            return initializeClientWithRetry(retryCount + 1, maxRetries);
+        } else {
+            console.error(`[خطأ حرج] فشلت جميع محاولات التهيئة (${maxRetries + 1} محاولات)!`);
+            botStatus = `<i class="fas fa-exclamation-triangle"></i> فشل بدء البوت بعد ${maxRetries + 1} محاولات`;
+            addConnectionLog('فشل نهائي', `فشلت جميع ${maxRetries + 1} محاولات برسالة: ${errorMsg}`);
+        }
+    }
+}
+
+// Start the client
+(async () => {
+    try {
+        await initializeClientWithRetry();
+    } catch (error) {
+        console.error('[خطأ] خطأ غير متوقع عند بدء البوت:', error);
+    }
 })();
 
 // Handle graceful shutdown
