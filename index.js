@@ -557,30 +557,14 @@ async function safeDelay() {
 
 const client = new Client({
     authStrategy: new LocalAuth(),
-    puppeteer: { args: ['--no-sandbox', '--disable-setuid-sandbox'] }
-});
-
-client.on('qr', async (qr) => {
-    botStatus = '<i class="fas fa-spinner fa-spin"></i> بانتظار مسح رمز الاستجابة السريعة (QR Code)...';
-    currentQR = await qrcode.toDataURL(qr);
+    puppeteer: { headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] }
 });
 
 client.on('ready', async () => {
-    botStatus = '<i class="fas fa-check-circle" style="color:var(--accent);"></i> متصل وجاهز للعمل';
-    currentQR = '';
-    console.log('تم ربط حساب واتساب بنجاح!');
     try {
         const chats = await client.getChats();
-        const groups = chats.filter(c => c.isGroup);
-        console.log('[معلومة] جاري مزامنة ' + groups.length + ' مجموعة...');
-        const insertGrp = db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)');
-        const syncTx = db.transaction((chatList) => {
-            for (const c of chatList) {
-                if (c.isGroup) insertGrp.run(c.id._serialized, c.name);
-            }
-        });
         syncTx(chats);
-        console.log('[معلومة] تمت مزامنة ' + groups.length + ' مجموعة بنجاح.');
+        console.log('[معلومة] تمت مزامنة ' + chats.length + ' مجموعة بنجاح.');
     } catch (error) {
         console.error('[خطأ] فشل مزامنة المجموعات: ' + error.message);
     }

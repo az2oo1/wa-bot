@@ -2,12 +2,9 @@ version: '3.8'
 
 services:
   bot:
-    # 'build: .' tells Docker to use the Dockerfile in this folder
-    build: .
-    working_dir: /app
+    image: ghcr.io/az2oo1/wa-bot:latest
     ports:
       - "3000:3000"
     volumes:
-      - .:/app
-      - /app/node_modules
-    command: ["sh", "-c", "npm install && npm rebuild better-sqlite3 && node index.js"]
+      - /DATA/AppData/wa-bot:/app
+    restart: unless-stopped
