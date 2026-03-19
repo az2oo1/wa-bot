@@ -125,8 +125,10 @@ function syncTx(chats) {
         const stmt = db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)');
         for (const chat of chats) {
             try {
-                const groupId = chat.id._serialized;
-                stmt.run(groupId, chat.name);
+                if (chat.isGroup) {
+                    const groupId = chat.id._serialized;
+                    stmt.run(groupId, chat.name);
+                }
             } catch (error) {
                 console.error(`[خطأ] فشل مزامنة المجموعة: ${chat.name}`, error.message);
             }
