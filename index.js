@@ -558,13 +558,17 @@ async function safeDelay() {
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: { 
-        headless: true, 
+        headless: true,
+        timeout: 60000,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
             '--disable-dev-shm-usage',
             '--disable-gpu',
-            '--single-process'
+            '--disable-blink-features=AutomationControlled',
+            '--disable-web-resources',
+            '--disable-extensions',
+            '--start-maximized'
         ]
     }
 });
