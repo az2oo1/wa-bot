@@ -568,7 +568,9 @@ const client = new Client({
             '--disable-blink-features=AutomationControlled',
             '--disable-web-resources',
             '--disable-extensions',
-            '--start-maximized'
+            '--start-maximized',
+            '--user-data-dir=/tmp/chromium-wa-bot',
+            '--disable-sync'
         ]
     }
 });
@@ -1156,5 +1158,26 @@ client.on('vote_update', async vote => {
 
 // Start the client with retry logic
 initializeClientWithRetry();
+
+// Handle graceful shutdown
+process.on('SIGTERM', async () => {
+    console.log('[معلومة] تم استقبال إشارة SIGTERM، جاري إغلاق البوت...');
+    try {
+        await client.destroy();
+    } catch (e) {
+        console.error('[خطأ] خطأ أثناء إغلاق البوت:', e.message);
+    }
+    process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+    console.log('[معلومة] تم استقبال إشارة SIGINT، جاري إغلاق البوت...');
+    try {
+        await client.destroy();
+    } catch (e) {
+        console.error('[خطأ] خطأ أثناء إغلاق البوت:', e.message);
+    }
+    process.exit(0);
+});
 
 client.initialize();

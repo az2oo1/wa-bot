@@ -20,7 +20,12 @@ COPY . .
 # 2. Create the Magic Startup Script
 # This script checks if index.js is missing from your CasaOS folder. 
 # If it's missing, it dumps all the pre-compiled code into it!
+# It also cleans up any orphaned Chromium processes
 RUN echo '#!/bin/sh\n\
+# Clean up any orphaned Chromium processes\n\
+pkill -9 -f chromium || true\n\
+rm -rf /tmp/chromium-wa-bot 2>/dev/null || true\n\
+\n\
 if [ ! -f /app/index.js ]; then\n\
   echo "First run detected! Copying files to your CasaOS server..."\n\
   cp -r /app_staging/* /app/\n\
