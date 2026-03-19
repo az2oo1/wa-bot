@@ -614,6 +614,26 @@ client.on('disconnected', async (reason) => {
     }, 3000);
 });
 
+// Cleanup function to kill orphaned Chromium processes
+async function cleanupChromiumProcesses() {
+    return new Promise((resolve) => {
+        const { exec } = require('child_process');
+        exec('pkill -9 -f chromium || true', () => {
+            setTimeout(resolve, 500); // Wait for processes to fully terminate
+        });
+    });
+}
+
+// Cleanup function to remove old temporary directories
+async function cleanupOldTempDirs() {
+    return new Promise((resolve) => {
+        const { exec } = require('child_process');
+        exec('rm -rf /tmp/chromium-wa-bot-* 2>/dev/null || true', () => {
+            resolve();
+        });
+    });
+}
+
 // Initialize client with retry logic
 async function initializeClientWithRetry(retries = 0, maxRetries = 5) {
     try {
@@ -627,8 +647,12 @@ async function initializeClientWithRetry(retries = 0, maxRetries = 5) {
             console.log(`[معلومة] إعادة المحاولة خلال ${delayMs / 1000} ثانية...`);
             botStatus = `<i class="fas fa-exclamation-triangle fa-spin"></i> محاولة إعادة الاتصال (${retries + 1}/${maxRetries})...`;
             
-            setTimeout(() => {
-                try { client.destroy(); } catch (e) { }
+            setTimeout(async () => {
+                try { 
+                    await client.destroy(); 
+                } catch (e) { }
+                // Aggressive cleanup before retry
+                await cleanupChromiumProcesses();
                 setTimeout(() => initializeClientWithRetry(retries + 1, maxRetries), 1000);
             }, delayMs);
         } else {
