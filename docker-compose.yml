@@ -7,10 +7,4 @@ services:
       - "3000:3000"
     volumes:
       - /DATA/AppData/wa-bot:/app
-      - /app/.wwebjs_cache
-      - /app/.puppeteer_cache
-      - /root/.local/share/chromium
-      - /root/.config/chromium
-    environment:
-      - PUPPETEER_DISABLE_HEADFUL_MODE=true
     restart: unless-stopped
