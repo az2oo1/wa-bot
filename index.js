@@ -555,6 +555,9 @@ async function safeDelay() {
     await new Promise(r => setTimeout(r, ms));
 };
 
+// Generate a unique temp directory for each client instance
+const tempProfileDir = `/tmp/chromium-wa-bot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: { 
@@ -568,9 +571,20 @@ const client = new Client({
             '--disable-blink-features=AutomationControlled',
             '--disable-web-resources',
             '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-breakpad',
+            '--disable-client-side-phishing-detection',
+            '--disable-component-update',
+            '--disable-default-apps',
+            '--disable-device-discovery-notifications',
+            '--disable-hang-monitor',
+            '--disable-popup-blocking',
+            '--disable-prompt-on-repost',
+            '--disable-sync',
+            '--enable-automation',
+            '--no-default-browser-check',
             '--start-maximized',
-            '--user-data-dir=/tmp/chromium-wa-bot',
-            '--disable-sync'
+            `--user-data-dir=${tempProfileDir}`
         ]
     }
 });
