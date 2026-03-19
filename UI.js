@@ -2226,5 +2226,3 @@ module.exports = function renderDashboard(req, db, config) {
     </html>
     `;
 };
-
-//testing the regenerate fresh UI.js and index.js files feture
