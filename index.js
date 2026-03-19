@@ -1195,7 +1195,13 @@ client.on('vote_update', async vote => {
 });
 
 // Start the client with retry logic
-initializeClientWithRetry();
+(async () => {
+    console.log('[معلومة] جاري تنظيف العمليات المتبقية...');
+    await cleanupChromiumProcesses();
+    await cleanupOldTempDirs();
+    console.log('[معلومة] تم التنظيف، جاري بدء البوت...');
+    initializeClientWithRetry();
+})();
 
 // Handle graceful shutdown
 process.on('SIGTERM', async () => {
