@@ -592,8 +592,35 @@ client.on('disconnected', async (reason) => {
     botStatus = '<i class="fas fa-sign-out-alt"></i> تم تسجيل الخروج من الحساب...';
     currentQR = '';
     try { await client.destroy(); } catch (e) { }
-    setTimeout(() => { client.initialize(); }, 3000);
+    setTimeout(() => { 
+        console.log('[معلومة] إعادة تهيئة الاتصال...');
+        initializeClientWithRetry(); 
+    }, 3000);
 });
+
+// Initialize client with retry logic
+async function initializeClientWithRetry(retries = 0, maxRetries = 5) {
+    try {
+        console.log(`[معلومة] محاولة رقم ${retries + 1} للاتصال...`);
+        await client.initialize();
+    } catch (error) {
+        console.error(`[خطأ] فشل الاتصال في المحاولة ${retries + 1}:`, error.message);
+        
+        if (retries < maxRetries) {
+            const delayMs = Math.pow(2, retries) * 3000; // Exponential backoff: 3s, 6s, 12s, 24s, 48s, 96s
+            console.log(`[معلومة] إعادة المحاولة خلال ${delayMs / 1000} ثانية...`);
+            botStatus = `<i class="fas fa-exclamation-triangle fa-spin"></i> محاولة إعادة الاتصال (${retries + 1}/${maxRetries})...`;
+            
+            setTimeout(() => {
+                try { client.destroy(); } catch (e) { }
+                setTimeout(() => initializeClientWithRetry(retries + 1, maxRetries), 1000);
+            }, delayMs);
+        } else {
+            console.error('[خطأ] فشل الاتصال بعد جميع المحاولات');
+            botStatus = '<i class="fas fa-times-circle"></i> فشل الاتصال! يرجى إعادة تشغيل البوت.';
+        }
+    }
+}
 
 client.on('group_join', async (notification) => {
     try {
