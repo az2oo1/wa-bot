@@ -6,6 +6,7 @@ const util = require('util');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const { exec } = require('child_process');
 const renderDashboard = require('./UI.js');
 
 // Ensure media storage directory exists
@@ -617,9 +618,8 @@ client.on('disconnected', async (reason) => {
 // Cleanup function to kill orphaned Chromium processes
 async function cleanupChromiumProcesses() {
     return new Promise((resolve) => {
-        const { exec } = require('child_process');
-        exec('pkill -9 -f chromium || true', () => {
-            setTimeout(resolve, 500); // Wait for processes to fully terminate
+        exec('pkill -9 -f chromium 2>/dev/null; pkill -9 -f chrome 2>/dev/null; sleep 1', () => {
+            setTimeout(resolve, 1000); // Wait for processes to fully terminate
         });
     });
 }
@@ -627,9 +627,8 @@ async function cleanupChromiumProcesses() {
 // Cleanup function to remove old temporary directories
 async function cleanupOldTempDirs() {
     return new Promise((resolve) => {
-        const { exec } = require('child_process');
-        exec('rm -rf /tmp/chromium-wa-bot-* 2>/dev/null || true', () => {
-            resolve();
+        exec('rm -rf /tmp/chromium-* /tmp/.org.chromium.* /tmp/.pki 2>/dev/null || true', () => {
+            setTimeout(resolve, 500);
         });
     });
 }

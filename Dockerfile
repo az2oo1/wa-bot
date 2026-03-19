@@ -22,14 +22,20 @@ COPY . .
 # If it's missing, it dumps all the pre-compiled code into it!
 # It also cleans up any orphaned Chromium processes
 RUN echo '#!/bin/sh\n\
-# Clean up any orphaned Chromium processes\n\
-pkill -9 -f chromium || true\n\
-rm -rf /tmp/chromium-wa-bot 2>/dev/null || true\n\
+echo "Performing aggressive cleanup..."\n\
+pkill -9 -f chromium 2>/dev/null || true\n\
+pkill -9 -f chrome 2>/dev/null || true\n\
+sleep 1\n\
+rm -rf /tmp/chromium-* 2>/dev/null || true\n\
+rm -rf /tmp/.org.chromium.* 2>/dev/null || true\n\
+rm -rf /tmp/.pki 2>/dev/null || true\n\
+sleep 2\n\
 \n\
 if [ ! -f /app/index.js ]; then\n\
   echo "First run detected! Copying files to your CasaOS server..."\n\
   cp -r /app_staging/* /app/\n\
 fi\n\
+\n\
 cd /app\n\
 exec node index.js' > /start.sh && chmod +x /start.sh
 
