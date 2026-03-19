@@ -1240,7 +1240,7 @@ module.exports = function renderDashboard(req, db, config) {
                                     <div class="toggle-label blue">\${currentLang==='en'?'Enable Q&A Feature':'تفعيل ميزة الأسئلة والأجوبة'}<small>\${currentLang==='en'?'Auto-respond to predefined questions with dynamic fields':'الإجابة التلقائية على الأسئلة المحددة مع حقول ديناميكية'}</small></div>
                                 </div>
                             </div>
-                            <div id="group_qa_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enableQAFeature?'1200px':'0px'};opacity:\${group.enableQAFeature?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableQAFeature?'20px':'0px'};">
+                            <div id="group_qa_panel_\${groupIndex}" style="overflow-y:auto;max-height:\${group.enableQAFeature?'600px':'0px'};opacity:\${group.enableQAFeature?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableQAFeature?'20px':'0px'};padding-right:8px;">
                                 <div class="sub-panel blue" style="margin-bottom:16px;">
                                     <h4 style="color:var(--blue);">\${currentLang==='en'?'Dynamic Fields Reference':'مرجع الحقول الديناميكية'}</h4>
                                     <div style="font-size:13px;color:var(--text-muted);line-height:1.8;">
@@ -1653,7 +1653,7 @@ module.exports = function renderDashboard(req, db, config) {
             function toggleGroupPanel(groupIndex, type, enabled) {
                 const panelMap = { spam: 'spam', welcome: 'welcome', words: 'words', qa: 'qa', panic: 'panic', blacklist: 'blacklist', whitelist: 'whitelist' };
                 const fieldMap = { spam: 'enableAntiSpam', welcome: 'enableWelcomeMessage', words: 'enableWordFilter', qa: 'enableQAFeature', panic: 'enablePanicMode', blacklist: 'enableBlacklist', whitelist: 'enableWhitelist' };
-                const maxHeightMap = { spam: '600px', welcome: '200px', words: '600px', qa: '1200px', panic: '800px', blacklist: '600px', whitelist: '600px' };
+                const maxHeightMap = { spam: '600px', welcome: '200px', words: '600px', qa: '600px', panic: '800px', blacklist: '600px', whitelist: '600px' };
 
                 if (groupIndex !== 'global') {
                     groupsArr[groupIndex][fieldMap[type]] = enabled;
@@ -1667,11 +1667,13 @@ module.exports = function renderDashboard(req, db, config) {
                     panel.style.maxHeight = maxHeightMap[type];
                     panel.style.opacity = '1';
                     panel.style.marginTop = '20px';
+                    panel.style.overflowY = 'auto';
                     if (toggle) toggle.style.borderRadius = '10px 10px 0 0';
                 } else {
                     panel.style.maxHeight = '0px';
                     panel.style.opacity = '0';
                     panel.style.marginTop = '0px';
+                    panel.style.overflowY = 'hidden';
                     if (toggle) toggle.style.borderRadius = '10px';
                 }
             }
