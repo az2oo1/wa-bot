@@ -582,7 +582,10 @@ const client = new Client({
             '--disable-popup-blocking',
             '--disable-prompt-on-repost',
             '--disable-sync',
-            '--enable-automation',
+            '--disable-default-apps',
+            '--disable-background-timer-throttling',
+            '--disable-renderer-backgrounding',
+            '--disable-device-orientation-request-prompt',
             '--no-default-browser-check',
             '--start-maximized',
             `--user-data-dir=${tempProfileDir}`
@@ -595,6 +598,7 @@ client.on('ready', async () => {
         const chats = await client.getChats();
         syncTx(chats);
         console.log('[معلومة] تمت مزامنة ' + chats.length + ' مجموعة بنجاح.');
+        botStatus = '<i class="fas fa-check-circle"></i> متصل وجاهز للعمل';
     } catch (error) {
         console.error('[خطأ] فشل مزامنة المجموعات: ' + error.message);
     }
@@ -605,9 +609,39 @@ client.on('authenticated', () => {
     currentQR = '';
 });
 
+// Handle page errors that might cause frame detachment
+client.on('page_created', (page) => {
+    page.on('error', (error) => {
+        console.error('[خطأ] Page error:', error.message);
+    });
+    
+    page.on('close', () => {
+        console.log('[معلومة] تم إغلاق صفحة WhatsApp Web');
+    });
+});
+
+// Handle QR code generation
+client.on('qr', (qr) => {
+    qrcode.toDataURL(qr, (err, url) => {
+        if (err) {
+            console.error('[خطأ] فشل إنشاء QR code:', err.message);
+            botStatus = '<i class="fas fa-exclamation-triangle"></i> خطأ في QR code';
+            return;
+        }
+        currentQR = url;
+        botStatus = '<i class="fas fa-qrcode"></i> بانتظار مسح رمز الاستجابة السريعة (QR Code)...';
+        console.log('[معلومة] QR code متاح للمسح');
+    });
+});
+
 client.on('disconnected', async (reason) => {
     botStatus = '<i class="fas fa-sign-out-alt"></i> تم تسجيل الخروج من الحساب...';
     currentQR = '';
+    isInitializing = false;
+    if (initializationTimeout) {
+        clearTimeout(initializationTimeout);
+        initializationTimeout = null;
+    }
     try { await client.destroy(); } catch (e) { }
     setTimeout(() => { 
         console.log('[معلومة] إعادة تهيئة الاتصال...');
@@ -615,19 +649,23 @@ client.on('disconnected', async (reason) => {
     }, 3000);
 });
 
-// Cleanup function to kill orphaned Chromium processes
+// Flag to prevent concurrent initialization attempts
+let isInitializing = false;
+let initializationTimeout = null;
+
+// Cleanup function to kill orphaned Chromium and related processes
 async function cleanupChromiumProcesses() {
     return new Promise((resolve) => {
-        exec('pkill -9 -f chromium 2>/dev/null; pkill -9 -f chrome 2>/dev/null; sleep 1', () => {
-            setTimeout(resolve, 1000); // Wait for processes to fully terminate
+        exec('pkill -9 -f chromium 2>/dev/null; pkill -9 -f chrome 2>/dev/null; pkill -9 -f puppet 2>/dev/null; sleep 2', () => {
+            setTimeout(resolve, 1500); // Wait for processes to fully terminate
         });
     });
 }
 
-// Cleanup function to remove old temporary directories
+// Cleanup function to remove old temporary directories and lock files
 async function cleanupOldTempDirs() {
     return new Promise((resolve) => {
-        exec('rm -rf /tmp/chromium-* /tmp/.org.chromium.* /tmp/.pki 2>/dev/null || true', () => {
+        exec('rm -rf /tmp/chromium-* /tmp/.org.chromium.* /tmp/.pki /tmp/.X* 2>/dev/null || true', () => {
             setTimeout(resolve, 500);
         });
     });
@@ -635,28 +673,55 @@ async function cleanupOldTempDirs() {
 
 // Initialize client with retry logic
 async function initializeClientWithRetry(retries = 0, maxRetries = 5) {
+    if (isInitializing) {
+        console.log('[معلومة] محاولة تهيئة أخرى جارية، سيتم الانتظار...');
+        return;
+    }
+
+    isInitializing = true;
+
+    if (initializationTimeout) {
+        clearTimeout(initializationTimeout);
+        initializationTimeout = null;
+    }
+
     try {
         console.log(`[معلومة] محاولة رقم ${retries + 1} للاتصال...`);
         await client.initialize();
+        isInitializing = false;
     } catch (error) {
         console.error(`[خطأ] فشل الاتصال في المحاولة ${retries + 1}:`, error.message);
         
         if (retries < maxRetries) {
-            const delayMs = Math.pow(2, retries) * 3000; // Exponential backoff: 3s, 6s, 12s, 24s, 48s, 96s
+            // Longer delay for frame detachment errors
+            let delayMs = Math.pow(2, retries) * 3000;
+            if (error.message.includes('Navigating frame was detached')) {
+                delayMs = Math.max(delayMs, 8000); // At least 8 seconds for frame detachment
+                console.log('[معلومة] تم رصد انفصال الإطار، زيادة وقت الانتظار...');
+            }
+            
             console.log(`[معلومة] إعادة المحاولة خلال ${delayMs / 1000} ثانية...`);
             botStatus = `<i class="fas fa-exclamation-triangle fa-spin"></i> محاولة إعادة الاتصال (${retries + 1}/${maxRetries})...`;
             
-            setTimeout(async () => {
+            isInitializing = false;
+            
+            initializationTimeout = setTimeout(async () => {
                 try { 
                     await client.destroy(); 
                 } catch (e) { }
-                // Aggressive cleanup before retry
+                
+                // Cleanup before retry
                 await cleanupChromiumProcesses();
-                setTimeout(() => initializeClientWithRetry(retries + 1, maxRetries), 1000);
+                await cleanupOldTempDirs();
+                
+                // Wait before retry
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                await initializeClientWithRetry(retries + 1, maxRetries);
             }, delayMs);
         } else {
             console.error('[خطأ] فشل الاتصال بعد جميع المحاولات');
             botStatus = '<i class="fas fa-times-circle"></i> فشل الاتصال! يرجى إعادة تشغيل البوت.';
+            isInitializing = false;
         }
     }
 }
@@ -1196,9 +1261,37 @@ client.on('vote_update', async vote => {
 // Start the client with retry logic
 (async () => {
     console.log('[معلومة] جاري تنظيف العمليات المتبقية...');
+    
+    // Aggressive cleanup of any existing Chromium processes
     await cleanupChromiumProcesses();
     await cleanupOldTempDirs();
+    
+    // Clean only Chromium lock files, NOT the entire auth session
+    // LocalAuth needs the session data to persist across restarts
+    console.log('[معلومة] جاري حذف ملفات القفل...');
+    await new Promise((resolve) => {
+        exec('find /app/.wwebjs_auth -name "*lock*" -delete 2>/dev/null || true; find /app/.wwebjs_auth -name ".parent-lock" -delete 2>/dev/null || true', () => {
+            setTimeout(resolve, 500);
+        });
+    });
+    
+    // Wait to ensure all cleanup is complete
+    await new Promise(resolve => setTimeout(resolve, 1500));
+    
     console.log('[معلومة] تم التنظيف، جاري بدء البوت...');
+    
+    // Add error handler for uncaught promise rejections during initialization
+    process.once('unhandledRejection', (reason, promise) => {
+        if (reason.message && (reason.message.includes('TargetCloseError') || reason.message.includes('Target closed') || reason.message.includes('Navigating frame was detached') || reason.message.includes('already running'))) {
+            console.error('[خطأ] حدث خطأ أثناء التهيئة:', reason.message);
+            isInitializing = false;
+            if (initializationTimeout) clearTimeout(initializationTimeout);
+            setTimeout(() => initializeClientWithRetry(0, 5), 3000);
+        } else {
+            console.error('[خطأ] استثناء غير معالج:', reason);
+        }
+    });
+    
     initializeClientWithRetry();
 })();
 
@@ -1222,5 +1315,3 @@ process.on('SIGINT', async () => {
     }
     process.exit(0);
 });
-
-client.initialize();

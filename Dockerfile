@@ -20,16 +20,22 @@ COPY . .
 # 2. Create the Magic Startup Script
 # This script checks if index.js is missing from your CasaOS folder. 
 # If it's missing, it dumps all the pre-compiled code into it!
-# It also cleans up any orphaned Chromium processes
+# It also cleans up Chromium processes while preserving WhatsApp session data
 RUN echo '#!/bin/sh\n\
-echo "Performing aggressive cleanup..."\n\
+echo "🧹 Performing cleanup..."\n\
 pkill -9 -f chromium 2>/dev/null || true\n\
 pkill -9 -f chrome 2>/dev/null || true\n\
+pkill -9 -f puppet 2>/dev/null || true\n\
 sleep 1\n\
 rm -rf /tmp/chromium-* 2>/dev/null || true\n\
 rm -rf /tmp/.org.chromium.* 2>/dev/null || true\n\
 rm -rf /tmp/.pki 2>/dev/null || true\n\
-sleep 2\n\
+rm -rf /tmp/.X* 2>/dev/null || true\n\
+sleep 1\n\
+echo "🔧 Cleaning stale lock files only (preserving session data)..."\n\
+find /app/.wwebjs_auth -name "*lock*" -delete 2>/dev/null || true\n\
+find /app/.wwebjs_auth -name ".parent-lock" -delete 2>/dev/null || true\n\
+sleep 1\n\
 \n\
 if [ ! -f /app/index.js ]; then\n\
   echo "First run detected! Copying files to your CasaOS server..."\n\
@@ -37,6 +43,7 @@ if [ ! -f /app/index.js ]; then\n\
 fi\n\
 \n\
 cd /app\n\
+echo "✅ Cleanup complete. Starting bot..."\n\
 exec node index.js' > /start.sh && chmod +x /start.sh
 
 # 3. Tell the container to run the script when it starts
