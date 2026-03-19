@@ -605,7 +605,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <p style="font-size:15px; font-weight:700; color:var(--accent); margin:8px 0 0 0;">Abdulaziz Algassem</p>
                         <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"><i class="fas fa-code-branch"></i> INTERSTELLAR</p>
                         <p style="font-size:12px; color:var(--text); margin-bottom:10px; line-height:1.4;">
-                            ${t('متخصص في حلول واتساب', 'WhatsApp & AI solutions')}
+                            ${t('طالب تقنية المعلومات', 'IT student')}
                         </p>
                         <div style="display:flex; flex-direction:column; gap:4px;">
                             <a href="https://github.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
