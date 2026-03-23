@@ -647,39 +647,65 @@ function addConnectionLog(status, details = '') {
 }
 
 app.get('/login', (req, res) => {
+        const lang = req.headers.cookie && req.headers.cookie.includes('bot_lang=en') ? 'en' : 'ar';
+        const dir = lang === 'en' ? 'ltr' : 'rtl';
+        const t = (ar, en) => lang === 'en' ? en : ar;
         const html = `<!doctype html>
-<html lang="en">
+<html lang="${lang}" dir="${dir}">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>WA Bot Login</title>
+    <title>${t('تسجيل الدخول', 'Sign In')}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        body { margin: 0; font-family: Arial, sans-serif; background: #0f1720; color: #f2f5f7; min-height: 100vh; display: grid; place-items: center; }
-        .card { width: min(92vw, 420px); background: #172230; border: 1px solid #2a3b50; border-radius: 12px; padding: 24px; }
-        h1 { margin: 0 0 8px; font-size: 24px; }
-        p { margin: 0 0 18px; color: #a9c0d9; }
-        label { display: block; margin: 12px 0 6px; font-weight: 700; }
-        input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid #355171; background: #0f1720; color: #f2f5f7; }
-        button { margin-top: 14px; width: 100%; padding: 11px 12px; border: 0; border-radius: 8px; background: #2ea043; color: #fff; font-weight: 700; cursor: pointer; }
-        .hint { margin-top: 12px; color: #ffcc66; font-size: 13px; }
-        .error { margin-top: 10px; color: #ff6b6b; min-height: 19px; }
+        :root{--bg:#080c10;--card-bg:#131920;--card-border:#1e2830;--input-bg:#0a0f14;--input-border:#1e2830;--text:#dce8f5;--text-muted:#6b8099;--accent:#00c853;--accent-dim:rgba(0,200,83,.12);--red:#ff5252;--blue:#40c4ff}
+        *{box-sizing:border-box} html,body{margin:0;padding:0}
+        body{font-family:'IBM Plex Sans Arabic',sans-serif;background:radial-gradient(circle at 0 0,#0f1720 0,#080c10 45%,#070a0d 100%);color:var(--text);min-height:100vh;display:grid;place-items:center;padding:18px}
+        .card{width:min(96vw,460px);background:var(--card-bg);border:1px solid var(--card-border);border-radius:16px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.5)}
+        .brand{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+        .brand .icon{width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#00e676,#00b0ff);display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;box-shadow:0 0 24px rgba(0,230,118,.35)}
+        h1{margin:0;font-size:25px}
+        p{margin:4px 0 0;color:var(--text-muted)}
+        label{display:block;margin:14px 0 6px;font-weight:700;color:var(--text-muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+        input{width:100%;padding:12px 14px;border-radius:10px;border:1.5px solid var(--input-border);background:var(--input-bg);color:var(--text);font-family:inherit}
+        input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
+        .btn{margin-top:15px;width:100%;padding:12px 14px;border-radius:10px;border:1.5px solid rgba(0,200,83,.45);background:var(--accent-dim);color:var(--accent);font-weight:700;cursor:pointer;font-size:15px}
+        .btn:hover{filter:brightness(1.08)}
+        .lang-row{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
+        .lang-btn{border:1px solid rgba(64,196,255,.4);background:rgba(64,196,255,.08);color:var(--blue);padding:6px 10px;border-radius:8px;cursor:pointer;font-weight:700}
+        .hint{margin-top:12px;color:#ffd68a;font-size:13px}
+        .error{margin-top:8px;color:#ff9f9f;min-height:19px}
     </style>
 </head>
 <body>
     <div class="card">
-        <h1>WA Bot</h1>
-        <p>Sign in to access dashboard controls.</p>
+        <div class="brand">
+            <div class="icon"><i class="fas fa-robot"></i></div>
+            <div>
+                <h1>WA Bot</h1>
+                <p>${t('تسجيل الدخول للوصول إلى لوحة التحكم', 'Sign in to access dashboard controls')}</p>
+            </div>
+        </div>
         <form id="loginForm">
-            <label for="username">Username</label>
+            <label for="username">${t('اسم المستخدم', 'Username')}</label>
             <input id="username" name="username" autocomplete="username" required>
-            <label for="password">Password</label>
+            <label for="password">${t('كلمة المرور', 'Password')}</label>
             <input id="password" name="password" type="password" autocomplete="current-password" required>
-            <button type="submit">Sign In</button>
+            <button class="btn" type="submit">${t('تسجيل الدخول', 'Sign In')}</button>
             <div class="error" id="error"></div>
-            <div class="hint">Default first login: admin / admin123</div>
+            <div class="hint">${t('بيانات الدخول الافتراضية أول مرة: admin / admin123', 'Default first login: admin / admin123')}</div>
+            <div class="lang-row">
+                <span style="color:var(--text-muted);font-size:12px">${t('اللغة', 'Language')}</span>
+                <button class="lang-btn" type="button" onclick="switchLanguage()">${lang === 'en' ? 'AR' : 'EN'}</button>
+            </div>
         </form>
     </div>
     <script>
+        const dict = {
+            login_failed: '${t('فشل تسجيل الدخول', 'Login failed')}'
+        };
         const form = document.getElementById('loginForm');
         const err = document.getElementById('error');
         form.addEventListener('submit', async (e) => {
@@ -695,12 +721,19 @@ app.get('/login', (req, res) => {
                 body: JSON.stringify(payload)
             });
             if (!res.ok) {
-                const data = await res.json().catch(() => ({ error: 'Login failed' }));
-                err.textContent = data.error || 'Login failed';
+                const data = await res.json().catch(() => ({ error: dict.login_failed }));
+                err.textContent = data.error || dict.login_failed;
                 return;
             }
             window.location.href = '/';
         });
+
+        function switchLanguage() {
+            const current = '${lang}';
+            const next = current === 'en' ? 'ar' : 'en';
+            document.cookie = 'bot_lang=' + next + '; path=/; max-age=31536000';
+            location.reload();
+        }
     </script>
 </body>
 </html>`;
@@ -748,7 +781,8 @@ app.get('/', requireAuthPage, requirePermission('dashboard:read'), (req, res) =>
 });
 
 app.get('/users', requireAuthPage, requirePermission('users:manage'), (req, res) => {
-        const html = renderUserManagement(req.authUser);
+    const lang = req.headers.cookie && req.headers.cookie.includes('bot_lang=en') ? 'en' : 'ar';
+    const html = renderUserManagement(req.authUser, lang);
         res.send(html);
 });
 
