@@ -132,6 +132,22 @@ function resolveDbPath() {
     return path.join(process.cwd(), 'bot_data.sqlite');
 }
 
+function ensureDbPathReady(dbPath) {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+    if (fs.existsSync(dbPath)) {
+        const stat = fs.statSync(dbPath);
+        if (stat.isDirectory()) {
+            const backupPath = `${dbPath}.dir-backup-${Date.now()}`;
+            fs.renameSync(dbPath, backupPath);
+            console.error(`[DB] Expected a file but found a directory at ${dbPath}. Moved directory to ${backupPath}.`);
+        }
+    }
+
+    // Ensure SQLite file exists without truncating existing data.
+    fs.closeSync(fs.openSync(dbPath, 'a'));
+}
+
 function openDatabaseWithFallback() {
     const primaryPath = resolveDbPath();
     const fallbackPath = path.join('/tmp', 'wa-bot', 'bot_data.sqlite');
@@ -144,8 +160,7 @@ function openDatabaseWithFallback() {
 
     for (const dbPath of candidates) {
         try {
-            fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-            fs.closeSync(fs.openSync(dbPath, 'a'));
+            ensureDbPathReady(dbPath);
             const openedDb = new Database(dbPath);
             console.log(`[DB] Using database file: ${dbPath}`);
             return openedDb;
