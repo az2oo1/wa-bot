@@ -810,8 +810,6 @@ module.exports = function renderDashboard(req, db, config) {
                 'wl_desc': '${t("تخطي الفلاتر للأرقام الموثوقة", "Bypass filters for trusted numbers")}',
                 'use_global_bl': '${t("تطبيق القائمة السوداء العامة", "Apply Global Blacklist")}',
                 'ug_bl_desc': '${t("دمج الأرقام المحظورة العامة مع هذه المجموعة", "Include globally banned numbers")}',
-                'enable_bl_ext': '${t("تفعيل حظر رموز الدول", "Enable Blocked Extensions")}',
-                'bl_ext_desc': '${t("تطبيق قسم رموز الدول المحظورة على هذه المجموعة", "Apply blocked extensions list to this group")}',
                 'custom_bl': '${t("أرقام محظورة مخصصة لهذه المجموعة", "Custom banned numbers for this group")}',
                 'use_global_wl': '${t("تطبيق القائمة البيضاء العامة", "Apply Global Whitelist")}',
                 'ug_wl_desc': '${t("دمج الأرقام الموثوقة العامة مع هذه المجموعة", "Include globally trusted numbers")}',
@@ -980,7 +978,6 @@ module.exports = function renderDashboard(req, db, config) {
                 enableAIMedia: groupsConfigObj[key].enableAIMedia || false,
                 autoAction: groupsConfigObj[key].autoAction || false,
                 enableBlacklist: groupsConfigObj[key].enableBlacklist !== false,
-                enableBlockedExtensions: groupsConfigObj[key].enableBlockedExtensions !== false,
                 enableWhitelist: groupsConfigObj[key].enableWhitelist !== false,
                 useGlobalBlacklist: groupsConfigObj[key].useGlobalBlacklist !== false,
                 useGlobalWhitelist: groupsConfigObj[key].useGlobalWhitelist !== false,
@@ -1429,12 +1426,6 @@ module.exports = function renderDashboard(req, db, config) {
                                         <div class="toggle-label">\${dict.use_global_bl}<small>\${dict.ug_bl_desc}</small></div>
                                     </div>
                                 </div>
-                                <div class="toggle-row" style="margin-bottom:14px;background:rgba(255,255,255,0.04);border-color:rgba(64,196,255,0.25);">
-                                    <div class="toggle-left">
-                                        <label class="switch"><input type="checkbox" \${group.enableBlockedExtensions!==false?'checked':''} onchange="updateGroupToggle(\${groupIndex},'enableBlockedExtensions',this.checked)"><span class="slider"></span></label>
-                                        <div class="toggle-label">\${dict.enable_bl_ext}<small>\${dict.bl_ext_desc}</small></div>
-                                    </div>
-                                </div>
                                 <label class="field-label">\${dict.custom_bl}</label>
                                 <div class="input-with-btn" style="margin-bottom:10px;">
                                     <input type="text" id="newGroupBl_\${groupIndex}" placeholder="Ex: 966512345678" onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupBlacklist(\${groupIndex});}">
@@ -1691,7 +1682,7 @@ module.exports = function renderDashboard(req, db, config) {
                 groupsArr.push({ 
                     id: '', adminGroup: '', words: [], useDefaultWords: true, 
                     enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
-                    autoAction: false, enableBlacklist: true, enableBlockedExtensions: true, enableWhitelist: true,
+                    autoAction: false, enableBlacklist: true, enableWhitelist: true,
                     useGlobalBlacklist: true, useGlobalWhitelist: true,
                     customBlacklist: [], customWhitelist: [],
                     enableAntiSpam: false, spamDuplicateLimit: 3, spamAction: 'poll',
