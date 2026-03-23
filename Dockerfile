@@ -79,6 +79,18 @@ find /app/.wwebjs_auth -name "*lock*" -delete 2>/dev/null || true\n\
 find /app/.wwebjs_auth -name ".parent-lock" -delete 2>/dev/null || true\n\
 find /app/.wwebjs_auth -name "Singleton*" -delete 2>/dev/null || true\n\
 sleep 1\n\
+DB_PATH="${WA_DB_PATH:-/app/bot_data.sqlite}"\n\
+DB_DIR="$(dirname "$DB_PATH")"\n\
+mkdir -p "$DB_DIR"\n\
+if [ -d "$DB_PATH" ]; then\n\
+  mv "$DB_PATH" "${DB_PATH}.dir-backup-$(date +%s)"\n\
+fi\n\
+if ! touch "$DB_PATH"; then\n\
+  echo "❌ Cannot create database file at $DB_PATH"\n\
+  echo "📂 Directory listing for $DB_DIR:"\n\
+  ls -la "$DB_DIR" || true\n\
+  exit 1\n\
+fi\n\
 cd /app\n\
 echo "✅ Cleanup and regeneration complete. Starting bot..."\n\
 exec node index.js' > /start.sh && chmod +x /start.sh
