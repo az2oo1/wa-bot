@@ -89,7 +89,6 @@ module.exports = function renderDashboard(req, db, config) {
                         <span style="font-size: 11px; font-weight: 700; color: ${lang === 'en' ? 'var(--accent)' : 'var(--text-muted)'}; transition: color 0.3s;">EN</span>
                     </div>
 
-                    <button class="icon-btn" id="themeToggle" onclick="toggleTheme()" title="Toggle light/dark mode"><i class="fas fa-moon"></i></button>   
                     <div class="status-pill">
                         <div class="status-dot" id="statusDot"></div>
                         <span id="status-text"><i class="fas fa-spinner fa-spin"></i> ${t('جاري تهيئة النظام وبدء التشغيل...', 'Initializing system...')}</span>
@@ -123,10 +122,6 @@ module.exports = function renderDashboard(req, db, config) {
                                 <div><i class="fas fa-robot"></i> <strong style="color:var(--text);">${t('البوت:', 'Bot:')}</strong> <span id="status-text-detail">...</span></div>
                                 <div><i class="fas fa-database"></i> <strong style="color:var(--text);">${t('قاعدة البيانات:', 'Database:')}</strong> <span style="color:var(--accent);">${t('متصلة', 'Connected')} <i class="fas fa-check"></i></span></div>
                                 <div><i class="fas fa-globe"></i> <strong style="color:var(--text);">${t('المنفذ:', 'Port:')}</strong> <span style="color:var(--accent);">3000 <i class="fas fa-check"></i></span></div>
-                            </div>
-                            <div style="margin-top:14px; padding-top:14px; border-top:1px dashed var(--card-border);">
-                                <button id="logoutBtn" type="button" class="btn btn-danger" onclick="logoutBot()" style="display:none;"><i class="fas fa-link-slash"></i> ${t('قطع اتصال واتساب', 'Disconnect WhatsApp')}</button>
-                                <div style="font-size:12px; color:var(--text-muted); margin-top:8px;">${t('هذا الخيار يفصل جلسة واتساب فقط وليس حساب لوحة التحكم', 'This disconnects only the WhatsApp session, not your dashboard account')}</div>
                             </div>
                         </div>
                         <div class="card">
@@ -1064,14 +1059,6 @@ module.exports = function renderDashboard(req, db, config) {
                         term.scrollTop = term.scrollHeight;
                     }
                 } catch(e) {}
-            }
-
-            async function logoutBot() {
-                if(confirm(dict.logout_confirm.replace(/<[^>]*>?/gm, ''))) {
-                    document.getElementById('status-text').innerHTML = dict.logging_out;
-                    document.getElementById('logoutBtn').style.display = 'none';
-                    await fetch('/api/logout', { method: 'POST' });
-                }
             }
 
             async function signOutSession() {
@@ -2609,13 +2596,10 @@ module.exports = function renderDashboard(req, db, config) {
                     const dot = document.getElementById('statusDot');
                     if(data.status.includes('متصل') || data.status.includes('Connected')) {
                         dot.className = 'status-dot online';
-                        document.getElementById('logoutBtn').style.display = 'block';
                     } else if(data.status.includes('QR') || data.status.includes('انتظار') || data.status.includes('Waiting')) {
                         dot.className = 'status-dot waiting';
-                        document.getElementById('logoutBtn').style.display = 'none';
                     } else {
                         dot.className = 'status-dot';
-                        document.getElementById('logoutBtn').style.display = 'none';
                     }
 
                     const qrImg = document.getElementById('qr-image');
@@ -2793,22 +2777,6 @@ module.exports = function renderDashboard(req, db, config) {
                 await saveConfig();
             }
             
-            function toggleTheme() {
-                const isLight = document.documentElement.classList.toggle('light');
-                document.getElementById('themeToggle').innerHTML = isLight ? '<i class="fas fa-sun"></i>' : '<i class="fas fa-moon"></i>';
-                try { localStorage.setItem('theme', isLight ? 'light' : 'dark'); } catch(e) {}
-            }
-
-            (function() {
-                try {
-                    if (localStorage.getItem('theme') === 'light') {
-                        document.documentElement.classList.add('light');
-                        document.getElementById('themeToggle').innerHTML = '<i class="fas fa-sun"></i>';
-                    } else {
-                        document.getElementById('themeToggle').innerHTML = '<i class="fas fa-moon"></i>';
-                    }
-                } catch(e) {}
-            })();
         </script>
     </body>
     </html>
