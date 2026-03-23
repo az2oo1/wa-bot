@@ -1526,7 +1526,8 @@ client.on('message', async msg => {
                 let senderId = cleanAuthorId;
                 if (contact && contact.number) senderId = `${contact.number}@c.us`;
 
-                const messageContent = normalizedMessageText || msg.body || '[مرفق وسائط]';
+                const cleanBodyFallback = stripRawVCardBlocks(msg.body || '');
+                const messageContent = normalizedMessageText || cleanBodyFallback || '[مرفق وسائط]';
                 await safeDelay();
                 await msg.delete(true);
 
