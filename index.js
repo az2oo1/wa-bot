@@ -1091,8 +1091,17 @@ client.on('message', async msg => {
             else if (msg.type === 'document') internalMsgType = 'document';
             else if (msg.type === 'sticker') internalMsgType = 'sticker';
 
+            const normalizedMessageText = (() => {
+                const chunks = [];
+                if (typeof msg.body === 'string' && msg.body.trim().length > 0) chunks.push(msg.body);
+                if ((msg.type === 'vcard' || msg.type === 'multi_vcard') && Array.isArray(msg.vCards) && msg.vCards.length > 0) {
+                    chunks.push(msg.vCards.join('\n'));
+                }
+                return chunks.join('\n').trim();
+            })();
+
             const compactId = compactMsgId(msgId);
-            const msgPreview = toLogPreview(msg.body, 100) || `[${internalMsgType}]`;
+            const msgPreview = toLogPreview(normalizedMessageText, 100) || `[${internalMsgType}]`;
             console.log(`[رسالة] استلام | id=${compactId} | نوع=${internalMsgType} | نص="${msgPreview}"`);
 
             let targetAdminGroup = config.defaultAdminGroup;
@@ -1271,8 +1280,12 @@ client.on('message', async msg => {
             let violationReason = '';
             const isMediaContent = internalMsgType !== 'text';
 
-            if (isWordFilterEnabled && forbiddenWords.length > 0 && msg.body) {
-                const matchedWord = forbiddenWords.find(word => msg.body.includes(word));
+            if (isWordFilterEnabled && forbiddenWords.length > 0 && normalizedMessageText) {
+                const normalizedLower = normalizedMessageText.toLowerCase();
+                const matchedWord = forbiddenWords.find(word => {
+                    if (typeof word !== 'string' || word.trim().length === 0) return false;
+                    return normalizedLower.includes(word.toLowerCase());
+                });
                 if (matchedWord) {
                     isViolating = true;
                     violationReason = `تطابق تام مع الكلمة المحظورة: [${matchedWord}]`;
@@ -1392,7 +1405,7 @@ client.on('message', async msg => {
 
             if (canSendToAI) {
                 try {
-                    const msgText = typeof msg.body === 'string' ? msg.body : '';
+                    const msgText = normalizedMessageText;
                     console.log(`[AI] إرسال | id=${compactId} | نص="${toLogPreview(msgText, 100)}"`);
                     const payload = { model: config.ollamaModel, prompt: msgText, stream: false };
                     if (base64Image) payload.images = [base64Image];
@@ -1416,7 +1429,7 @@ client.on('message', async msg => {
                 }
             } else {
                 let aiSkipReason = 'غير مستوفية لشروط الفحص';
-                const hasText = typeof msg.body === 'string' && msg.body.trim().length > 0;
+                const hasText = normalizedMessageText.length > 0;
                 if (isViolating) aiSkipReason = 'تم اعتبارها مخالفة قبل AI';
                 else if (!isAIFilterEnabled) aiSkipReason = 'فلتر AI معطل';
                 else if (!hasText && !isAIMediaEnabled) aiSkipReason = 'وسائط بدون نص وفلتر الوسائط معطل';
