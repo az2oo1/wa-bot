@@ -57,6 +57,9 @@ module.exports = function renderDashboard(req, db, config) {
             <button class="nav-item" onclick="showPage('page-import-export', this)">
                 <span class="nav-icon"><i class="fas fa-exchange-alt"></i></span> ${t('استيراد/تصدير', 'Import/Export')}
             </button>
+            <button class="nav-item" onclick="window.location.href='/users'">
+                <span class="nav-icon"><i class="fas fa-user-shield"></i></span> ${t('إدارة المستخدمين', 'User Management')}
+            </button>
             <button class="nav-item" onclick="showPage('page-about', this)">
                 <span class="nav-icon"><i class="fas fa-info-circle"></i></span> ${t('حول', 'About')}
             </button>

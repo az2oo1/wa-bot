@@ -3,11 +3,13 @@ const { Client, LocalAuth, Poll, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
 const Database = require('better-sqlite3');
 const util = require('util');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
 const { exec } = require('child_process');
 const renderDashboard = require('./UI.js');
+const renderUserManagement = require('./userManagementUI.js');
 
 // Ensure media storage directory exists
 if (!fs.existsSync('./media')) fs.mkdirSync('./media');
@@ -195,6 +197,49 @@ db.exec(`
     );
 `);
 
+db.exec(`
+    CREATE TABLE IF NOT EXISTS app_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        is_superadmin INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS permission_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        permissions TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS user_permission_groups (
+        user_id INTEGER NOT NULL,
+        permission_group_id INTEGER NOT NULL,
+        PRIMARY KEY (user_id, permission_group_id),
+        FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE,
+        FOREIGN KEY (permission_group_id) REFERENCES permission_groups(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS user_group_access (
+        user_id INTEGER NOT NULL,
+        wa_group_id TEXT NOT NULL,
+        PRIMARY KEY (user_id, wa_group_id),
+        FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS user_settings (
+        user_id INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT,
+        PRIMARY KEY (user_id, key),
+        FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
+    );
+`);
+
 const colsToAdd = [
     'blocked_types TEXT', 'blocked_action TEXT', 'spam_types TEXT', 'spam_limits TEXT',
     'enable_panic_mode INTEGER', 'panic_message_limit INTEGER', 'panic_time_window INTEGER',
@@ -335,6 +380,238 @@ function saveConfigToDB(conf) {
     saveTx();
 }
 
+const SESSION_COOKIE_NAME = 'wa_bot_session';
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const sessionStore = new Map();
+
+const DEFAULT_PERMISSION_GROUPS = [
+    {
+        name: 'Viewer',
+        description: 'Read-only dashboard access',
+        permissions: ['dashboard:read', 'groups:view', 'logs:view']
+    },
+    {
+        name: 'Group Manager',
+        description: 'Manage scoped groups and media',
+        permissions: ['dashboard:read', 'groups:view', 'groups:manage-scoped', 'config:write-scoped', 'media:manage', 'logs:view']
+    },
+    {
+        name: 'Security Manager',
+        description: 'Manage security lists and anti-abuse actions',
+        permissions: ['dashboard:read', 'groups:view', 'security:manage', 'logs:view']
+    },
+    {
+        name: 'Operator',
+        description: 'Daily operations with import/export and bot actions',
+        permissions: ['dashboard:read', 'groups:view', 'config:write', 'security:manage', 'media:manage', 'import-export:manage', 'bot:logout', 'logs:view']
+    }
+];
+
+function nowIso() {
+    return new Date().toISOString();
+}
+
+function sanitizeUsername(value) {
+    if (typeof value !== 'string') return '';
+    return value.trim().toLowerCase();
+}
+
+function parseJsonArray(value) {
+    try {
+        const parsed = JSON.parse(value || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function hashPassword(password, saltHex) {
+    const salt = saltHex || crypto.randomBytes(16).toString('hex');
+    const digest = crypto.scryptSync(password, salt, 64).toString('hex');
+    return `${salt}:${digest}`;
+}
+
+function verifyPassword(password, storedHash) {
+    if (!storedHash || typeof storedHash !== 'string' || !storedHash.includes(':')) return false;
+    const [salt, savedDigestHex] = storedHash.split(':');
+    const actualDigestHex = crypto.scryptSync(password, salt, 64).toString('hex');
+    const savedDigest = Buffer.from(savedDigestHex, 'hex');
+    const actualDigest = Buffer.from(actualDigestHex, 'hex');
+    if (savedDigest.length !== actualDigest.length) return false;
+    return crypto.timingSafeEqual(savedDigest, actualDigest);
+}
+
+function parseCookies(req) {
+    const header = req.headers.cookie;
+    if (!header) return {};
+    return header.split(';').reduce((acc, segment) => {
+        const idx = segment.indexOf('=');
+        if (idx === -1) return acc;
+        const key = decodeURIComponent(segment.slice(0, idx).trim());
+        const val = decodeURIComponent(segment.slice(idx + 1).trim());
+        acc[key] = val;
+        return acc;
+    }, {});
+}
+
+function setSessionCookie(res, token) {
+    const secureFlag = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    res.setHeader('Set-Cookie', `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${secureFlag}`);
+}
+
+function clearSessionCookie(res) {
+    res.setHeader('Set-Cookie', `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+
+function cleanupExpiredSessions() {
+    const now = Date.now();
+    for (const [token, session] of sessionStore.entries()) {
+        if (!session || session.expiresAt <= now) {
+            sessionStore.delete(token);
+        }
+    }
+}
+
+setInterval(cleanupExpiredSessions, 15 * 60 * 1000).unref();
+
+function ensureDefaultPermissionGroups() {
+    const upsert = db.prepare('INSERT OR IGNORE INTO permission_groups (name, description, permissions) VALUES (?, ?, ?)');
+    for (const group of DEFAULT_PERMISSION_GROUPS) {
+        upsert.run(group.name, group.description, JSON.stringify(group.permissions));
+    }
+}
+
+function ensureBootstrapAdmin() {
+    const count = db.prepare('SELECT COUNT(*) AS count FROM app_users').get().count;
+    if (count > 0) return;
+
+    const username = 'admin';
+    const password = 'admin123';
+    const timestamp = nowIso();
+    const insertUser = db.prepare(`
+        INSERT INTO app_users (username, password_hash, display_name, is_active, is_superadmin, created_at, updated_at)
+        VALUES (?, ?, ?, 1, 1, ?, ?)
+    `);
+    insertUser.run(username, hashPassword(password), 'System Admin', timestamp, timestamp);
+    console.log('[Auth] Created bootstrap superadmin user: admin / admin123 (change immediately).');
+}
+
+function getUserByUsername(username) {
+    return db.prepare('SELECT * FROM app_users WHERE username = ?').get(username);
+}
+
+function getUserById(userId) {
+    return db.prepare('SELECT * FROM app_users WHERE id = ?').get(userId);
+}
+
+function getEffectivePermissions(user) {
+    if (!user || user.is_active !== 1) return [];
+    if (user.is_superadmin === 1) return ['*'];
+
+    const rows = db.prepare(`
+        SELECT pg.permissions
+        FROM user_permission_groups upg
+        JOIN permission_groups pg ON pg.id = upg.permission_group_id
+        WHERE upg.user_id = ?
+    `).all(user.id);
+
+    const merged = new Set();
+    rows.forEach(r => parseJsonArray(r.permissions).forEach(p => merged.add(String(p))));
+    return Array.from(merged);
+}
+
+function hasPermission(user, permission) {
+    const permissions = getEffectivePermissions(user);
+    return permissions.includes('*') || permissions.includes(permission);
+}
+
+function getAllowedGroupIds(user) {
+    if (!user || user.is_superadmin === 1) return null;
+    const rows = db.prepare('SELECT wa_group_id FROM user_group_access WHERE user_id = ?').all(user.id);
+    return new Set(rows.map(r => r.wa_group_id));
+}
+
+function createSession(userId) {
+    const token = crypto.randomBytes(32).toString('hex');
+    sessionStore.set(token, { userId, expiresAt: Date.now() + SESSION_TTL_MS });
+    return token;
+}
+
+function destroySession(req, res) {
+    const cookies = parseCookies(req);
+    const token = cookies[SESSION_COOKIE_NAME];
+    if (token) sessionStore.delete(token);
+    clearSessionCookie(res);
+}
+
+function requireAuthApi(req, res, next) {
+    const cookies = parseCookies(req);
+    const token = cookies[SESSION_COOKIE_NAME];
+    if (!token || !sessionStore.has(token)) return res.status(401).json({ error: 'Unauthorized' });
+
+    const session = sessionStore.get(token);
+    if (!session || session.expiresAt <= Date.now()) {
+        sessionStore.delete(token);
+        clearSessionCookie(res);
+        return res.status(401).json({ error: 'Session expired' });
+    }
+
+    const user = getUserById(session.userId);
+    if (!user || user.is_active !== 1) {
+        sessionStore.delete(token);
+        clearSessionCookie(res);
+        return res.status(401).json({ error: 'User inactive or not found' });
+    }
+
+    session.expiresAt = Date.now() + SESSION_TTL_MS;
+    req.authUser = user;
+    req.authPermissions = getEffectivePermissions(user);
+    next();
+}
+
+function requireAuthPage(req, res, next) {
+    const cookies = parseCookies(req);
+    const token = cookies[SESSION_COOKIE_NAME];
+    if (!token || !sessionStore.has(token)) return res.redirect('/login');
+
+    const session = sessionStore.get(token);
+    if (!session || session.expiresAt <= Date.now()) {
+        sessionStore.delete(token);
+        clearSessionCookie(res);
+        return res.redirect('/login');
+    }
+
+    const user = getUserById(session.userId);
+    if (!user || user.is_active !== 1) {
+        sessionStore.delete(token);
+        clearSessionCookie(res);
+        return res.redirect('/login');
+    }
+
+    session.expiresAt = Date.now() + SESSION_TTL_MS;
+    req.authUser = user;
+    req.authPermissions = getEffectivePermissions(user);
+    next();
+}
+
+function requirePermission(permission) {
+    return (req, res, next) => {
+        if (!req.authUser) return res.status(401).json({ error: 'Unauthorized' });
+        if (hasPermission(req.authUser, permission)) return next();
+        return res.status(403).json({ error: 'Forbidden' });
+    };
+}
+
+function normalizeUserAccessPayload(payload) {
+    const permissionGroupIds = Array.isArray(payload.permissionGroupIds) ? payload.permissionGroupIds.map(n => parseInt(n, 10)).filter(Number.isFinite) : [];
+    const allowedGroupIds = Array.isArray(payload.allowedGroupIds) ? payload.allowedGroupIds.map(g => String(g)) : [];
+    const settings = payload.settings && typeof payload.settings === 'object' ? payload.settings : {};
+    return { permissionGroupIds, allowedGroupIds, settings };
+}
+
+ensureDefaultPermissionGroups();
+ensureBootstrapAdmin();
+
 if (db.prepare('SELECT count(*) as count FROM global_settings').get().count === 0) saveConfigToDB(loadConfigFromDB());
 let config = loadConfigFromDB();
 
@@ -363,19 +640,122 @@ function addConnectionLog(status, details = '') {
     console.log(`[اتصال] ${logEntry}`);
 }
 
-app.get('/', (req, res) => {
+app.get('/login', (req, res) => {
+        const html = `<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>WA Bot Login</title>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; background: #0f1720; color: #f2f5f7; min-height: 100vh; display: grid; place-items: center; }
+        .card { width: min(92vw, 420px); background: #172230; border: 1px solid #2a3b50; border-radius: 12px; padding: 24px; }
+        h1 { margin: 0 0 8px; font-size: 24px; }
+        p { margin: 0 0 18px; color: #a9c0d9; }
+        label { display: block; margin: 12px 0 6px; font-weight: 700; }
+        input { width: 100%; box-sizing: border-box; padding: 10px 12px; border-radius: 8px; border: 1px solid #355171; background: #0f1720; color: #f2f5f7; }
+        button { margin-top: 14px; width: 100%; padding: 11px 12px; border: 0; border-radius: 8px; background: #2ea043; color: #fff; font-weight: 700; cursor: pointer; }
+        .hint { margin-top: 12px; color: #ffcc66; font-size: 13px; }
+        .error { margin-top: 10px; color: #ff6b6b; min-height: 19px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>WA Bot</h1>
+        <p>Sign in to access dashboard controls.</p>
+        <form id="loginForm">
+            <label for="username">Username</label>
+            <input id="username" name="username" autocomplete="username" required>
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+            <button type="submit">Sign In</button>
+            <div class="error" id="error"></div>
+            <div class="hint">Default first login: admin / admin123</div>
+        </form>
+    </div>
+    <script>
+        const form = document.getElementById('loginForm');
+        const err = document.getElementById('error');
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            err.textContent = '';
+            const payload = {
+                username: document.getElementById('username').value,
+                password: document.getElementById('password').value
+            };
+            const res = await fetch('/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({ error: 'Login failed' }));
+                err.textContent = data.error || 'Login failed';
+                return;
+            }
+            window.location.href = '/';
+        });
+    </script>
+</body>
+</html>`;
+        res.send(html);
+});
+
+app.post('/auth/login', (req, res) => {
+        const username = sanitizeUsername(req.body.username);
+        const password = String(req.body.password || '');
+
+        if (!username || !password) {
+                return res.status(400).json({ error: 'Username and password are required' });
+        }
+
+        const user = getUserByUsername(username);
+        if (!user || user.is_active !== 1 || !verifyPassword(password, user.password_hash)) {
+                return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        const token = createSession(user.id);
+        setSessionCookie(res, token);
+        return res.json({ success: true });
+});
+
+app.post('/auth/logout', requireAuthApi, (req, res) => {
+        destroySession(req, res);
+        return res.sendStatus(200);
+});
+
+app.get('/auth/me', requireAuthApi, (req, res) => {
+        const allowedSet = getAllowedGroupIds(req.authUser);
+        res.json({
+                id: req.authUser.id,
+                username: req.authUser.username,
+                displayName: req.authUser.display_name,
+                isSuperadmin: req.authUser.is_superadmin === 1,
+                permissions: req.authPermissions,
+                allowedGroupIds: allowedSet ? Array.from(allowedSet) : null
+        });
+});
+
+app.get('/', requireAuthPage, requirePermission('dashboard:read'), (req, res) => {
     const html = renderDashboard(req, db, config);
     res.send(html);
 });
 
-app.get('/api/groups', (req, res) => {
+app.get('/users', requireAuthPage, requirePermission('users:manage'), (req, res) => {
+        const html = renderUserManagement(req.authUser);
+        res.send(html);
+});
+
+app.get('/api/groups', requireAuthApi, requirePermission('groups:view'), (req, res) => {
     try {
-        const groups = db.prepare('SELECT * FROM whatsapp_groups').all();
+                let groups = db.prepare('SELECT * FROM whatsapp_groups').all();
+                const allowedSet = getAllowedGroupIds(req.authUser);
+                if (allowedSet) groups = groups.filter(g => allowedSet.has(g.id));
         res.json(groups);
     } catch (e) { res.json([]); }
 });
 
-app.post('/api/blacklist/add', (req, res) => {
+app.post('/api/blacklist/add', requireAuthApi, requirePermission('security:manage'), (req, res) => {
     if (req.body.number) {
         try {
             db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(req.body.number);
@@ -385,7 +765,7 @@ app.post('/api/blacklist/add', (req, res) => {
     res.sendStatus(200);
 });
 
-app.post('/api/whitelist/add', (req, res) => {
+app.post('/api/whitelist/add', requireAuthApi, requirePermission('security:manage'), (req, res) => {
     if (req.body.number) {
         try {
             db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)').run(req.body.number);
@@ -395,7 +775,7 @@ app.post('/api/whitelist/add', (req, res) => {
     res.sendStatus(200);
 });
 
-app.post('/api/blacklist/remove', (req, res) => {
+app.post('/api/blacklist/remove', requireAuthApi, requirePermission('security:manage'), (req, res) => {
     if (req.body.number) {
         try {
             db.prepare('DELETE FROM blacklist WHERE number = ?').run(req.body.number);
@@ -405,7 +785,7 @@ app.post('/api/blacklist/remove', (req, res) => {
     res.sendStatus(200);
 });
 
-app.post('/api/extensions/add', (req, res) => {
+app.post('/api/extensions/add', requireAuthApi, requirePermission('security:manage'), (req, res) => {
     if (req.body.ext) {
         try {
             db.prepare('INSERT OR IGNORE INTO blocked_extensions (ext) VALUES (?)').run(String(req.body.ext));
@@ -415,7 +795,7 @@ app.post('/api/extensions/add', (req, res) => {
     res.sendStatus(200);
 });
 
-app.post('/api/extensions/remove', (req, res) => {
+app.post('/api/extensions/remove', requireAuthApi, requirePermission('security:manage'), (req, res) => {
     if (req.body.ext) {
         try {
             db.prepare('DELETE FROM blocked_extensions WHERE ext = ?').run(String(req.body.ext));
@@ -425,7 +805,7 @@ app.post('/api/extensions/remove', (req, res) => {
     res.sendStatus(200);
 });
 
-app.post('/api/whitelist/remove', (req, res) => {
+app.post('/api/whitelist/remove', requireAuthApi, requirePermission('security:manage'), (req, res) => {
     if (req.body.number) {
         try {
             db.prepare('DELETE FROM whitelist WHERE number = ?').run(req.body.number);
@@ -435,7 +815,7 @@ app.post('/api/whitelist/remove', (req, res) => {
     res.sendStatus(200);
 });
 
-app.post('/api/blacklist/purge', async (req, res) => {
+app.post('/api/blacklist/purge', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
     if (!client.info || !client.info.wid) {
         return res.status(400).json({ error: 'البوت غير متصل حالياً، يرجى الانتظار. / Bot disconnected, please wait.' });
     }
@@ -518,7 +898,7 @@ app.post('/api/blacklist/purge', async (req, res) => {
     }
 });
 
-app.get('/api/status', (req, res) => {
+app.get('/api/status', requireAuthApi, requirePermission('dashboard:read'), (req, res) => {
     const l = req.query.lang === 'en' ? 'en' : 'ar';
     let translatedStatus = botStatus;
     if (l === 'en') {
@@ -533,10 +913,10 @@ app.get('/api/status', (req, res) => {
     res.json({ qr: currentQR, status: translatedStatus });
 });
 
-app.get('/api/logs', (req, res) => res.json(logsHistory));
+app.get('/api/logs', requireAuthApi, requirePermission('logs:view'), (req, res) => res.json(logsHistory));
 
 // Get connection/initialization logs for debugging
-app.get('/api/connection-logs', (req, res) => {
+app.get('/api/connection-logs', requireAuthApi, requirePermission('logs:view'), (req, res) => {
     const connectionData = {
         currentStatus: botStatus,
         isConnected: botStatus.includes('متصل'),
@@ -551,7 +931,7 @@ app.get('/api/connection-logs', (req, res) => {
     res.json(connectionData);
 });
 
-app.post('/api/logout', async (req, res) => {
+app.post('/api/logout', requireAuthApi, requirePermission('bot:logout'), async (req, res) => {
     try {
         botStatus = '<i class="fas fa-spinner fa-pulse"></i> جاري إنهاء الجلسة...';
         await client.logout();
@@ -559,9 +939,23 @@ app.post('/api/logout', async (req, res) => {
     } catch (error) { res.sendStatus(500); }
 });
 
-app.post('/save', (req, res) => {
+app.post('/save', requireAuthApi, (req, res) => {
     try {
-        saveConfigToDB(req.body);
+        const canWriteAll = hasPermission(req.authUser, 'config:write');
+        const canWriteScoped = hasPermission(req.authUser, 'config:write-scoped');
+        if (!canWriteAll && !canWriteScoped) return res.status(403).json({ error: 'Forbidden' });
+
+        if (canWriteAll) {
+            saveConfigToDB(req.body);
+        } else {
+            const current = loadConfigFromDB();
+            const incomingGroups = req.body && req.body.groupsConfig ? req.body.groupsConfig : {};
+            const allowedSet = getAllowedGroupIds(req.authUser) || new Set();
+            for (const [groupId, groupConfig] of Object.entries(incomingGroups)) {
+                if (allowedSet.has(groupId)) current.groupsConfig[groupId] = groupConfig;
+            }
+            saveConfigToDB(current);
+        }
         config = loadConfigFromDB();
         console.log('[فحص] تم حفظ الإعدادات بنجاح.');
         res.sendStatus(200);
@@ -578,13 +972,17 @@ app.listen(3000, () => console.log('لوحة التحكم تعمل عبر الم
 app.use('/media', express.static(path.join(__dirname, 'media')));
 
 // Upload a file for a group
-app.post('/api/media/upload/:groupId', upload.single('file'), (req, res) => {
+app.post('/api/media/upload/:groupId', requireAuthApi, requirePermission('media:manage'), upload.single('file'), (req, res) => {
+    const allowedSet = getAllowedGroupIds(req.authUser);
+    if (allowedSet && !allowedSet.has(req.params.groupId)) return res.status(403).json({ error: 'Forbidden group' });
     if (!req.file) return res.status(400).json({ error: 'No file received' });
     res.json({ filename: req.file.filename, size: req.file.size });
 });
 
 // List files for a group
-app.get('/api/media/list/:groupId', (req, res) => {
+app.get('/api/media/list/:groupId', requireAuthApi, requirePermission('media:manage'), (req, res) => {
+    const allowedSet = getAllowedGroupIds(req.authUser);
+    if (allowedSet && !allowedSet.has(req.params.groupId)) return res.status(403).json({ error: 'Forbidden group' });
     const dir = path.join('./media', req.params.groupId);
     if (!fs.existsSync(dir)) return res.json([]);
     try {
@@ -597,7 +995,9 @@ app.get('/api/media/list/:groupId', (req, res) => {
 });
 
 // Delete a file for a group
-app.delete('/api/media/delete/:groupId/:filename', (req, res) => {
+app.delete('/api/media/delete/:groupId/:filename', requireAuthApi, requirePermission('media:manage'), (req, res) => {
+    const allowedSet = getAllowedGroupIds(req.authUser);
+    if (allowedSet && !allowedSet.has(req.params.groupId)) return res.status(403).json({ error: 'Forbidden group' });
     const filePath = path.join('./media', req.params.groupId, req.params.filename);
     try {
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -608,7 +1008,7 @@ app.delete('/api/media/delete/:groupId/:filename', (req, res) => {
 
 // ── Import/Export API ─────────────────────────────────────────────────────────
 // Export dataset with selected options
-app.post('/api/export', (req, res) => {
+app.post('/api/export', requireAuthApi, requirePermission('import-export:manage'), (req, res) => {
     try {
         const selected = req.body.selected || {};
         const dataset = {};
@@ -649,7 +1049,7 @@ app.post('/api/export', (req, res) => {
 });
 
 // Import dataset with selected options
-app.post('/api/import', (req, res) => {
+app.post('/api/import', requireAuthApi, requirePermission('import-export:manage'), (req, res) => {
     try {
         const { dataset, selected } = req.body;
         
@@ -736,6 +1136,204 @@ app.post('/api/import', (req, res) => {
         console.error('[خطأ] فشل الاستيراد:', error);
         res.status(500).json({ error: 'Import failed: ' + error.message });
     }
+});
+
+app.get('/api/access/permission-groups', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const rows = db.prepare('SELECT id, name, description, permissions FROM permission_groups ORDER BY name').all();
+    const data = rows.map(r => ({ ...r, permissions: parseJsonArray(r.permissions) }));
+    res.json(data);
+});
+
+app.post('/api/access/permission-groups/create', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const name = String(req.body.name || '').trim();
+    const description = String(req.body.description || '').trim();
+    const permissions = Array.isArray(req.body.permissions) ? req.body.permissions.map(p => String(p).trim()).filter(Boolean) : [];
+    if (!name || permissions.length === 0) return res.status(400).json({ error: 'Invalid permission group payload' });
+
+    try {
+        db.prepare('INSERT INTO permission_groups (name, description, permissions) VALUES (?, ?, ?)')
+            .run(name, description, JSON.stringify(Array.from(new Set(permissions))));
+        res.sendStatus(200);
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+app.post('/api/access/permission-groups/delete', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const id = parseInt(req.body.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+    const tx = db.transaction(() => {
+        db.prepare('DELETE FROM user_permission_groups WHERE permission_group_id = ?').run(id);
+        db.prepare('DELETE FROM permission_groups WHERE id = ?').run(id);
+    });
+    tx();
+    res.sendStatus(200);
+});
+
+app.get('/api/users', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const users = db.prepare('SELECT id, username, display_name, is_active, is_superadmin, created_at, updated_at FROM app_users ORDER BY id ASC').all();
+    const rows = db.prepare(`
+        SELECT upg.user_id, pg.id AS group_id, pg.name
+        FROM user_permission_groups upg
+        JOIN permission_groups pg ON pg.id = upg.permission_group_id
+    `).all();
+    const groupAccess = db.prepare('SELECT user_id, wa_group_id FROM user_group_access').all();
+
+    const byUserGroups = new Map();
+    rows.forEach(r => {
+        if (!byUserGroups.has(r.user_id)) byUserGroups.set(r.user_id, []);
+        byUserGroups.get(r.user_id).push({ id: r.group_id, name: r.name });
+    });
+
+    const byUserWaAccess = new Map();
+    groupAccess.forEach(r => {
+        if (!byUserWaAccess.has(r.user_id)) byUserWaAccess.set(r.user_id, []);
+        byUserWaAccess.get(r.user_id).push(r.wa_group_id);
+    });
+
+    res.json(users.map(u => ({
+        ...u,
+        permissionGroups: byUserGroups.get(u.id) || [],
+        allowedGroupIds: byUserWaAccess.get(u.id) || []
+    })));
+});
+
+app.post('/api/users/create', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const username = sanitizeUsername(req.body.username);
+    const displayName = String(req.body.displayName || '').trim();
+    const password = String(req.body.password || '');
+    const isSuperadmin = req.body.isSuperadmin ? 1 : 0;
+
+    if (!username || !displayName || password.length < 8) {
+        return res.status(400).json({ error: 'username/displayName required and password must be at least 8 chars' });
+    }
+    if (!/^[a-z0-9._-]+$/.test(username)) {
+        return res.status(400).json({ error: 'username can contain only a-z, 0-9, dot, underscore, hyphen' });
+    }
+
+    try {
+        const timestamp = nowIso();
+        db.prepare(`
+            INSERT INTO app_users (username, password_hash, display_name, is_active, is_superadmin, created_at, updated_at)
+            VALUES (?, ?, ?, 1, ?, ?, ?)
+        `).run(username, hashPassword(password), displayName, isSuperadmin, timestamp, timestamp);
+        res.sendStatus(200);
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+app.post('/api/users/update', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const userId = parseInt(req.body.userId, 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid userId' });
+
+    const user = getUserById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const updates = [];
+    const params = [];
+
+    if (typeof req.body.displayName === 'string') {
+        updates.push('display_name = ?');
+        params.push(req.body.displayName.trim());
+    }
+    if (typeof req.body.isActive !== 'undefined') {
+        updates.push('is_active = ?');
+        params.push(req.body.isActive ? 1 : 0);
+    }
+    if (typeof req.body.isSuperadmin !== 'undefined') {
+        updates.push('is_superadmin = ?');
+        params.push(req.body.isSuperadmin ? 1 : 0);
+    }
+    if (typeof req.body.password === 'string' && req.body.password.length > 0) {
+        if (req.body.password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 chars' });
+        updates.push('password_hash = ?');
+        params.push(hashPassword(req.body.password));
+    }
+
+    if (updates.length === 0) return res.status(400).json({ error: 'No valid updates' });
+
+    updates.push('updated_at = ?');
+    params.push(nowIso());
+    params.push(userId);
+
+    db.prepare(`UPDATE app_users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    res.sendStatus(200);
+});
+
+app.post('/api/users/delete', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const userId = parseInt(req.body.userId, 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid userId' });
+    if (req.authUser.id === userId) return res.status(400).json({ error: 'You cannot delete your own account' });
+
+    const tx = db.transaction(() => {
+        db.prepare('DELETE FROM user_permission_groups WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM user_group_access WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM app_users WHERE id = ?').run(userId);
+    });
+
+    tx();
+    res.sendStatus(200);
+});
+
+app.get('/api/users/:userId/access', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const userId = parseInt(req.params.userId, 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid userId' });
+    const user = getUserById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const permissionGroups = db.prepare(`
+        SELECT pg.id, pg.name
+        FROM user_permission_groups upg
+        JOIN permission_groups pg ON pg.id = upg.permission_group_id
+        WHERE upg.user_id = ?
+    `).all(userId);
+
+    const allowedGroupIds = db.prepare('SELECT wa_group_id FROM user_group_access WHERE user_id = ?').all(userId).map(r => r.wa_group_id);
+    const settingsRows = db.prepare('SELECT key, value FROM user_settings WHERE user_id = ?').all(userId);
+    const settings = {};
+    settingsRows.forEach(r => {
+        settings[r.key] = r.value;
+    });
+
+    res.json({
+        userId,
+        permissionGroupIds: permissionGroups.map(g => g.id),
+        allowedGroupIds,
+        settings
+    });
+});
+
+app.post('/api/users/:userId/access', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const userId = parseInt(req.params.userId, 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid userId' });
+    const user = getUserById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const payload = normalizeUserAccessPayload(req.body || {});
+
+    const tx = db.transaction(() => {
+        db.prepare('DELETE FROM user_permission_groups WHERE user_id = ?').run(userId);
+        const insertPermission = db.prepare('INSERT OR IGNORE INTO user_permission_groups (user_id, permission_group_id) VALUES (?, ?)');
+        payload.permissionGroupIds.forEach(groupId => insertPermission.run(userId, groupId));
+
+        db.prepare('DELETE FROM user_group_access WHERE user_id = ?').run(userId);
+        const insertGroup = db.prepare('INSERT OR IGNORE INTO user_group_access (user_id, wa_group_id) VALUES (?, ?)');
+        payload.allowedGroupIds.forEach(waGroupId => insertGroup.run(userId, waGroupId));
+
+        db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(userId);
+        const insertSetting = db.prepare('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)');
+        Object.entries(payload.settings).forEach(([key, value]) => {
+            insertSetting.run(userId, String(key), typeof value === 'string' ? value : JSON.stringify(value));
+        });
+
+        db.prepare('UPDATE app_users SET updated_at = ? WHERE id = ?').run(nowIso(), userId);
+    });
+
+    tx();
+    res.sendStatus(200);
 });
 // ─────────────────────────────────────────────────────────────────────────────
 

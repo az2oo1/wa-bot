@@ -16,6 +16,7 @@
 - [📊 Configuration](#-configuration)
 - [🤖 AI Integration](#-ai-integration)
 - [🖼️ Dashboard Features](#-dashboard-features)
+- [👤 User Management & Access Control](#-user-management--access-control)
 - [📝 API Documentation](#-api-documentation)
 - [❓ Troubleshooting](#-troubleshooting)
 - [📜 License](#-license)
@@ -258,6 +259,53 @@ npm start
 Once the bot is running, open your browser and navigate to:
 
 ```
+
+---
+
+## 👤 User Management & Access Control
+
+The dashboard is now protected with session-based authentication.
+
+- Login URL: `/login`
+- Initial bootstrap account:
+  - Username: `admin`
+  - Password: `admin123`
+
+After login:
+
+- Main dashboard: `/`
+- User management page: `/users`
+
+### What you can do in `/users`
+
+- Create and delete users
+- Create custom permission groups with your own permission keys
+- Assign permission groups to each user
+- Restrict each user to selected WhatsApp groups (custom group scope)
+- Save per-user custom settings (stored in DB)
+
+### Permission Model
+
+Users can be:
+
+- Superadmin: full access to all features
+- Permission-based user: receives capabilities from assigned permission groups
+
+Built-in permission groups are created automatically:
+
+- `Viewer`
+- `Group Manager`
+- `Security Manager`
+- `Operator`
+
+You can also create custom permission groups from the `/users` page.
+
+### Notes
+
+- `config:write` allows full configuration save.
+- `config:write-scoped` limits save operations to the user's allowed WhatsApp groups only.
+- If there are no users in DB, a bootstrap admin is auto-created.
+
 http://localhost:3000
 ```
 
