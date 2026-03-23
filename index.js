@@ -1312,7 +1312,7 @@ client.on('message', async msg => {
             if (canSendToAI) {
                 try {
                     const msgText = msg.body || '[صورة بدون نص مرفق]';
-                    const aiPromptText = `أنت مشرف مجموعة صارم. تعليماتك هي: ${config.aiPrompt}
+                    const aiPromptText = `${config.aiPrompt}
 
 بناء على التعليمات، هل هذا المحتوى يعتبر مخالف؟ أجب بكلمة "نعم" أو "لا" فقط.
 المحتوى: "${msgText}"`;
