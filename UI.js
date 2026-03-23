@@ -1256,7 +1256,7 @@ module.exports = function renderDashboard(req, db, config) {
             async function umCreatePermissionGroup() {
                 try {
                     const permissions = document.getElementById('um_perm_list').value
-                        .split('\n')
+                        .split('\\n')
                         .map(s => s.trim())
                         .filter(Boolean);
                     await umApi('/api/access/permission-groups/create', {
