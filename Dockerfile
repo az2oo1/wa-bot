@@ -82,6 +82,25 @@ sleep 1\n\
 DB_PATH="${WA_DB_PATH:-/app/bot_data.sqlite}"\n\
 DB_DIR="$(dirname "$DB_PATH")"\n\
 mkdir -p "$DB_DIR"\n\
+if [ -L "$DB_PATH" ]; then\n\
+  LINK_TARGET="$(readlink "$DB_PATH" || true)"\n\
+  if [ -n "$LINK_TARGET" ]; then\n\
+    case "$LINK_TARGET" in\n\
+      /*) TARGET_PATH="$LINK_TARGET" ;;\n\
+      *) TARGET_PATH="$DB_DIR/$LINK_TARGET" ;;\n\
+    esac\n\
+    TARGET_DIR="$(dirname "$TARGET_PATH")"\n\
+    if ! mkdir -p "$TARGET_DIR" 2>/dev/null || ! touch "$TARGET_PATH" 2>/dev/null; then\n\
+      echo "⚠️ Broken or unwritable DB symlink detected: $DB_PATH -> $LINK_TARGET"\n\
+      echo "🔧 Replacing symlink with local database file at $DB_PATH"\n\
+      rm -f "$DB_PATH"\n\
+    fi\n\
+  else\n\
+    echo "⚠️ Invalid DB symlink detected at $DB_PATH"\n\
+    echo "🔧 Replacing symlink with local database file at $DB_PATH"\n\
+    rm -f "$DB_PATH"\n\
+  fi\n\
+fi\n\
 if [ -d "$DB_PATH" ]; then\n\
   mv "$DB_PATH" "${DB_PATH}.dir-backup-$(date +%s)"\n\
 fi\n\
