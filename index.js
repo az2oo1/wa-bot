@@ -54,7 +54,37 @@ function compactMsgId(value) {
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
-const db = new Database('./bot_data.sqlite');
+function resolveDbPath() {
+    if (process.env.WA_DB_PATH && process.env.WA_DB_PATH.trim()) {
+        return process.env.WA_DB_PATH.trim();
+    }
+    if (process.env.WA_DATA_DIR && process.env.WA_DATA_DIR.trim()) {
+        return path.join(process.env.WA_DATA_DIR.trim(), 'bot_data.sqlite');
+    }
+    return path.join(process.cwd(), 'bot_data.sqlite');
+}
+
+function openDatabaseWithFallback() {
+    const primaryPath = resolveDbPath();
+    const fallbackPath = path.join('/tmp', 'wa-bot', 'bot_data.sqlite');
+    const candidates = [primaryPath, fallbackPath];
+
+    for (const dbPath of candidates) {
+        try {
+            fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+            fs.closeSync(fs.openSync(dbPath, 'a'));
+            const openedDb = new Database(dbPath);
+            console.log(`[DB] Using database file: ${dbPath}`);
+            return openedDb;
+        } catch (err) {
+            console.error(`[DB] Failed to open database at ${dbPath}: ${err.message || err}`);
+        }
+    }
+
+    throw new Error('Could not open any writable SQLite database path.');
+}
+
+const db = openDatabaseWithFallback();
 db.pragma('journal_mode = WAL');
 
 db.exec(`

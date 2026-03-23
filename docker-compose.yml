@@ -7,6 +7,7 @@ services:
       - "3000:3000"
     environment:
       - WA_DATA_DIR=/data
+      - WA_DB_PATH=/data/bot_data.sqlite
       - WA_AUTH_PATH=/data/.wwebjs_auth
       - WA_BROWSER_PROFILE_DIR=/data/chromium-profile
     volumes:
