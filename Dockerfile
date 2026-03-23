@@ -108,6 +108,10 @@ fi\n\
 if [ -f "$DB_PATH" ]; then\n\
   cp -n "$DB_PATH" "${DB_PATH}.startup-backup" 2>/dev/null || true\n\
 fi\n\
+if [ ! -f "$DB_PATH" ] && [ -f "${DB_PATH}.startup-backup" ]; then\n\
+  echo "♻️ Restoring missing DB file from startup backup..."\n\
+  cp -a "${DB_PATH}.startup-backup" "$DB_PATH"\n\
+fi\n\
 if ! touch "$DB_PATH"; then\n\
   echo "❌ Cannot create database file at $DB_PATH"\n\
   echo "📂 Directory listing for $DB_DIR:"\n\
