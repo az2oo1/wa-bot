@@ -25,11 +25,11 @@ module.exports = function renderUserManagement(authUser, lang) {
     .title h1{margin:0;font-size:28px;display:flex;gap:10px;align-items:center}
     .title p{margin:4px 0 0;color:var(--text-muted)}
     .top-actions{display:flex;gap:10px;flex-wrap:wrap}
-    .btn{padding:10px 16px;border-radius:10px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text);font-weight:700;cursor:pointer}
-    .btn:hover{filter:brightness(1.08)}
+    .btn{padding:10px 16px;border-radius:10px;border:1.5px solid var(--card-border);background:var(--input-bg);color:var(--text);font-weight:700;cursor:pointer;transition:all .2s}
+    .btn:hover{transform:translateY(-1px);filter:brightness(1.08)}
     .btn-primary{background:var(--accent-dim);border-color:rgba(0,200,83,0.45);color:var(--accent)}
     .btn-danger{background:rgba(255,82,82,.1);border-color:rgba(255,82,82,.45);color:var(--red)}
-    .btn-blue{background:rgba(64,196,255,.1);border-color:rgba(64,196,255,.4);color:var(--blue)}
+    .btn-blue{background:rgba(64,196,255,.1);border-color:rgba(64,196,255,.45);color:var(--blue)}
     .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
     .card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius);padding:18px}
     .card h2{margin:0 0 12px;font-size:18px;display:flex;align-items:center;gap:8px}
