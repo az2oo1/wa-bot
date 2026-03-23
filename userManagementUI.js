@@ -26,7 +26,7 @@ module.exports = function renderUserManagement(authUser, lang) {
     .title p{margin:4px 0 0;color:var(--text-muted)}
     .top-actions{display:flex;gap:10px;flex-wrap:wrap}
     .btn{padding:10px 16px;border-radius:10px;border:1.5px solid var(--card-border);background:var(--input-bg);color:var(--text);font-weight:700;cursor:pointer;transition:all .2s}
-    .btn:hover{transform:translateY(-1px);filter:brightness(1.08)}
+    .btn:hover{transform:translateY(-1px);filter:none;box-shadow:none}
     .btn-primary{background:var(--accent-dim);border-color:rgba(0,200,83,0.45);color:var(--accent)}
     .btn-danger{background:rgba(255,82,82,.1);border-color:rgba(255,82,82,.45);color:var(--red)}
     .btn-blue{background:rgba(64,196,255,.1);border-color:rgba(64,196,255,.45);color:var(--blue)}

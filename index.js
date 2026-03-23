@@ -678,10 +678,10 @@ app.get('/login', (req, res) => {
         input{width:100%;padding:12px 14px;border-radius:10px;border:1.5px solid var(--input-border);background:var(--input-bg);color:var(--text);font-family:inherit}
         input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
         .btn{margin-top:15px;width:100%;padding:12px 14px;border-radius:10px;border:1.5px solid rgba(0,200,83,.45);background:var(--accent-dim);color:var(--accent);font-weight:700;cursor:pointer;font-size:15px;transition:all .2s}
-        .btn:hover{transform:translateY(-1px);filter:brightness(1.08)}
+        .btn:hover{transform:translateY(-1px);filter:none;box-shadow:none}
         .lang-row{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
         .lang-btn{border:1.5px solid rgba(64,196,255,.45);background:rgba(64,196,255,.1);color:var(--blue);padding:6px 10px;border-radius:10px;cursor:pointer;font-weight:700;transition:all .2s}
-        .lang-btn:hover{transform:translateY(-1px);filter:brightness(1.08)}
+        .lang-btn:hover{transform:translateY(-1px);filter:none;box-shadow:none}
         .hint{margin-top:12px;color:#ffd68a;font-size:13px}
         .error{margin-top:8px;color:#ff9f9f;min-height:19px}
     </style>

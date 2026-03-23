@@ -30,7 +30,8 @@ module.exports = function renderDashboard(req, db, config) {
 
             .btn:hover, .sidebar-footer button:hover, #logoutBtn:hover {
                 transform: translateY(-1px);
-                filter: brightness(1.08);
+                filter: none;
+                box-shadow: none !important;
             }
 
             .btn-primary, .sidebar-footer button[data-variant="primary"] {
