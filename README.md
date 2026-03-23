@@ -134,25 +134,31 @@ wa-bot-app/
 Create `docker-compose.yml`:
 
 ```yaml
-version: '3.8'
-
 services:
   bot:
     image: ghcr.io/az2oo1/wa-bot:latest
     ports:
       - "3000:3000"
     volumes:
-      - /DATA/AppData/wa-bot:/app
+      - wa_bot_data:/app
     environment:
       - WA_DB_PATH=/app/bot_data.sqlite  # Explicit database path in persistent volume
+      - WA_ALLOW_TMP_DB_FALLBACK=false   # Prevent fallback to ephemeral /tmp DB
     restart: unless-stopped
+
+volumes:
+  wa_bot_data:
 ```
 
 **Volume Explanations:**
-- `node_modules`: Persists Node.js dependencies across container restarts
-- `.wwebjs_auth`: Stores WhatsApp authentication tokens (persistent login)
-- `.wwebjs_cache`: Caches WhatsApp Web data for faster startup
-- `bot_data.sqlite`: Stores all bot data (blacklists, settings, logs)
+- `wa_bot_data`: Persists all runtime app data inside `/app` (auth, cache, media, and SQLite DB)
+
+If you prefer a host bind mount instead of a named volume, ensure the host path exists and is writable before starting:
+
+```bash
+mkdir -p /DATA/AppData/wa-bot
+sudo chown -R 1000:1000 /DATA/AppData/wa-bot
+```
 
 #### Step 4: Prepare Application Files
 
@@ -480,9 +486,22 @@ docker-compose up --build -d
 # Restart the container
 docker-compose restart bot
 
-# If persistent, rebuild:
+# If persistent, recreate with a clean named volume:
 docker-compose down
-rm bot_data.sqlite
+docker volume rm wa-bot_wa_bot_data
+docker-compose up -d
+```
+
+### DB Path Points To Directory
+
+**Issue:** logs show DB path is a directory (example: `/app/bot_data.sqlite`)
+
+**Cause:** A previous bad bind mount may have created `bot_data.sqlite` as a folder.
+
+**Solution (host bind mount users):**
+```bash
+docker-compose down
+rm -rf /DATA/AppData/wa-bot/bot_data.sqlite
 docker-compose up -d
 ```
 

@@ -1,13 +1,14 @@
-version: '3.8'
-
 services:
   bot:
     image: ghcr.io/az2oo1/wa-bot:latest
     ports:
       - "3000:3000"
     volumes:
-      - /DATA/AppData/wa-bot:/app
+      - wa_bot_data:/app
     environment:
       - WA_DB_PATH=/app/bot_data.sqlite  # Explicit database path in persistent volume
       - WA_ALLOW_TMP_DB_FALLBACK=false   # Prevent silent fallback to /tmp (ephemeral)
     restart: unless-stopped
+
+volumes:
+  wa_bot_data:
