@@ -768,6 +768,10 @@ module.exports = function renderDashboard(req, db, config) {
                 'target_group': '${t("اختر المجموعة المستهدفة", "Select Target Group")}',
                 'admin_group': '${t("مجموعة الإدارة (اتركه فارغاً للافتراضي)", "Admin Group (leave empty for default)")}',
                 'admin_group_label': '${t("اختر المجموعة لتلقي التنبيهات", "Select Group for Alerts")}',
+                'admin_msg_lang': '${t("لغة رسائل الإدارة", "Admin Message Language")}',
+                'use_default_lang': '${t("استخدم الافتراضي", "Use Default")}',
+                'lang_ar': 'العربية',
+                'lang_en': 'English',
                 'blocked_types': '${t("الأنواع الممنوعة قطعياً", "Absolute Blocked Types")}',
                 'block_action': '${t("إجراء المنع", "Block Action")}',
                 'act_del': '${t("حذف الرسالة فقط", "Delete Message Only")}',
@@ -843,6 +847,15 @@ module.exports = function renderDashboard(req, db, config) {
                             defHTML += \`<option value="${config.defaultAdminGroup}" selected>${config.defaultAdminGroup} (Unknown)</option>\`;
                         }
                         defHTML += \`</select>\`;
+                        defHTML += \`
+                            <div class="field-group" style="margin-top:12px; margin-bottom:0;">
+                                <label class="field-label">\${dict.admin_msg_lang}</label>
+                                <select id="defaultAdminLanguage" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">
+                                    <option value="ar" ${config.defaultAdminLanguage === 'en' ? '' : 'selected'}>\${dict.lang_ar}</option>
+                                    <option value="en" ${config.defaultAdminLanguage === 'en' ? 'selected' : ''}>\${dict.lang_en}</option>
+                                </select>
+                            </div>
+                        \`;
                         defAdminContainer.innerHTML = defHTML;
                     }
                     
@@ -971,6 +984,7 @@ module.exports = function renderDashboard(req, db, config) {
             let groupsArr = Object.keys(groupsConfigObj).map(key => ({
                 id: key,
                 adminGroup: groupsConfigObj[key].adminGroup || '',
+                adminLanguage: groupsConfigObj[key].adminLanguage || 'default',
                 words: groupsConfigObj[key].words || [],
                 useDefaultWords: groupsConfigObj[key].useDefaultWords !== false,
                 enableWordFilter: groupsConfigObj[key].enableWordFilter !== false,
@@ -1159,6 +1173,14 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="field-group" style="margin-bottom:0;">
                             <label class="field-label">\${dict.admin_group}</label>
                             \${createGroupSelectHTML(group.adminGroup, \`updateGroupData(\${groupIndex}, 'adminGroup', this.value)\`, true)}
+                        </div>
+                        <div class="field-group" style="margin-bottom:0;">
+                            <label class="field-label">\${dict.admin_msg_lang}</label>
+                            <select onchange="updateGroupData(\${groupIndex}, 'adminLanguage', this.value)">
+                                <option value="default" \${group.adminLanguage==='default'?'selected':''}>\${dict.use_default_lang}</option>
+                                <option value="ar" \${group.adminLanguage==='ar'?'selected':''}>\${dict.lang_ar}</option>
+                                <option value="en" \${group.adminLanguage==='en'?'selected':''}>\${dict.lang_en}</option>
+                            </select>
                         </div>
                     </div>
 
@@ -1681,6 +1703,7 @@ module.exports = function renderDashboard(req, db, config) {
             function addGroup() {
                 groupsArr.push({ 
                     id: '', adminGroup: '', words: [], useDefaultWords: true, 
+                    adminLanguage: 'default',
                     enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
                     autoAction: false, enableBlacklist: true, enableWhitelist: true,
                     useGlobalBlacklist: true, useGlobalWhitelist: true,
@@ -2163,6 +2186,9 @@ module.exports = function renderDashboard(req, db, config) {
                 let defAdmin = '';
                 const defAdminEl = document.getElementById('defaultAdminGroup');
                 if (defAdminEl) defAdmin = defAdminEl.value;
+                let defAdminLang = 'ar';
+                const defAdminLangEl = document.getElementById('defaultAdminLanguage');
+                if (defAdminLangEl) defAdminLang = defAdminLangEl.value === 'en' ? 'en' : 'ar';
 
                 const newConfig = {
                     enableAntiSpam: document.getElementById('enableAntiSpam').checked,
@@ -2184,6 +2210,7 @@ module.exports = function renderDashboard(req, db, config) {
                     ollamaUrl: document.getElementById('ollamaUrl').value.trim(),
                     ollamaModel: document.getElementById('ollamaModel').value.trim(),
                     defaultAdminGroup: defAdmin,
+                    defaultAdminLanguage: defAdminLang,
                     defaultWords: defaultWordsArr,
                     groupsConfig: finalGroupsObj
                 };

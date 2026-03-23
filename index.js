@@ -100,6 +100,20 @@ function formatVCardsForDisplay(vcards) {
     return parsed.join('\n');
 }
 
+function normalizeAdminLang(value) {
+    return value === 'en' ? 'en' : 'ar';
+}
+
+function resolveAdminLang(groupConfig, conf) {
+    const defaultLang = normalizeAdminLang(conf && conf.defaultAdminLanguage ? conf.defaultAdminLanguage : 'ar');
+    if (!groupConfig || !groupConfig.adminLanguage || groupConfig.adminLanguage === 'default') return defaultLang;
+    return normalizeAdminLang(groupConfig.adminLanguage);
+}
+
+function tAdmin(groupConfig, conf, arText, enText) {
+    return resolveAdminLang(groupConfig, conf) === 'en' ? enText : arText;
+}
+
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
@@ -158,7 +172,8 @@ const colsToAdd = [
     'panic_lockout_duration INTEGER', 'panic_alert_target TEXT', 'panic_alert_message TEXT',
     'enable_whitelist INTEGER', 'custom_blacklist TEXT', 'custom_whitelist TEXT',
     'use_global_blacklist INTEGER', 'use_global_whitelist INTEGER',
-    'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT', 'qa_language TEXT', 'qa_event_dates TEXT'
+    'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT', 'qa_language TEXT', 'qa_event_dates TEXT',
+    'admin_language TEXT'
 ];
 colsToAdd.forEach(col => {
     try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch (e) { }
@@ -173,7 +188,7 @@ function loadConfigFromDB() {
         blockedTypes: [], blockedAction: 'delete',
         spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
         spamLimits: { text: 7, image: 3, video: 2, audio: 3, document: 3, sticker: 3 },
-        defaultAdminGroup: '', defaultWords: [], aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية.',
+        defaultAdminGroup: '', defaultAdminLanguage: 'ar', defaultWords: [], aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية.',
         aiFilterTriggerWords: ['نعم'],
         ollamaUrl: 'http://localhost:11434', ollamaModel: 'llava', groupsConfig: {}
     };
@@ -192,6 +207,7 @@ function loadConfigFromDB() {
     db.prepare('SELECT * FROM custom_groups').all().forEach(g => {
         newConfig.groupsConfig[g.group_id] = {
             adminGroup: g.admin_group, useDefaultWords: g.use_default_words === 1,
+            adminLanguage: g.admin_language || 'default',
             enableWordFilter: g.enable_word_filter === 1, enableAIFilter: g.enable_ai_filter === 1,
             enableAIMedia: g.enable_ai_media === 1, autoAction: g.auto_action === 1,
             enableBlacklist: g.enable_blacklist === 1, enableWhitelist: g.enable_whitelist !== 0,
@@ -247,6 +263,7 @@ function saveConfigToDB(conf) {
         setGlobal.run('spamTypes', JSON.stringify(conf.spamTypes));
         setGlobal.run('spamLimits', JSON.stringify(conf.spamLimits));
         setGlobal.run('defaultAdminGroup', conf.defaultAdminGroup);
+        setGlobal.run('defaultAdminLanguage', normalizeAdminLang(conf.defaultAdminLanguage));
         setGlobal.run('defaultWords', JSON.stringify(conf.defaultWords));
         setGlobal.run('aiFilterTriggerWords', JSON.stringify(conf.aiFilterTriggerWords || ['نعم']));
 
@@ -256,19 +273,19 @@ function saveConfigToDB(conf) {
         db.prepare('DELETE FROM custom_groups').run();
         const insertGroup = db.prepare(`
             INSERT INTO custom_groups (
-                group_id, admin_group, use_default_words, enable_word_filter, enable_ai_filter, 
+                group_id, admin_group, admin_language, use_default_words, enable_word_filter, enable_ai_filter, 
                 enable_ai_media, auto_action, enable_blacklist, enable_whitelist, enable_anti_spam, spam_duplicate_limit, 
                 spam_action, enable_welcome_message, welcome_message_text, custom_words,
                 blocked_types, blocked_action, spam_types, spam_limits,
                 enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
                 panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist,
                 enable_qa_feature, custom_qa, qa_event_date, qa_language, qa_event_dates
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
             insertGroup.run(
-                gId, gData.adminGroup, gData.useDefaultWords ? 1 : 0, gData.enableWordFilter ? 1 : 0,
+                gId, gData.adminGroup, gData.adminLanguage || 'default', gData.useDefaultWords ? 1 : 0, gData.enableWordFilter ? 1 : 0,
                 gData.enableAIFilter ? 1 : 0, gData.enableAIMedia ? 1 : 0, gData.autoAction ? 1 : 0,
                 gData.enableBlacklist ? 1 : 0, gData.enableWhitelist ? 1 : 0, gData.enableAntiSpam ? 1 : 0, gData.spamDuplicateLimit,
                 gData.spamAction, gData.enableWelcomeMessage ? 1 : 0, gData.welcomeMessageText, JSON.stringify(gData.words),
@@ -650,7 +667,7 @@ app.post('/api/import', (req, res) => {
                 if (selected.custom_groups_clear) db.prepare('DELETE FROM custom_groups').run();
                 const stmt = db.prepare(`
                     INSERT OR REPLACE INTO custom_groups (
-                        group_id, admin_group, use_default_words, enable_word_filter, enable_ai_filter, 
+                        group_id, admin_group, admin_language, use_default_words, enable_word_filter, enable_ai_filter, 
                         enable_ai_media, auto_action, enable_blacklist, enable_whitelist, enable_anti_spam, 
                         spam_duplicate_limit, spam_action, enable_welcome_message, welcome_message_text, custom_words,
                         blocked_types, blocked_action, spam_types, spam_limits,
@@ -658,11 +675,11 @@ app.post('/api/import', (req, res) => {
                         panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, 
                         use_global_blacklist, use_global_whitelist, enable_qa_feature, custom_qa, qa_event_date, 
                         qa_language, qa_event_dates
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `);
                 for (const row of dataset.custom_groups) {
                     stmt.run(
-                        row.group_id, row.admin_group, row.use_default_words, row.enable_word_filter,
+                        row.group_id, row.admin_group, row.admin_language || 'default', row.use_default_words, row.enable_word_filter,
                         row.enable_ai_filter, row.enable_ai_media, row.auto_action, row.enable_blacklist,
                         row.enable_whitelist, row.enable_anti_spam, row.spam_duplicate_limit, row.spam_action,
                         row.enable_welcome_message, row.welcome_message_text, row.custom_words,
@@ -1024,9 +1041,12 @@ client.on('group_join', async (notification) => {
                         try {
                             await safeDelay();
                             await chat.removeParticipants([participantId]);
-                            const reportText = `🛡️ *حماية (قائمة سوداء)*
-حاول رقم محظور الدخول لمجموعة "${chat.name}" وتم طرده.
-الرقم: @${cleanJoinedId.split('@')[0]}`;
+                            const reportText = tAdmin(
+                                groupConfig,
+                                config,
+                                `🛡️ *حماية (قائمة سوداء)*\nحاول رقم محظور الدخول لمجموعة "${chat.name}" وتم طرده.\nالرقم: @${cleanJoinedId.split('@')[0]}`,
+                                `🛡️ *Protection (Blacklist)*\nA blacklisted number attempted to join "${chat.name}" and was removed.\nNumber: @${cleanJoinedId.split('@')[0]}`
+                            );
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanJoinedId] });
                         } catch (err) { }
                     }, 2000);
@@ -1111,17 +1131,27 @@ client.on('message', async msg => {
                             const alertMsgText = rawAlertMsg.replace(/{time}/g, lockMins);
                             const alertTarget = groupConfig.panicAlertTarget || 'both';
                             let targetAdminGroup = (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') ? groupConfig.adminGroup.trim() : config.defaultAdminGroup;
+                            const panicAdminOpenText = tAdmin(
+                                groupConfig,
+                                config,
+                                `🚨 *تنبيه طوارئ (Panic Mode)* 🚨\nتم رصد هجوم في مجموعة "${chat.name}" وإغلاقها تلقائياً لمدة ${lockMins} دقائق.`,
+                                `🚨 *Panic Mode Alert* 🚨\nRaid activity was detected in "${chat.name}". The group was locked for ${lockMins} minutes.`
+                            );
+                            const panicAdminCloseText = tAdmin(
+                                groupConfig,
+                                config,
+                                `🔓 *تنبيه طوارئ*\nتم إعادة فتح مجموعة "${chat.name}" بعد انتهاء فترة الإغلاق التلقائي.`,
+                                `🔓 *Panic Mode Alert*\n"${chat.name}" has been unlocked after the automatic lock period ended.`
+                            );
 
                             if (alertTarget === 'group' || alertTarget === 'both') await client.sendMessage(groupId, alertMsgText);
-                            if (alertTarget === 'admin' || alertTarget === 'both') await client.sendMessage(targetAdminGroup, `🚨 *تنبيه طوارئ (Panic Mode)* 🚨
-تم رصد هجوم في مجموعة "${chat.name}" وإغلاقها تلقائياً لمدة ${lockMins} دقائق.`);
+                            if (alertTarget === 'admin' || alertTarget === 'both') await client.sendMessage(targetAdminGroup, panicAdminOpenText);
 
                             setTimeout(async () => {
                                 try {
                                     await chat.setMessagesAdminsOnly(false);
                                     if (alertTarget === 'group' || alertTarget === 'both') await client.sendMessage(groupId, '🔓 *انتهت فترة الإغلاق التلقائي. يمكنكم إرسال الرسائل الآن.*');
-                                    if (alertTarget === 'admin' || alertTarget === 'both') await client.sendMessage(targetAdminGroup, `🔓 *تنبيه طوارئ*
-تم إعادة فتح مجموعة "${chat.name}" بعد انتهاء فترة الإغلاق التلقائي.`);
+                                    if (alertTarget === 'admin' || alertTarget === 'both') await client.sendMessage(targetAdminGroup, panicAdminCloseText);
                                 } catch (e) { console.error('[خطأ] فشل فتح المجموعة:', e); }
                                 lockedGroups.delete(groupId);
                             }, lockMins * 60 * 1000);
@@ -1168,9 +1198,11 @@ client.on('message', async msg => {
             let blockedTypes = config.blockedTypes;
             let blockedAction = config.blockedAction;
             let forbiddenWords = [...config.defaultWords];
+            let adminMessageLang = normalizeAdminLang(config.defaultAdminLanguage);
 
             if (groupConfig) {
                 targetAdminGroup = (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') ? groupConfig.adminGroup.trim() : config.defaultAdminGroup;
+                adminMessageLang = resolveAdminLang(groupConfig, config);
                 if (typeof groupConfig.enableWordFilter !== 'undefined') isWordFilterEnabled = groupConfig.enableWordFilter;
                 if (typeof groupConfig.enableAIFilter !== 'undefined') isAIFilterEnabled = groupConfig.enableAIFilter;
                 if (typeof groupConfig.enableAIMedia !== 'undefined') isAIMediaEnabled = groupConfig.enableAIMedia;
@@ -1212,18 +1244,16 @@ client.on('message', async msg => {
                     try {
                         await chat.removeParticipants([rawAuthorId]);
                         if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanAuthorId);
-                        const reportText = `🚨 *حظر تلقائي (نوع ممنوع)*
-أرسل العضو ملف (${internalMsgType}) في "${chat.name}" وتم طرده.
-👤 *المرسل:* @${cleanAuthorId.split('@')[0]}`;
+                        const reportText = adminMessageLang === 'en'
+                            ? `🚨 *Auto Ban (Blocked Type)*\nA member sent (${internalMsgType}) in "${chat.name}" and was removed.\n👤 *Sender:* @${cleanAuthorId.split('@')[0]}`
+                            : `🚨 *حظر تلقائي (نوع ممنوع)*\nأرسل العضو ملف (${internalMsgType}) في "${chat.name}" وتم طرده.\n👤 *المرسل:* @${cleanAuthorId.split('@')[0]}`;
                         await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanAuthorId] });
                     } catch (e) { }
                 } else if (blockedAction === 'poll') {
-                    const pollTitle = `🚨 إشعار بمخالفة في "${chat.name}"
-المرسل: @${cleanAuthorId.split('@')[0]}
-السبب: إرسال نوع ممنوع (${internalMsgType})
-
-هل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
-                    const poll = new Poll(pollTitle, isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا'] : ['نعم، طرد', 'لا']);
+                    const pollTitle = adminMessageLang === 'en'
+                        ? `🚨 Violation Alert in "${chat.name}"\nSender: @${cleanAuthorId.split('@')[0]}\nReason: Sent blocked type (${internalMsgType})\n\nDo you want to remove this number${isBlacklistEnabled ? ' and add it to blacklist' : ''}?`
+                        : `🚨 إشعار بمخالفة في "${chat.name}"\nالمرسل: @${cleanAuthorId.split('@')[0]}\nالسبب: إرسال نوع ممنوع (${internalMsgType})\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
+                    const poll = new Poll(pollTitle, isBlacklistEnabled ? (adminMessageLang === 'en' ? ['Yes, remove and blacklist', 'No'] : ['نعم، طرد وحظر', 'لا']) : (adminMessageLang === 'en' ? ['Yes, remove', 'No'] : ['نعم، طرد', 'لا']));
                     const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [cleanAuthorId] });
                     pendingBans.set(pollMsg.id._serialized, { senderId: cleanAuthorId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
                 }
@@ -1304,20 +1334,18 @@ client.on('message', async msg => {
                             if (isBlacklistEnabled) {
                                 db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
                             }
-                            const reportText = `🚨 *حظر تلقائي (إزعاج)*
-تم طرد العضو من "${chat.name}"${isBlacklistEnabled ? ' وإدراجه في القائمة السوداء' : ''}.
-
-👤 *المرسل:* @${senderId.split('@')[0]}
-📋 *السبب:* ${spamFlagReason}`;
+                            const reportText = adminMessageLang === 'en'
+                                ? `🚨 *Auto Ban (Spam)*\nThe member was removed from "${chat.name}"${isBlacklistEnabled ? ' and added to blacklist' : ''}.\n\n👤 *Sender:* @${senderId.split('@')[0]}\n📋 *Reason:* ${spamFlagReason}`
+                                : `🚨 *حظر تلقائي (إزعاج)*\nتم طرد العضو من "${chat.name}"${isBlacklistEnabled ? ' وإدراجه في القائمة السوداء' : ''}.\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${spamFlagReason}`;
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
                         } catch (e) { }
                     } else {
-                        const pollOptions = isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا، اكتف بالحذف'] : ['نعم، طرد العضو', 'لا'];
-                        const pollTitle = `🚨 إشعار إزعاج في "${chat.name}"
-المرسل: @${senderId.split('@')[0]}
-السبب: ${spamFlagReason}
-
-هل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
+                        const pollOptions = isBlacklistEnabled
+                            ? (adminMessageLang === 'en' ? ['Yes, remove and blacklist', 'No, only delete'] : ['نعم، طرد وحظر', 'لا، اكتف بالحذف'])
+                            : (adminMessageLang === 'en' ? ['Yes, remove member', 'No'] : ['نعم، طرد العضو', 'لا']);
+                        const pollTitle = adminMessageLang === 'en'
+                            ? `🚨 Spam Alert in "${chat.name}"\nSender: @${senderId.split('@')[0]}\nReason: ${spamFlagReason}\n\nDo you want to remove this number${isBlacklistEnabled ? ' and add it to blacklist' : ''}?`
+                            : `🚨 إشعار إزعاج في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${spamFlagReason}\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
                         const poll = new Poll(pollTitle, pollOptions);
                         const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
                         pendingBans.set(pollMsg.id._serialized, { senderId: senderId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
@@ -1501,24 +1529,18 @@ client.on('message', async msg => {
                         await chat.removeParticipants([rawAuthorId]);
                         if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
 
-                        const reportText = `🚨 *تقرير إجراء وحظر تلقائي*
-تم مسح محتوى مخالف وطرد العضو من "${chat.name}".
-
-👤 *المرسل:* @${senderId.split('@')[0]}
-📋 *السبب:* ${violationReason}
-📝 *النص الممسوح:*
-"${messageContent}"`;
+                        const reportText = adminMessageLang === 'en'
+                            ? `🚨 *Auto Moderation Report*\nViolating content was deleted and the member was removed from "${chat.name}".\n\n👤 *Sender:* @${senderId.split('@')[0]}\n📋 *Reason:* ${violationReason}\n📝 *Deleted Content:*\n"${messageContent}"`
+                            : `🚨 *تقرير إجراء وحظر تلقائي*\nتم مسح محتوى مخالف وطرد العضو من "${chat.name}".\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${violationReason}\n📝 *النص الممسوح:*\n"${messageContent}"`;
                         await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
                     } catch (e) { }
                 } else {
-                    const pollOptions = isBlacklistEnabled ? ['نعم، طرد وحظر', 'لا، اكتف بالحذف'] : ['نعم، طرد', 'لا'];
-                    const pollTitle = `🚨 إشعار بمحتوى مخالف في "${chat.name}"
-المرسل: @${senderId.split('@')[0]}
-السبب: ${violationReason}
-النص:
-"${messageContent}"
-
-هل ترغب في طرده؟`;
+                    const pollOptions = isBlacklistEnabled
+                        ? (adminMessageLang === 'en' ? ['Yes, remove and blacklist', 'No, only delete'] : ['نعم، طرد وحظر', 'لا، اكتف بالحذف'])
+                        : (adminMessageLang === 'en' ? ['Yes, remove', 'No'] : ['نعم، طرد', 'لا']);
+                    const pollTitle = adminMessageLang === 'en'
+                        ? `🚨 Violation Alert in "${chat.name}"\nSender: @${senderId.split('@')[0]}\nReason: ${violationReason}\nContent:\n"${messageContent}"\n\nDo you want to remove this member?`
+                        : `🚨 إشعار بمحتوى مخالف في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${violationReason}\nالنص:\n"${messageContent}"\n\nهل ترغب في طرده؟`;
                     const poll = new Poll(pollTitle, pollOptions);
 
                     const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
@@ -1537,7 +1559,7 @@ client.on('vote_update', async vote => {
             const data = pendingBans.get(pollId);
             const userToBan = data.senderId;
 
-            if (selectedOption.includes('نعم')) {
+            if (selectedOption && (selectedOption.includes('نعم') || /\byes\b/i.test(selectedOption))) {
                 if (data.isBlacklistEnabled) {
                     try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan); } catch (e) { }
                 }
