@@ -51,6 +51,55 @@ function compactMsgId(value) {
     return `${value.slice(0, 8)}...${value.slice(-8)}`;
 }
 
+function unfoldVCardLines(vcardText) {
+    if (typeof vcardText !== 'string') return [];
+    const lines = vcardText.replace(/\r/g, '').split('\n');
+    const unfolded = [];
+    for (const line of lines) {
+        if ((line.startsWith(' ') || line.startsWith('\t')) && unfolded.length > 0) {
+            unfolded[unfolded.length - 1] += line.trim();
+        } else {
+            unfolded.push(line);
+        }
+    }
+    return unfolded;
+}
+
+function extractVCardValue(unfoldedLines, key) {
+    const upperKey = `${key.toUpperCase()}`;
+    const line = unfoldedLines.find(l => l.toUpperCase().startsWith(`${upperKey}`) && l.includes(':'));
+    if (!line) return '';
+    return line.slice(line.indexOf(':') + 1).trim();
+}
+
+function formatVCardForDisplay(vcardText) {
+    const lines = unfoldVCardLines(vcardText);
+    if (lines.length === 0) return '';
+
+    const fn = extractVCardValue(lines, 'FN');
+    const tel = extractVCardValue(lines, 'TEL');
+
+    const altName = (() => {
+        const nValue = extractVCardValue(lines, 'N');
+        if (!nValue) return '';
+        const parts = nValue.split(';').map(p => p.trim()).filter(Boolean);
+        return parts.join(' ');
+    })();
+
+    const displayName = fn || altName || 'بدون اسم';
+    const displayPhone = tel || 'غير متوفر';
+    return `جهة اتصال: ${displayName} (${displayPhone})`;
+}
+
+function formatVCardsForDisplay(vcards) {
+    if (!Array.isArray(vcards) || vcards.length === 0) return '';
+    const parsed = vcards
+        .map(formatVCardForDisplay)
+        .filter(Boolean);
+    if (parsed.length === 0) return '';
+    return parsed.join('\n');
+}
+
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
@@ -1095,7 +1144,8 @@ client.on('message', async msg => {
                 const chunks = [];
                 if (typeof msg.body === 'string' && msg.body.trim().length > 0) chunks.push(msg.body);
                 if ((msg.type === 'vcard' || msg.type === 'multi_vcard') && Array.isArray(msg.vCards) && msg.vCards.length > 0) {
-                    chunks.push(msg.vCards.join('\n'));
+                    const prettyVcards = formatVCardsForDisplay(msg.vCards);
+                    if (prettyVcards) chunks.push(prettyVcards);
                 }
                 return chunks.join('\n').trim();
             })();
@@ -1442,7 +1492,7 @@ client.on('message', async msg => {
                 let senderId = cleanAuthorId;
                 if (contact && contact.number) senderId = `${contact.number}@c.us`;
 
-                const messageContent = msg.body || '[مرفق وسائط]';
+                const messageContent = normalizedMessageText || msg.body || '[مرفق وسائط]';
                 await safeDelay();
                 await msg.delete(true);
 
