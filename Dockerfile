@@ -16,6 +16,7 @@ COPY package*.json ./
 RUN npm install
 RUN npm rebuild better-sqlite3
 COPY . .
+RUN rm -f /app_staging/bot_data.sqlite /app_staging/bot_data.sqlite-wal /app_staging/bot_data.sqlite-shm
 
 # 2. Ensure UI.js and index.js are regenerated on every image build
 # Store original versions for regeneration
@@ -37,7 +38,13 @@ fi\n\
 \n\
 if [ ! -f /app/index.js ]; then\n\
   echo "First run detected! Copying app files to /app..."\n\
-  cp -r /app_staging/* /app/\n\
+  for item in /app_staging/*; do\n\
+    base="$(basename "$item")"\n\
+    case "$base" in\n\
+      bot_data.sqlite|bot_data.sqlite-wal|bot_data.sqlite-shm) continue ;;\n\
+    esac\n\
+    cp -r "$item" /app/\n\
+  done\n\
 else\n\
   echo "Updating UI.js and index.js in /app..."\n\
   cp /app_staging/UI.js /app/UI.js\n\

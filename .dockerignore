@@ -1,0 +1,8 @@
+# Never bake runtime SQLite data into the image
+bot_data.sqlite
+bot_data.sqlite-wal
+bot_data.sqlite-shm
+
+# Runtime auth/cache state should stay on mounted storage
+.wwebjs_auth
+.wwebjs_cache
