@@ -65,7 +65,7 @@ module.exports = function renderDashboard(req, db, config) {
             </button>
 
             <div class="sidebar-footer">
-                <button id="logoutBtn" onclick="logoutBot()" style="display:none; background: var(--red-dim); border-color: rgba(248,81,73,0.4); color: var(--red);"><i class="fas fa-sign-out-alt"></i> ${t('قطع الاتصال', 'Disconnect')}</button>
+                <button id="signOutBtn" onclick="signOutSession()" style="background: var(--red-dim); border-color: rgba(248,81,73,0.4); color: var(--red);"><i class="fas fa-right-from-bracket"></i> ${t('تسجيل الخروج', 'Sign Out')}</button>
                 <button onclick="saveConfig()" style="background: var(--accent-dim); border-color: rgba(0,230,118,0.4); color: var(--accent); font-weight:700;"><i class="fas fa-save"></i> ${t('حفظ', 'Save')}</button>
             </div>
         </nav>
@@ -123,6 +123,10 @@ module.exports = function renderDashboard(req, db, config) {
                                 <div><i class="fas fa-robot"></i> <strong style="color:var(--text);">${t('البوت:', 'Bot:')}</strong> <span id="status-text-detail">...</span></div>
                                 <div><i class="fas fa-database"></i> <strong style="color:var(--text);">${t('قاعدة البيانات:', 'Database:')}</strong> <span style="color:var(--accent);">${t('متصلة', 'Connected')} <i class="fas fa-check"></i></span></div>
                                 <div><i class="fas fa-globe"></i> <strong style="color:var(--text);">${t('المنفذ:', 'Port:')}</strong> <span style="color:var(--accent);">3000 <i class="fas fa-check"></i></span></div>
+                            </div>
+                            <div style="margin-top:14px; padding-top:14px; border-top:1px dashed var(--card-border);">
+                                <button id="logoutBtn" type="button" class="btn btn-danger" onclick="logoutBot()" style="display:none;"><i class="fas fa-link-slash"></i> ${t('قطع اتصال واتساب', 'Disconnect WhatsApp')}</button>
+                                <div style="font-size:12px; color:var(--text-muted); margin-top:8px;">${t('هذا الخيار يفصل جلسة واتساب فقط وليس حساب لوحة التحكم', 'This disconnects only the WhatsApp session, not your dashboard account')}</div>
                             </div>
                         </div>
                         <div class="card">
@@ -735,6 +739,7 @@ module.exports = function renderDashboard(req, db, config) {
                 <div class="card-grid">
                     <div class="card">
                         <div class="card-header"><h3><i class="fas fa-user-plus"></i> ${t('إضافة مستخدم', 'Create User')}</h3></div>
+                        <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">${t('اكتب البيانات ثم اضغط إضافة المستخدم. يمكنك تعديل الصلاحيات بعد الإنشاء.', 'Enter details then click Create User. You can assign permissions after creation.')}</p>
                         <div class="field-group">
                             <label class="field-label">${t('اسم المستخدم', 'Username')}</label>
                             <input type="text" id="um_create_username" placeholder="agent_1">
@@ -762,6 +767,14 @@ module.exports = function renderDashboard(req, db, config) {
 
                     <div class="card">
                         <div class="card-header"><h3><i class="fas fa-layer-group"></i> ${t('إضافة مجموعة صلاحيات', 'Create Permission Group')}</h3></div>
+                        <div class="field-group" style="margin-bottom:12px;">
+                            <label class="field-label">${t('قوالب جاهزة سريعة', 'Quick Presets')}</label>
+                            <div class="field-row">
+                                <button class="btn btn-ghost btn-sm" type="button" onclick="umUsePermPreset('viewer')">${t('مشاهدة فقط', 'Viewer')}</button>
+                                <button class="btn btn-ghost btn-sm" type="button" onclick="umUsePermPreset('operator')">${t('مشغل', 'Operator')}</button>
+                                <button class="btn btn-ghost btn-sm" type="button" onclick="umUsePermPreset('admin')">${t('مدير كامل', 'Full Admin')}</button>
+                            </div>
+                        </div>
                         <div class="field-group">
                             <label class="field-label">${t('اسم المجموعة', 'Group Name')}</label>
                             <input type="text" id="um_perm_name" placeholder="${t('المشرفون', 'Moderators')}">
@@ -793,13 +806,19 @@ module.exports = function renderDashboard(req, db, config) {
                 <div class="card">
                     <div class="card-header"><h3><i class="fas fa-sliders-h"></i> ${t('صلاحيات المستخدم المحدد', 'Selected User Access')}</h3></div>
                     <p id="um_selected_user" style="color:var(--text-muted);margin-bottom:14px;">${t('اختر مستخدماً من القائمة', 'Select a user from the list')}</p>
+                    <div class="field-row" style="margin-bottom:10px;">
+                        <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-perm', true)"><i class="fas fa-check-double"></i> ${t('تحديد كل الصلاحيات', 'Select All Permissions')}</button>
+                        <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-perm', false)"><i class="fas fa-eraser"></i> ${t('إلغاء كل الصلاحيات', 'Clear Permissions')}</button>
+                        <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-wa', true)"><i class="fas fa-check-double"></i> ${t('تحديد كل المجموعات', 'Select All Groups')}</button>
+                        <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-wa', false)"><i class="fas fa-eraser"></i> ${t('إلغاء كل المجموعات', 'Clear Groups')}</button>
+                    </div>
                     <div class="card-grid">
                         <div>
-                            <label class="field-label">${t('تعيين مجموعات الصلاحيات', 'Assign Permission Groups')}</label>
+                            <label class="field-label">${t('ماذا يمكن لهذا المستخدم أن يفعل؟', 'What can this user do?')}</label>
                             <div id="um_assign_perm_groups" class="chip-container" style="display:block;min-height:120px;"></div>
                         </div>
                         <div>
-                            <label class="field-label">${t('المجموعات المسموح الوصول إليها', 'Allowed WhatsApp Groups')}</label>
+                            <label class="field-label">${t('في أي مجموعات يمكنه إدارة الإعدادات؟', 'Which groups can they manage?')}</label>
                             <div id="um_assign_wa_groups" class="chip-container" style="display:block;min-height:120px;"></div>
                         </div>
                     </div>
@@ -853,6 +872,7 @@ module.exports = function renderDashboard(req, db, config) {
             const dict = {
                 'delete_confirm': '${t("هل أنت متأكد من رغبتك في حذف الإعدادات المخصصة لهذه المجموعة؟", "Are you sure you want to delete settings for this group?")}',
                 'logout_confirm': '${t("هل أنت متأكد من رغبتك في تسجيل الخروج من حساب واتساب؟ سيتم فصل البوت.", "Are you sure you want to log out of WhatsApp? The bot will disconnect.")}',
+                'signout_confirm': '${t("هل تريد تسجيل الخروج من لوحة التحكم؟", "Do you want to sign out from the dashboard?")}',
                 'logging_out': '<i class="fas fa-spinner fa-spin"></i> ${t("جاري تسجيل الخروج...", "Logging out...")}',
                 'purge_warn': '⚠️ ${t("تحذير: هذا الخيار سيجعل البوت يبحث في جميع المجموعات، وسيطرد أي شخص موجود في القائمة السوداء فوراً. متأكد؟", "Warning: The bot will scan all groups and instantly kick anyone in the blacklist. Sure?")}',
                 'purging': '<i class="fas fa-spinner fa-spin"></i> ${t("جاري المسح والطرد من المجموعات...", "Scanning and purging...")}',
@@ -1034,6 +1054,14 @@ module.exports = function renderDashboard(req, db, config) {
                     document.getElementById('logoutBtn').style.display = 'none';
                     await fetch('/api/logout', { method: 'POST' });
                 }
+            }
+
+            async function signOutSession() {
+                if (!confirm(dict.signout_confirm.replace(/<[^>]*>?/gm, ''))) return;
+                try {
+                    await fetch('/auth/logout', { method: 'POST' });
+                } catch (e) {}
+                window.location.href = '/login';
             }
 
             const pageTitles = {
@@ -1344,6 +1372,24 @@ module.exports = function renderDashboard(req, db, config) {
                 } catch (e) {
                     umSetStatus('um_access_status', e.message, true);
                 }
+            }
+
+            function umUsePermPreset(preset) {
+                const target = document.getElementById('um_perm_list');
+                if (!target) return;
+                const presets = {
+                    viewer: ['dashboard:read', 'groups:view', 'logs:view'],
+                    operator: ['dashboard:read', 'groups:view', 'config:write', 'security:manage', 'media:manage', 'import-export:manage', 'bot:logout', 'logs:view', 'users:manage'],
+                    admin: ['*']
+                };
+                const lines = presets[preset] || [];
+                target.value = lines.join('\n');
+            }
+
+            function umToggleAll(role, checked) {
+                document.querySelectorAll('input[data-role="' + role + '"]').forEach(el => {
+                    el.checked = checked;
+                });
             }
 
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
