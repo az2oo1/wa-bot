@@ -796,6 +796,8 @@ module.exports = function renderDashboard(req, db, config) {
                 'custom_words': '${t("كلمات ممنوعة مخصصة لهذه المجموعة", "Custom forbidden words for this group")}',
                 'add': '${t("إضافة", "Add")}',
                 'ai_text': '${t("المشرف الذكي (AI) للنصوص", "AI Moderator for Text")}',
+                'ai_trigger_words_group': '${t("كلمات تشغيل AI لهذه المجموعة", "AI Trigger Words for this group")}',
+                'ai_trigger_words_desc_group': '${t("عند وجود أي كلمة من هذه الكلمات في رد النموذج سيتم حذف الرسالة", "If AI response contains any of these words, the message will be deleted")}',
                 'ai_vision': '${t("تحليل الصور (Vision)", "Image Analysis (Vision)")}',
                 'direct_del': '${t("الحذف المباشر (تخطي التصويت)", "Direct Delete (Skip Poll)")}',
                 'select_group': '${t("اختر مجموعة...", "Select a Group...")}',
@@ -986,6 +988,7 @@ module.exports = function renderDashboard(req, db, config) {
                 adminGroup: groupsConfigObj[key].adminGroup || '',
                 adminLanguage: groupsConfigObj[key].adminLanguage || 'default',
                 words: groupsConfigObj[key].words || [],
+                aiFilterTriggerWords: groupsConfigObj[key].aiFilterTriggerWords || [],
                 useDefaultWords: groupsConfigObj[key].useDefaultWords !== false,
                 enableWordFilter: groupsConfigObj[key].enableWordFilter !== false,
                 enableAIFilter: groupsConfigObj[key].enableAIFilter || false,
@@ -1130,6 +1133,10 @@ module.exports = function renderDashboard(req, db, config) {
                     \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`
                 ).join('');
 
+                let aiWordsHtml = (group.aiFilterTriggerWords || []).map((word, wordIndex) =>
+                    \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupAITriggerWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`
+                ).join('');
+
                 let blHtml = group.customBlacklist.map((num, idx) => 
                     \`<div class="chip red-chip">\${num} <span class="chip-remove" onclick="removeGroupBlacklist(\${groupIndex}, \${idx})">&times;</span></div>\`
                 ).join('');
@@ -1245,6 +1252,15 @@ module.exports = function renderDashboard(req, db, config) {
                                 <label class="switch"><input type="checkbox" \${group.enableAIFilter?'checked':''} onchange="updateGroupToggle(\${groupIndex},'enableAIFilter',this.checked)"><span class="slider"></span></label>
                                 <div class="toggle-label blue">\${dict.ai_text}</div>
                             </div>
+                        </div>
+                        <div style="margin-bottom:12px; padding:14px; background:var(--input-bg); border:1.5px dashed var(--card-border); border-radius:10px;">
+                            <label class="field-label">\${dict.ai_trigger_words_group}</label>
+                            <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">\${dict.ai_trigger_words_desc_group}</p>
+                            <div class="input-with-btn" style="margin-bottom:10px;">
+                                <input type="text" id="newGroupAITriggerWord_\${groupIndex}" placeholder="..." onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupAITriggerWord(\${groupIndex});}">
+                                <button type="button" class="btn btn-primary btn-sm" onclick="addGroupAITriggerWord(\${groupIndex})"><i class="fas fa-plus"></i> \${dict.add}</button>
+                            </div>
+                            <div class="chip-container" id="chip_container_ai_words_\${groupIndex}">\${aiWordsHtml}</div>
                         </div>
                         <div class="toggle-row purple" style="margin-bottom:0;">
                             <div class="toggle-left">
@@ -1703,6 +1719,7 @@ module.exports = function renderDashboard(req, db, config) {
             function addGroup() {
                 groupsArr.push({ 
                     id: '', adminGroup: '', words: [], useDefaultWords: true, 
+                    aiFilterTriggerWords: [],
                     adminLanguage: 'default',
                     enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
                     autoAction: false, enableBlacklist: true, enableWhitelist: true,
@@ -1751,6 +1768,33 @@ module.exports = function renderDashboard(req, db, config) {
             function removeGroupWord(groupIndex, wordIndex) {
                 groupsArr[groupIndex].words.splice(wordIndex, 1);
                 renderGroupChips(groupIndex, 'words');
+            }
+
+            function addGroupAITriggerWord(groupIndex) {
+                const input = document.getElementById(\`newGroupAITriggerWord_\${groupIndex}\`);
+                const word = input.value.trim();
+                if (!word) return;
+                if (!Array.isArray(groupsArr[groupIndex].aiFilterTriggerWords)) groupsArr[groupIndex].aiFilterTriggerWords = [];
+                if (!groupsArr[groupIndex].aiFilterTriggerWords.includes(word)) {
+                    groupsArr[groupIndex].aiFilterTriggerWords.push(word);
+                    input.value = '';
+                    renderGroupAITriggerWords(groupIndex);
+                }
+            }
+
+            function removeGroupAITriggerWord(groupIndex, wordIndex) {
+                if (!Array.isArray(groupsArr[groupIndex].aiFilterTriggerWords)) return;
+                groupsArr[groupIndex].aiFilterTriggerWords.splice(wordIndex, 1);
+                renderGroupAITriggerWords(groupIndex);
+            }
+
+            function renderGroupAITriggerWords(groupIndex) {
+                const container = document.getElementById(\`chip_container_ai_words_\${groupIndex}\`);
+                if (!container) return;
+                const words = Array.isArray(groupsArr[groupIndex].aiFilterTriggerWords) ? groupsArr[groupIndex].aiFilterTriggerWords : [];
+                container.innerHTML = words.map((word, idx) =>
+                    \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupAITriggerWord(\${groupIndex}, \${idx})">&times;</span></div>\`
+                ).join('');
             }
 
             function addQuestionToQA(groupIndex) {

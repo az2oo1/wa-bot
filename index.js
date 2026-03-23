@@ -191,7 +191,8 @@ db.exec(`
         enable_word_filter INTEGER, enable_ai_filter INTEGER, enable_ai_media INTEGER,
         auto_action INTEGER, enable_blacklist INTEGER, enable_anti_spam INTEGER,
         spam_duplicate_limit INTEGER, spam_flood_limit INTEGER, spam_action TEXT,
-        enable_welcome_message INTEGER, welcome_message_text TEXT, custom_words TEXT
+        enable_welcome_message INTEGER, welcome_message_text TEXT, custom_words TEXT,
+        custom_ai_trigger_words TEXT
     );
 `);
 
@@ -202,7 +203,7 @@ const colsToAdd = [
     'enable_whitelist INTEGER', 'custom_blacklist TEXT', 'custom_whitelist TEXT',
     'use_global_blacklist INTEGER', 'use_global_whitelist INTEGER',
     'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT', 'qa_language TEXT', 'qa_event_dates TEXT',
-    'admin_language TEXT'
+    'admin_language TEXT', 'custom_ai_trigger_words TEXT'
 ];
 colsToAdd.forEach(col => {
     try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch (e) { }
@@ -251,7 +252,8 @@ function loadConfigFromDB() {
             enablePanicMode: g.enable_panic_mode === 1, panicMessageLimit: g.panic_message_limit || 10,
             panicTimeWindow: g.panic_time_window || 5, panicLockoutDuration: g.panic_lockout_duration || 10,
             panicAlertTarget: g.panic_alert_target || 'both', panicAlertMessage: g.panic_alert_message || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.',
-            enableQAFeature: g.enable_qa_feature === 1, qaList: JSON.parse(g.custom_qa || '[]'), eventDate: g.qa_event_date || '', qaLanguage: g.qa_language || 'ar', eventDates: JSON.parse(g.qa_event_dates || '[]')
+            enableQAFeature: g.enable_qa_feature === 1, qaList: JSON.parse(g.custom_qa || '[]'), eventDate: g.qa_event_date || '', qaLanguage: g.qa_language || 'ar', eventDates: JSON.parse(g.qa_event_dates || '[]'),
+            aiFilterTriggerWords: JSON.parse(g.custom_ai_trigger_words || '[]')
         };
     });
     return newConfig;
@@ -308,8 +310,8 @@ function saveConfigToDB(conf) {
                 blocked_types, blocked_action, spam_types, spam_limits,
                 enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
                 panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist,
-                enable_qa_feature, custom_qa, qa_event_date, qa_language, qa_event_dates
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                enable_qa_feature, custom_qa, qa_event_date, qa_language, qa_event_dates, custom_ai_trigger_words
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
@@ -324,7 +326,7 @@ function saveConfigToDB(conf) {
                 gData.panicLockoutDuration, gData.panicAlertTarget, gData.panicAlertMessage,
                 JSON.stringify(gData.customBlacklist || []), JSON.stringify(gData.customWhitelist || []),
                 gData.useGlobalBlacklist ? 1 : 0, gData.useGlobalWhitelist ? 1 : 0,
-                gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || '', gData.qaLanguage || 'ar', JSON.stringify(gData.eventDates || [])
+                gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || '', gData.qaLanguage || 'ar', JSON.stringify(gData.eventDates || []), JSON.stringify(gData.aiFilterTriggerWords || [])
             );
         }
     });
@@ -703,8 +705,8 @@ app.post('/api/import', (req, res) => {
                         enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
                         panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, 
                         use_global_blacklist, use_global_whitelist, enable_qa_feature, custom_qa, qa_event_date, 
-                        qa_language, qa_event_dates
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        qa_language, qa_event_dates, custom_ai_trigger_words
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `);
                 for (const row of dataset.custom_groups) {
                     stmt.run(
@@ -717,7 +719,7 @@ app.post('/api/import', (req, res) => {
                         row.panic_lockout_duration, row.panic_alert_target, row.panic_alert_message,
                         row.custom_blacklist, row.custom_whitelist, row.use_global_blacklist,
                         row.use_global_whitelist, row.enable_qa_feature, row.custom_qa, row.qa_event_date,
-                        row.qa_language, row.qa_event_dates
+                        row.qa_language, row.qa_event_dates, row.custom_ai_trigger_words || '[]'
                     );
                 }
             }
@@ -1228,6 +1230,7 @@ client.on('message', async msg => {
             let blockedTypes = config.blockedTypes;
             let blockedAction = config.blockedAction;
             let forbiddenWords = [...config.defaultWords];
+            let aiTriggerWords = Array.isArray(config.aiFilterTriggerWords) && config.aiFilterTriggerWords.length > 0 ? config.aiFilterTriggerWords : ['نعم'];
             let adminMessageLang = normalizeAdminLang(config.defaultAdminLanguage);
 
             if (groupConfig) {
@@ -1249,6 +1252,9 @@ client.on('message', async msg => {
                 if (groupConfig.blockedAction) blockedAction = groupConfig.blockedAction;
                 if (groupConfig.useDefaultWords === false) forbiddenWords = [];
                 if (groupConfig.words && groupConfig.words.length > 0) forbiddenWords = [...forbiddenWords, ...groupConfig.words];
+                if (Array.isArray(groupConfig.aiFilterTriggerWords) && groupConfig.aiFilterTriggerWords.length > 0) {
+                    aiTriggerWords = groupConfig.aiFilterTriggerWords;
+                }
             }
 
             if (isBlacklistEnabled) {
@@ -1525,10 +1531,9 @@ client.on('message', async msg => {
                     if (abortedMessages.has(msgId)) { abortedMessages.delete(msgId); return; }
 
                     const data = await response.json();
-                    const triggerWords = config.aiFilterTriggerWords || ['نعم'];
                     const aiText = data && typeof data.response === 'string' ? data.response : '';
                     console.log(`[AI] رد | id=${compactId} | نص="${toLogPreview(aiText, 140)}"`);
-                    if (aiText && triggerWords.some(word => aiText.includes(word))) {
+                    if (aiText && aiTriggerWords.some(word => aiText.includes(word))) {
                         isViolating = true;
                         violationReason = 'تم التصنيف كمخالفة عبر الذكاء الاصطناعي';
                     }
