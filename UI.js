@@ -729,10 +729,85 @@ module.exports = function renderDashboard(req, db, config) {
             <div class="page" id="page-users">
                 <div class="page-header">
                     <h2><i class="fas fa-user-shield"></i> ${t('إدارة المستخدمين', 'User Management')}</h2>
-                    <p>${t('إدارة الحسابات والصلاحيات بدون مغادرة لوحة التحكم', 'Manage accounts and permissions without leaving the dashboard')}</p>
+                    <p>${t('إدارة الحسابات والصلاحيات بشكل مباشر داخل اللوحة', 'Manage users and permissions directly inside the dashboard')}</p>
                 </div>
-                <div class="card" style="padding:10px;">
-                    <iframe id="usersFrame" src="/users" style="width:100%;min-height:78vh;border:1px solid var(--card-border);border-radius:10px;background:var(--card-bg);"></iframe>
+
+                <div class="card-grid">
+                    <div class="card">
+                        <div class="card-header"><h3><i class="fas fa-user-plus"></i> ${t('إضافة مستخدم', 'Create User')}</h3></div>
+                        <div class="field-group">
+                            <label class="field-label">${t('اسم المستخدم', 'Username')}</label>
+                            <input type="text" id="um_create_username" placeholder="agent_1">
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('الاسم المعروض', 'Display Name')}</label>
+                            <input type="text" id="um_create_display_name" placeholder="Agent One">
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('كلمة المرور', 'Password')}</label>
+                            <input type="text" id="um_create_password" placeholder="${t('8 أحرف على الأقل', 'At least 8 characters')}">
+                        </div>
+                        <div class="toggle-row" style="margin-bottom:16px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="um_create_superadmin"><span class="slider"></span></label>
+                                <div class="toggle-label">${t('صلاحية مدير عام', 'Superadmin Permission')}</div>
+                            </div>
+                        </div>
+                        <div class="field-row">
+                            <button class="btn btn-primary" type="button" onclick="umCreateUser()"><i class="fas fa-plus"></i> ${t('إضافة المستخدم', 'Create User')}</button>
+                            <button class="btn btn-ghost" type="button" onclick="umLoadData()"><i class="fas fa-sync"></i> ${t('تحديث', 'Refresh')}</button>
+                        </div>
+                        <div id="um_create_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header"><h3><i class="fas fa-layer-group"></i> ${t('إضافة مجموعة صلاحيات', 'Create Permission Group')}</h3></div>
+                        <div class="field-group">
+                            <label class="field-label">${t('اسم المجموعة', 'Group Name')}</label>
+                            <input type="text" id="um_perm_name" placeholder="${t('المشرفون', 'Moderators')}">
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('الوصف', 'Description')}</label>
+                            <input type="text" id="um_perm_desc" placeholder="${t('وصف مختصر', 'Short description')}">
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('الصلاحيات (كل سطر صلاحية)', 'Permissions (one per line)')}</label>
+                            <textarea id="um_perm_list" rows="6" placeholder="dashboard:read&#10;groups:view&#10;users:manage"></textarea>
+                        </div>
+                        <button class="btn btn-primary" type="button" onclick="umCreatePermissionGroup()"><i class="fas fa-plus"></i> ${t('إضافة المجموعة', 'Create Group')}</button>
+                        <div id="um_perm_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
+                    </div>
+                </div>
+
+                <div class="card-grid">
+                    <div class="card">
+                        <div class="card-header"><h3><i class="fas fa-users"></i> ${t('المستخدمون', 'Users')}</h3></div>
+                        <div id="um_users_list"></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><h3><i class="fas fa-key"></i> ${t('مجموعات الصلاحيات', 'Permission Groups')}</h3></div>
+                        <div id="um_perm_groups_list"></div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header"><h3><i class="fas fa-sliders-h"></i> ${t('صلاحيات المستخدم المحدد', 'Selected User Access')}</h3></div>
+                    <p id="um_selected_user" style="color:var(--text-muted);margin-bottom:14px;">${t('اختر مستخدماً من القائمة', 'Select a user from the list')}</p>
+                    <div class="card-grid">
+                        <div>
+                            <label class="field-label">${t('تعيين مجموعات الصلاحيات', 'Assign Permission Groups')}</label>
+                            <div id="um_assign_perm_groups" class="chip-container" style="display:block;min-height:120px;"></div>
+                        </div>
+                        <div>
+                            <label class="field-label">${t('المجموعات المسموح الوصول إليها', 'Allowed WhatsApp Groups')}</label>
+                            <div id="um_assign_wa_groups" class="chip-container" style="display:block;min-height:120px;"></div>
+                        </div>
+                    </div>
+                    <div class="field-row" style="margin-top:12px;">
+                        <button class="btn btn-primary" type="button" onclick="umSaveSelectedUserAccess()"><i class="fas fa-save"></i> ${t('حفظ الوصول', 'Save Access')}</button>
+                        <button class="btn btn-danger" type="button" onclick="umDeleteSelectedUser()"><i class="fas fa-trash"></i> ${t('حذف المستخدم', 'Delete User')}</button>
+                    </div>
+                    <div id="um_access_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
                 </div>
             </div>
 
@@ -985,8 +1060,7 @@ module.exports = function renderDashboard(req, db, config) {
                     document.getElementById('groupsDetailView').style.display = 'none';
                 }
                 if (pageId === 'page-users') {
-                    const frame = document.getElementById('usersFrame');
-                    if (frame && !frame.src) frame.src = '/users';
+                    umLoadData();
                 }
             }
             function toggleSidebar() {
@@ -1002,6 +1076,263 @@ module.exports = function renderDashboard(req, db, config) {
                 if(msg) t.innerHTML = msg;
                 t.classList.add('show');
                 setTimeout(() => t.classList.remove('show'), 3000);
+            }
+
+            const umState = {
+                users: [],
+                permissionGroups: [],
+                waGroups: [],
+                selectedUserId: null,
+                selectedUserAccess: null,
+                loaded: false
+            };
+            const umNoUsersText = '${t('لا يوجد مستخدمون حالياً', 'No users yet')}';
+            const umNoPermsText = '${t('لا توجد مجموعات صلاحيات', 'No permission groups')}';
+            const umSelectText = '${t('اختيار', 'Select')}';
+            const umDeleteText = '${t('حذف', 'Delete')}';
+
+            async function umApi(url, options = {}) {
+                const res = await fetch(url, options);
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({ error: currentLang === 'en' ? 'Request failed' : 'فشل الطلب' }));
+                    throw new Error(data.error || (currentLang === 'en' ? 'Request failed' : 'فشل الطلب'));
+                }
+                const text = await res.text();
+                return text ? JSON.parse(text) : null;
+            }
+
+            function umSetStatus(elId, msg, isErr = false) {
+                const el = document.getElementById(elId);
+                if (!el) return;
+                el.textContent = msg || '';
+                el.style.color = isErr ? 'var(--red)' : 'var(--text-muted)';
+            }
+
+            function umEscapeHtml(value) {
+                return String(value)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#039;');
+            }
+
+            async function umLoadData(force = false) {
+                if (umState.loaded && !force) return;
+                try {
+                    const [users, permissionGroups, waGroups] = await Promise.all([
+                        umApi('/api/users'),
+                        umApi('/api/access/permission-groups'),
+                        umApi('/api/groups')
+                    ]);
+                    umState.users = users || [];
+                    umState.permissionGroups = permissionGroups || [];
+                    umState.waGroups = waGroups || [];
+                    umState.loaded = true;
+                    umRenderUsers();
+                    umRenderPermissionGroups();
+                    umRenderSelectedUserAccess();
+                } catch (e) {
+                    umSetStatus('um_create_status', e.message, true);
+                }
+            }
+
+            function umRenderUsers() {
+                const container = document.getElementById('um_users_list');
+                if (!container) return;
+                if (!umState.users.length) {
+                    container.innerHTML = '<p style="color:var(--text-muted);">' + umNoUsersText + '</p>';
+                    return;
+                }
+
+                container.innerHTML = umState.users.map(user => {
+                    const activeTxt = user.is_active ? (currentLang === 'en' ? 'Active' : 'مفعل') : (currentLang === 'en' ? 'Disabled' : 'معطل');
+                    const superTxt = user.is_superadmin ? '<span class="chip" style="margin-inline-start:6px;">' + (currentLang === 'en' ? 'Superadmin' : 'مدير عام') + '</span>' : '';
+                    const activeClass = user.is_active ? 'green' : 'red';
+                    return '' +
+                        '<div class="group-list-card" style="padding:12px 14px;margin-bottom:10px;align-items:center;" onclick="umSelectUser(' + user.id + ')">' +
+                            '<div class="glc-info">' +
+                                '<div class="glc-name">' + umEscapeHtml(user.display_name) + ' <span class="mono">(' + umEscapeHtml(user.username) + ')</span></div>' +
+                                '<div class="glc-chips" style="margin-top:6px;">' +
+                                    '<span class="glc-chip ' + activeClass + '">' + activeTxt + '</span>' +
+                                    superTxt +
+                                '</div>' +
+                            '</div>' +
+                            '<button type="button" class="btn btn-sm btn-blue" onclick="event.stopPropagation();umSelectUser(' + user.id + ')"><i class="fas fa-hand-pointer"></i> ' + umSelectText + '</button>' +
+                        '</div>';
+                }).join('');
+            }
+
+            function umRenderPermissionGroups() {
+                const container = document.getElementById('um_perm_groups_list');
+                if (!container) return;
+                if (!umState.permissionGroups.length) {
+                    container.innerHTML = '<p style="color:var(--text-muted);">' + umNoPermsText + '</p>';
+                    return;
+                }
+
+                container.innerHTML = umState.permissionGroups.map(group => {
+                    const perms = Array.isArray(group.permissions) ? group.permissions : [];
+                    const permsHtml = perms.map(p => '<span class="chip">' + umEscapeHtml(p) + '</span>').join('');
+                    return '' +
+                        '<div class="card" style="padding:12px;margin-bottom:10px;">' +
+                            '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
+                                '<div>' +
+                                    '<strong>' + umEscapeHtml(group.name) + '</strong>' +
+                                    '<div style="color:var(--text-muted);font-size:12px;">' + umEscapeHtml(group.description || '') + '</div>' +
+                                '</div>' +
+                                '<button type="button" class="btn btn-sm btn-danger" onclick="umDeletePermissionGroup(' + group.id + ')"><i class="fas fa-trash"></i> ' + umDeleteText + '</button>' +
+                            '</div>' +
+                            '<div class="chip-container" style="margin-top:8px;max-height:80px;">' + permsHtml + '</div>' +
+                        '</div>';
+                }).join('');
+            }
+
+            async function umSelectUser(userId) {
+                umState.selectedUserId = userId;
+                try {
+                    umState.selectedUserAccess = await umApi('/api/users/' + userId + '/access');
+                    umRenderSelectedUserAccess();
+                } catch (e) {
+                    umSetStatus('um_access_status', e.message, true);
+                }
+            }
+
+            function umRenderSelectedUserAccess() {
+                const meta = document.getElementById('um_selected_user');
+                const permBox = document.getElementById('um_assign_perm_groups');
+                const waBox = document.getElementById('um_assign_wa_groups');
+                if (!meta || !permBox || !waBox) return;
+
+                if (!umState.selectedUserId || !umState.selectedUserAccess) {
+                    meta.textContent = currentLang === 'en' ? 'Select a user from the list' : 'اختر مستخدماً من القائمة';
+                    permBox.innerHTML = '';
+                    waBox.innerHTML = '';
+                    return;
+                }
+
+                const user = umState.users.find(u => u.id === umState.selectedUserId);
+                meta.innerHTML = user
+                    ? (currentLang === 'en' ? 'Editing:' : 'تعديل:') + ' <strong>' + umEscapeHtml(user.display_name) + '</strong> <span class="mono">(' + umEscapeHtml(user.username) + ')</span>'
+                    : (currentLang === 'en' ? 'User:' : 'المستخدم:') + ' #' + umState.selectedUserId;
+
+                const selectedPermIds = new Set((umState.selectedUserAccess.permissionGroupIds || []).map(Number));
+                permBox.innerHTML = umState.permissionGroups.map(group => {
+                    const checked = selectedPermIds.has(Number(group.id)) ? 'checked' : '';
+                    return '<label class="cb-label" style="display:flex;margin:0 0 8px 0;justify-content:flex-start;">' +
+                        '<input type="checkbox" data-role="um-perm" value="' + group.id + '" ' + checked + '> ' + umEscapeHtml(group.name) +
+                    '</label>';
+                }).join('');
+
+                const selectedWaIds = new Set(umState.selectedUserAccess.allowedGroupIds || []);
+                waBox.innerHTML = umState.waGroups.map(group => {
+                    const checked = selectedWaIds.has(group.id) ? 'checked' : '';
+                    return '<label class="cb-label" style="display:flex;margin:0 0 8px 0;justify-content:flex-start;">' +
+                        '<input type="checkbox" data-role="um-wa" value="' + group.id + '" ' + checked + '> ' + umEscapeHtml(group.name || group.id) +
+                    '</label>';
+                }).join('');
+            }
+
+            async function umCreateUser() {
+                try {
+                    await umApi('/api/users/create', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            username: document.getElementById('um_create_username').value,
+                            displayName: document.getElementById('um_create_display_name').value,
+                            password: document.getElementById('um_create_password').value,
+                            isSuperadmin: document.getElementById('um_create_superadmin').checked
+                        })
+                    });
+                    umSetStatus('um_create_status', currentLang === 'en' ? 'User created successfully' : 'تم إنشاء المستخدم بنجاح');
+                    document.getElementById('um_create_password').value = '';
+                    await umLoadData(true);
+                } catch (e) {
+                    umSetStatus('um_create_status', e.message, true);
+                }
+            }
+
+            async function umCreatePermissionGroup() {
+                try {
+                    const permissions = document.getElementById('um_perm_list').value
+                        .split('\n')
+                        .map(s => s.trim())
+                        .filter(Boolean);
+                    await umApi('/api/access/permission-groups/create', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            name: document.getElementById('um_perm_name').value,
+                            description: document.getElementById('um_perm_desc').value,
+                            permissions
+                        })
+                    });
+                    umSetStatus('um_perm_status', currentLang === 'en' ? 'Permission group created' : 'تم إنشاء مجموعة الصلاحيات');
+                    document.getElementById('um_perm_name').value = '';
+                    document.getElementById('um_perm_desc').value = '';
+                    document.getElementById('um_perm_list').value = '';
+                    await umLoadData(true);
+                } catch (e) {
+                    umSetStatus('um_perm_status', e.message, true);
+                }
+            }
+
+            async function umDeletePermissionGroup(id) {
+                if (!confirm(currentLang === 'en' ? 'Delete this permission group?' : 'هل تريد حذف مجموعة الصلاحيات؟')) return;
+                try {
+                    await umApi('/api/access/permission-groups/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ id })
+                    });
+                    umSetStatus('um_perm_status', currentLang === 'en' ? 'Permission group deleted' : 'تم حذف مجموعة الصلاحيات');
+                    await umLoadData(true);
+                } catch (e) {
+                    umSetStatus('um_perm_status', e.message, true);
+                }
+            }
+
+            async function umSaveSelectedUserAccess() {
+                if (!umState.selectedUserId) {
+                    umSetStatus('um_access_status', currentLang === 'en' ? 'Select a user first' : 'اختر مستخدماً أولاً', true);
+                    return;
+                }
+                try {
+                    const permissionGroupIds = Array.from(document.querySelectorAll('input[data-role="um-perm"]:checked')).map(cb => Number(cb.value));
+                    const allowedGroupIds = Array.from(document.querySelectorAll('input[data-role="um-wa"]:checked')).map(cb => cb.value);
+                    await umApi('/api/users/' + umState.selectedUserId + '/access', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ permissionGroupIds, allowedGroupIds, settings: {} })
+                    });
+                    umSetStatus('um_access_status', currentLang === 'en' ? 'Access saved successfully' : 'تم حفظ الوصول بنجاح');
+                    await umSelectUser(umState.selectedUserId);
+                    await umLoadData(true);
+                } catch (e) {
+                    umSetStatus('um_access_status', e.message, true);
+                }
+            }
+
+            async function umDeleteSelectedUser() {
+                if (!umState.selectedUserId) {
+                    umSetStatus('um_access_status', currentLang === 'en' ? 'Select a user first' : 'اختر مستخدماً أولاً', true);
+                    return;
+                }
+                if (!confirm(currentLang === 'en' ? 'Delete selected user?' : 'هل تريد حذف المستخدم المحدد؟')) return;
+                try {
+                    await umApi('/api/users/delete', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId: umState.selectedUserId })
+                    });
+                    umSetStatus('um_access_status', currentLang === 'en' ? 'User deleted' : 'تم حذف المستخدم');
+                    umState.selectedUserId = null;
+                    umState.selectedUserAccess = null;
+                    await umLoadData(true);
+                } catch (e) {
+                    umSetStatus('um_access_status', e.message, true);
+                }
             }
 
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
