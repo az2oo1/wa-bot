@@ -138,9 +138,7 @@ function ensureDbPathReady(dbPath) {
     if (fs.existsSync(dbPath)) {
         const stat = fs.statSync(dbPath);
         if (stat.isDirectory()) {
-            const backupPath = `${dbPath}.dir-backup-${Date.now()}`;
-            fs.renameSync(dbPath, backupPath);
-            console.error(`[DB] Expected a file but found a directory at ${dbPath}. Moved directory to ${backupPath}.`);
+            throw new Error(`[DB] Invalid database path: ${dbPath} points to a directory.`);
         }
     }
 
@@ -155,7 +153,7 @@ function openDatabaseWithFallback() {
         (process.env.WA_DB_PATH && process.env.WA_DB_PATH.trim()) ||
         (process.env.WA_DATA_DIR && process.env.WA_DATA_DIR.trim())
     );
-    const allowTmpFallback = !hasExplicitDbPath && process.env.WA_ALLOW_TMP_DB_FALLBACK !== 'false';
+    const allowTmpFallback = process.env.WA_ALLOW_TMP_DB_FALLBACK === 'true';
     const candidates = allowTmpFallback ? [primaryPath, fallbackPath] : [primaryPath];
 
     for (const dbPath of candidates) {

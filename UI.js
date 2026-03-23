@@ -1032,7 +1032,9 @@ module.exports = function renderDashboard(req, db, config) {
                 eventDate: groupsConfigObj[key].eventDate || '',
                 eventDates: groupsConfigObj[key].eventDates || [],
                 qaLanguage: groupsConfigObj[key].qaLanguage || 'ar',
-                currentQAQuestions: []
+                currentQAQuestions: [],
+                currentQAAnswer: '',
+                editingQAIndex: null
             }));
 
             let currentDetailIndex = null;
@@ -1349,7 +1351,7 @@ module.exports = function renderDashboard(req, db, config) {
                                 </div>
                                 <label class="field-label">\${currentLang==='en'?'Answer (Use {date}, {eventdate}, {user} for dynamic values)':'الإجابة (استخدم {date}, {eventdate}, {user} للحقول الديناميكية)'}</label>
                                 <div class="field-group" style="margin-bottom:10px;">
-                                    <textarea id="newQAAnswer_\${groupIndex}" placeholder="\${currentLang==='en'?'Enter answer with optional dynamic fields...':'أدخل الإجابة مع الحقول الديناميكية الاختيارية...'}" rows="3" style="margin-bottom:10px;"></textarea>
+                                    <textarea id="newQAAnswer_\${groupIndex}" placeholder="\${currentLang==='en'?'Enter answer with optional dynamic fields...':'أدخل الإجابة مع الحقول الديناميكية الاختيارية...'}" rows="3" style="margin-bottom:10px;" oninput="updateGroupData(\${groupIndex}, 'currentQAAnswer', this.value)" onchange="updateGroupData(\${groupIndex}, 'currentQAAnswer', this.value)">\${group.currentQAAnswer || ''}</textarea>
                                     <button type="button" id="saveQABtn_\${groupIndex}" class="btn btn-full" onclick="addGroupQA(\${groupIndex})" style="background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700;"><i class="fas fa-save"></i> \${currentLang==='en'?'Save Q&A Pair':'حفظ زوج س و ج'}</button>
                                 </div>
 
@@ -1750,7 +1752,7 @@ module.exports = function renderDashboard(req, db, config) {
                     spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
                     spamLimits: {text:7, image:3, video:2, audio:3, document:3, sticker:3},
                     enablePanicMode: false, panicMessageLimit: 10, panicTimeWindow: 5, panicLockoutDuration: 10, panicAlertTarget: 'both', panicAlertMessage: '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}',
-                    enableQAFeature: false, qaList: [], eventDate: '', eventDates: [], qaLanguage: 'ar', currentQAQuestions: []
+                    enableQAFeature: false, qaList: [], eventDate: '', eventDates: [], qaLanguage: 'ar', currentQAQuestions: [], currentQAAnswer: '', editingQAIndex: null
                 });
                 openGroupDetail(groupsArr.length - 1);
             }
@@ -1839,12 +1841,16 @@ module.exports = function renderDashboard(req, db, config) {
             }
 
             function addEventDate(groupIndex) {
+                const answerEl = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
+                if (answerEl) groupsArr[groupIndex].currentQAAnswer = answerEl.value;
                 if (!groupsArr[groupIndex].eventDates) groupsArr[groupIndex].eventDates = [];
                 groupsArr[groupIndex].eventDates.push({ label: '', date: '' });
                 renderGroupDetailBody(groupIndex, 'qa');
             }
 
             function removeEventDate(groupIndex, dateIndex) {
+                const answerEl = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
+                if (answerEl) groupsArr[groupIndex].currentQAAnswer = answerEl.value;
                 groupsArr[groupIndex].eventDates.splice(dateIndex, 1);
                 renderGroupDetailBody(groupIndex, 'qa');
             }
@@ -1868,7 +1874,7 @@ module.exports = function renderDashboard(req, db, config) {
 
             function addGroupQA(groupIndex) {
                 const answerInput = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
-                const answer = answerInput.value.trim();
+                const answer = (answerInput ? answerInput.value : (groupsArr[groupIndex].currentQAAnswer || '')).trim();
                 const questions = groupsArr[groupIndex].currentQAQuestions || [];
                 const mediaFile = groupsArr[groupIndex].pendingMediaFile || '';
                 const editingIndex = Number.isInteger(groupsArr[groupIndex].editingQAIndex)
@@ -1884,8 +1890,9 @@ module.exports = function renderDashboard(req, db, config) {
                     } else {
                         groupsArr[groupIndex].qaList.push(newPair);
                     }
-                    answerInput.value = '';
+                    if (answerInput) answerInput.value = '';
                     groupsArr[groupIndex].currentQAQuestions = [];
+                    groupsArr[groupIndex].currentQAAnswer = '';
                     groupsArr[groupIndex].editingQAIndex = null;
                     // Clear media selection
                     groupsArr[groupIndex].pendingMediaFile = '';
