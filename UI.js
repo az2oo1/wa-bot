@@ -1093,12 +1093,23 @@ module.exports = function renderDashboard(req, db, config) {
 
             async function umApi(url, options = {}) {
                 const res = await fetch(url, options);
-                if (!res.ok) {
-                    const data = await res.json().catch(() => ({ error: currentLang === 'en' ? 'Request failed' : 'فشل الطلب' }));
-                    throw new Error(data.error || (currentLang === 'en' ? 'Request failed' : 'فشل الطلب'));
-                }
                 const text = await res.text();
-                return text ? JSON.parse(text) : null;
+                const contentType = res.headers.get('content-type') || '';
+
+                let data = null;
+                if (text) {
+                    if (contentType.includes('application/json')) {
+                        try { data = JSON.parse(text); } catch (e) { data = null; }
+                    } else {
+                        try { data = JSON.parse(text); } catch (e) { data = { message: text }; }
+                    }
+                }
+
+                if (!res.ok) {
+                    throw new Error((data && (data.error || data.message)) || (currentLang === 'en' ? 'Request failed' : 'فشل الطلب'));
+                }
+
+                return data;
             }
 
             function umSetStatus(elId, msg, isErr = false) {

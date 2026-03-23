@@ -155,12 +155,23 @@ module.exports = function renderUserManagement(authUser, lang) {
 
     async function api(url, options = {}) {
       const res = await fetch(url, options);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({ error: 'Request failed' }));
-        throw new Error(data.error || 'Request failed');
-      }
       const text = await res.text();
-      return text ? JSON.parse(text) : null;
+      const contentType = res.headers.get('content-type') || '';
+
+      let data = null;
+      if (text) {
+        if (contentType.includes('application/json')) {
+          try { data = JSON.parse(text); } catch (e) { data = null; }
+        } else {
+          try { data = JSON.parse(text); } catch (e) { data = { message: text }; }
+        }
+      }
+
+      if (!res.ok) {
+        throw new Error((data && (data.error || data.message)) || 'Request failed');
+      }
+
+      return data;
     }
 
     function setStatus(id, message, isError = false) {
