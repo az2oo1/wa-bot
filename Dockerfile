@@ -25,32 +25,36 @@ RUN cp UI.js UI.js.original && cp index.js index.js.original
 # This script regenerates UI.js and index.js every time the container starts
 RUN echo '#!/bin/sh\n\
 set -e\n\
-DATA_DIR=${WA_DATA_DIR:-}\n\
-if [ -z "$DATA_DIR" ]; then\n\
-  if [ -d /app/.wwebjs_auth ] || [ -f /app/bot_data.sqlite ]; then\n\
-    DATA_DIR=/app\n\
-  else\n\
-    DATA_DIR=/data\n\
-  fi\n\
-fi\n\
-mkdir -p "$DATA_DIR"\n\
 mkdir -p /app\n\
-mkdir -p "$DATA_DIR/.wwebjs_auth" "$DATA_DIR/.wwebjs_cache" "$DATA_DIR/media"\n\
-if [ "$DATA_DIR" != "/app" ]; then\n\
-  ln -sfn "$DATA_DIR/.wwebjs_auth" /app/.wwebjs_auth\n\
-  ln -sfn "$DATA_DIR/.wwebjs_cache" /app/.wwebjs_cache\n\
-  ln -sfn "$DATA_DIR/media" /app/media\n\
-  if [ ! -f "$DATA_DIR/bot_data.sqlite" ] && [ -f /app/bot_data.sqlite ] && [ ! -L /app/bot_data.sqlite ]; then cp /app/bot_data.sqlite "$DATA_DIR/bot_data.sqlite"; fi\n\
-  if [ ! -f "$DATA_DIR/bot_data.sqlite" ] && [ -f /app_staging/bot_data.sqlite ]; then cp /app_staging/bot_data.sqlite "$DATA_DIR/bot_data.sqlite"; fi\n\
-  ln -sfn "$DATA_DIR/bot_data.sqlite" /app/bot_data.sqlite\n\
-fi\n\
-echo "🗂️ Using data dir: $DATA_DIR"\n\
+mkdir -p /app/.wwebjs_auth /app/.wwebjs_cache /app/media\n\
 echo "🔄 Regenerating UI.js and index.js..."\n\
 if [ -f /app_staging/UI.js.original ]; then\n\
   cp /app_staging/UI.js.original /app_staging/UI.js\n\
 fi\n\
 if [ -f /app_staging/index.js.original ]; then\n\
   cp /app_staging/index.js.original /app_staging/index.js\n\
+fi\n\
+\n\
+if [ ! -f /app/index.js ]; then\n\
+  echo "First run detected! Copying app files to /app..."\n\
+  cp -r /app_staging/* /app/\n\
+else\n\
+  echo "Updating UI.js and index.js in /app..."\n\
+  cp /app_staging/UI.js /app/UI.js\n\
+  cp /app_staging/index.js /app/index.js\n\
+fi\n\
+\n\
+if [ ! -d /app/node_modules ] || [ ! -f /app/node_modules/express/package.json ]; then\n\
+  echo "📦 Restoring node_modules to /app..."\n\
+  if [ -d /app_staging/node_modules ]; then\n\
+    cp -a /app_staging/node_modules /app/\n\
+  fi\n\
+fi\n\
+\n\
+if [ ! -f /app/node_modules/express/package.json ]; then\n\
+  echo "📦 Installing dependencies in /app (fallback)..."\n\
+  cd /app\n\
+  npm install --omit=dev\n\
 fi\n\
 \n\
 echo "🧹 Performing cleanup..."\n\
@@ -64,15 +68,10 @@ rm -rf /tmp/.pki 2>/dev/null || true\n\
 rm -rf /tmp/.X* 2>/dev/null || true\n\
 sleep 1\n\
 echo "🔧 Cleaning stale lock files only (preserving session data)..."\n\
-find "$DATA_DIR/.wwebjs_auth" -name "*lock*" -delete 2>/dev/null || true\n\
-find "$DATA_DIR/.wwebjs_auth" -name ".parent-lock" -delete 2>/dev/null || true\n\
-find "$DATA_DIR/.wwebjs_auth" -name "Singleton*" -delete 2>/dev/null || true\n\
+find /app/.wwebjs_auth -name "*lock*" -delete 2>/dev/null || true\n\
+find /app/.wwebjs_auth -name ".parent-lock" -delete 2>/dev/null || true\n\
+find /app/.wwebjs_auth -name "Singleton*" -delete 2>/dev/null || true\n\
 sleep 1\n\
-\n\
-echo "Regenerating UI.js and index.js in /app..."\n\
-cp /app_staging/UI.js /app/UI.js\n\
-cp /app_staging/index.js /app/index.js\n\
-\n\
 cd /app\n\
 echo "✅ Cleanup and regeneration complete. Starting bot..."\n\
 exec node index.js' > /start.sh && chmod +x /start.sh
