@@ -752,6 +752,24 @@ module.exports = function renderDashboard(req, db, config) {
                             <label class="field-label">${t('كلمة المرور', 'Password')}</label>
                             <input type="text" id="um_create_password" placeholder="${t('8 أحرف على الأقل', 'At least 8 characters')}">
                         </div>
+                        <div class="field-row">
+                            <div class="field-group" style="margin-bottom:0;">
+                                <label class="field-label">${t('الدور السريع', 'Quick Role')}</label>
+                                <select id="um_create_quick_role">
+                                    <option value="viewer">${t('مشاهدة فقط', 'Viewer')}</option>
+                                    <option value="operator" selected>${t('مشغل', 'Operator')}</option>
+                                    <option value="admin">${t('مدير كامل', 'Full Admin')}</option>
+                                    <option value="custom">${t('مخصص (يدوي)', 'Custom (Manual)')}</option>
+                                </select>
+                            </div>
+                            <div class="field-group" style="margin-bottom:0;">
+                                <label class="field-label">${t('نطاق المجموعات', 'Groups Scope')}</label>
+                                <select id="um_create_group_scope">
+                                    <option value="all" selected>${t('كل المجموعات', 'All Groups')}</option>
+                                    <option value="none">${t('بدون صلاحيات مجموعات الآن', 'No Groups Yet')}</option>
+                                </select>
+                            </div>
+                        </div>
                         <div class="toggle-row" style="margin-bottom:16px;">
                             <div class="toggle-left">
                                 <label class="switch"><input type="checkbox" id="um_create_superadmin"><span class="slider"></span></label>
@@ -759,7 +777,7 @@ module.exports = function renderDashboard(req, db, config) {
                             </div>
                         </div>
                         <div class="field-row">
-                            <button class="btn btn-primary" type="button" onclick="umCreateUser()"><i class="fas fa-plus"></i> ${t('إضافة المستخدم', 'Create User')}</button>
+                            <button class="btn btn-primary" type="button" onclick="umCreateUser()"><i class="fas fa-wand-magic-sparkles"></i> ${t('إضافة سريعة للمستخدم', 'Quick Create User')}</button>
                             <button class="btn btn-ghost" type="button" onclick="umLoadData()"><i class="fas fa-sync"></i> ${t('تحديث', 'Refresh')}</button>
                         </div>
                         <div id="um_create_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
@@ -1274,17 +1292,45 @@ module.exports = function renderDashboard(req, db, config) {
 
             async function umCreateUser() {
                 try {
+                    const usernameRaw = document.getElementById('um_create_username').value;
+                    const displayNameRaw = document.getElementById('um_create_display_name').value;
+                    const passwordRaw = document.getElementById('um_create_password').value;
+                    const role = document.getElementById('um_create_quick_role').value;
+                    const scope = document.getElementById('um_create_group_scope').value;
+
+                    const isAdminByRole = role === 'admin';
+                    const isSuperadmin = document.getElementById('um_create_superadmin').checked || isAdminByRole;
+
                     await umApi('/api/users/create', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            username: document.getElementById('um_create_username').value,
-                            displayName: document.getElementById('um_create_display_name').value,
-                            password: document.getElementById('um_create_password').value,
-                            isSuperadmin: document.getElementById('um_create_superadmin').checked
+                            username: usernameRaw,
+                            displayName: displayNameRaw,
+                            password: passwordRaw,
+                            isSuperadmin
                         })
                     });
-                    umSetStatus('um_create_status', currentLang === 'en' ? 'User created successfully' : 'تم إنشاء المستخدم بنجاح');
+
+                    await umLoadData(true);
+
+                    const usernameNorm = String(usernameRaw || '').trim().toLowerCase();
+                    const createdUser = umState.users.find(u => String(u.username || '').toLowerCase() === usernameNorm);
+
+                    if (createdUser && !isSuperadmin && role !== 'custom') {
+                        const roleName = role === 'viewer' ? 'Viewer' : 'Operator';
+                        const roleGroup = umState.permissionGroups.find(g => String(g.name || '').toLowerCase() === roleName.toLowerCase());
+                        const permissionGroupIds = roleGroup ? [roleGroup.id] : [];
+                        const allowedGroupIds = scope === 'all' ? umState.waGroups.map(g => g.id) : [];
+
+                        await umApi('/api/users/' + createdUser.id + '/access', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ permissionGroupIds, allowedGroupIds, settings: {} })
+                        });
+                    }
+
+                    umSetStatus('um_create_status', currentLang === 'en' ? 'User created and configured successfully' : 'تم إنشاء المستخدم وضبط الصلاحيات بنجاح');
                     document.getElementById('um_create_password').value = '';
                     await umLoadData(true);
                 } catch (e) {
@@ -1383,7 +1429,7 @@ module.exports = function renderDashboard(req, db, config) {
                     admin: ['*']
                 };
                 const lines = presets[preset] || [];
-                target.value = lines.join('\n');
+                target.value = lines.join('\\n');
             }
 
             function umToggleAll(role, checked) {
@@ -1391,6 +1437,17 @@ module.exports = function renderDashboard(req, db, config) {
                     el.checked = checked;
                 });
             }
+
+            function umHandleQuickRoleChange() {
+                const roleEl = document.getElementById('um_create_quick_role');
+                const superEl = document.getElementById('um_create_superadmin');
+                if (!roleEl || !superEl) return;
+                if (roleEl.value === 'admin') superEl.checked = true;
+                if (roleEl.value === 'viewer' || roleEl.value === 'operator') superEl.checked = false;
+            }
+
+            const umQuickRoleEl = document.getElementById('um_create_quick_role');
+            if (umQuickRoleEl) umQuickRoleEl.addEventListener('change', umHandleQuickRoleChange);
 
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
             let aiFilterTriggerWordsArr = ${JSON.stringify(config.aiFilterTriggerWords || ['نعم'])};
