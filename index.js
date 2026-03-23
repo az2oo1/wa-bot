@@ -750,6 +750,32 @@ async function safeDelay() {
 const authDataPath = process.env.WA_AUTH_PATH || path.join(process.cwd(), '.wwebjs_auth');
 const browserProfileDir = process.env.WA_BROWSER_PROFILE_DIR || `/tmp/chromium-wa-bot-${process.pid}`;
 
+function resolveBrowserExecutablePath() {
+    const envPath = process.env.PUPPETEER_EXECUTABLE_PATH && process.env.PUPPETEER_EXECUTABLE_PATH.trim();
+    if (envPath) return envPath;
+
+    if (process.platform === 'win32') {
+        const winCandidates = [
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+            path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
+            path.join(process.env.LOCALAPPDATA || '', 'Chromium\\Application\\chrome.exe')
+        ].filter(Boolean);
+        const found = winCandidates.find(p => fs.existsSync(p));
+        return found || null;
+    }
+
+    if (process.platform === 'linux') {
+        const linuxCandidates = ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'];
+        const found = linuxCandidates.find(p => fs.existsSync(p));
+        return found || null;
+    }
+
+    return null;
+}
+
+const resolvedBrowserExecutablePath = resolveBrowserExecutablePath();
+
 function cleanupStaleAuthLocks(authPath) {
     try {
         if (!fs.existsSync(authPath)) return;
@@ -786,7 +812,7 @@ const client = new Client({
         clientId: process.env.WA_CLIENT_ID || 'main'
     }),
     puppeteer: { 
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+        ...(resolvedBrowserExecutablePath ? { executablePath: resolvedBrowserExecutablePath } : {}),
         headless: true,
         timeout: 60000,
         args: [
