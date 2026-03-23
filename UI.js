@@ -303,6 +303,15 @@ module.exports = function renderDashboard(req, db, config) {
                                 </div>
                             </div>
                         </div>
+                        <div class="toggle-row blue" style="margin-top:12px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableJoinProfileScreening" ${config.enableJoinProfileScreening ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label blue">
+                                    ${t('فحص الملف الشخصي عند الانضمام', 'Join Profile Screening')}
+                                    <small>${t('يفحص الاسم/النبذة للطلبات والأعضاء الجدد باستخدام فلتر الكلمات وAI عند تفعيلهما', 'Checks name/bio for join requests and new members using Word Filter and AI when enabled')}</small>
+                                </div>
+                            </div>
+                        </div>
                         <div style="margin-top:20px; padding:16px; background:var(--input-bg); border-radius:10px; border:1px solid var(--card-border);">
                             <div style="font-size:13px; color:var(--text-muted); line-height:2;">
                                 <div><i class="fas fa-circle text-danger" style="color:var(--red); font-size: 10px; margin-inline-end: 5px;"></i> <strong style="color:var(--text);">${t('مفعّل:', 'Enabled:')}</strong> ${t('حذف فوري + طرد تلقائي', 'Instant delete + auto kick')}</div>
@@ -798,6 +807,8 @@ module.exports = function renderDashboard(req, db, config) {
                 'ai_text': '${t("المشرف الذكي (AI) للنصوص", "AI Moderator for Text")}',
                 'ai_trigger_words_group': '${t("كلمات تشغيل AI لهذه المجموعة", "AI Trigger Words for this group")}',
                 'ai_trigger_words_desc_group': '${t("عند وجود أي كلمة من هذه الكلمات في رد النموذج سيتم حذف الرسالة", "If AI response contains any of these words, the message will be deleted")}',
+                'join_profile_screening': '${t("فحص الملف الشخصي عند الانضمام", "Join Profile Screening")}',
+                'join_profile_screening_desc': '${t("يفحص الاسم/النبذة للأعضاء الجدد وطلبات الانضمام", "Checks profile name/bio for new joins and membership requests")}',
                 'ai_vision': '${t("تحليل الصور (Vision)", "Image Analysis (Vision)")}',
                 'direct_del': '${t("الحذف المباشر (تخطي التصويت)", "Direct Delete (Skip Poll)")}',
                 'select_group': '${t("اختر مجموعة...", "Select a Group...")}',
@@ -990,6 +1001,7 @@ module.exports = function renderDashboard(req, db, config) {
                 words: groupsConfigObj[key].words || [],
                 aiFilterTriggerWords: groupsConfigObj[key].aiFilterTriggerWords || [],
                 useDefaultWords: groupsConfigObj[key].useDefaultWords !== false,
+                enableJoinProfileScreening: groupsConfigObj[key].enableJoinProfileScreening || false,
                 enableWordFilter: groupsConfigObj[key].enableWordFilter !== false,
                 enableAIFilter: groupsConfigObj[key].enableAIFilter || false,
                 enableAIMedia: groupsConfigObj[key].enableAIMedia || false,
@@ -1266,6 +1278,12 @@ module.exports = function renderDashboard(req, db, config) {
                             <div class="toggle-left">
                                 <label class="switch"><input type="checkbox" \${group.enableAIMedia?'checked':''} onchange="updateGroupToggle(\${groupIndex},'enableAIMedia',this.checked)"><span class="slider"></span></label>
                                 <div class="toggle-label purple">\${dict.ai_vision}</div>
+                            </div>
+                        </div>
+                        <div class="toggle-row blue" style="margin-top:12px; margin-bottom:0;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" \${group.enableJoinProfileScreening?'checked':''} onchange="updateGroupToggle(\${groupIndex},'enableJoinProfileScreening',this.checked)"><span class="slider"></span></label>
+                                <div class="toggle-label blue">\${dict.join_profile_screening}<small>\${dict.join_profile_screening_desc}</small></div>
                             </div>
                         </div>
                     </div>
@@ -1720,6 +1738,7 @@ module.exports = function renderDashboard(req, db, config) {
                 groupsArr.push({ 
                     id: '', adminGroup: '', words: [], useDefaultWords: true, 
                     aiFilterTriggerWords: [],
+                    enableJoinProfileScreening: false,
                     adminLanguage: 'default',
                     enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
                     autoAction: false, enableBlacklist: true, enableWhitelist: true,
@@ -2245,6 +2264,7 @@ module.exports = function renderDashboard(req, db, config) {
                     blockedAction: document.getElementById('globalBlockedAction').value,
                     enableBlacklist: document.getElementById('enableBlacklist').checked,
                     enableWhitelist: document.getElementById('enableWhitelist').checked,
+                    enableJoinProfileScreening: document.getElementById('enableJoinProfileScreening').checked,
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
                     enableAIFilter: document.getElementById('enableAIFilter').checked,
                     enableAIMedia: document.getElementById('enableAIMedia').checked,

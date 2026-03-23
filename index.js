@@ -192,7 +192,8 @@ db.exec(`
         auto_action INTEGER, enable_blacklist INTEGER, enable_anti_spam INTEGER,
         spam_duplicate_limit INTEGER, spam_flood_limit INTEGER, spam_action TEXT,
         enable_welcome_message INTEGER, welcome_message_text TEXT, custom_words TEXT,
-        custom_ai_trigger_words TEXT
+        custom_ai_trigger_words TEXT,
+        enable_join_profile_screening INTEGER
     );
 `);
 
@@ -203,7 +204,7 @@ const colsToAdd = [
     'enable_whitelist INTEGER', 'custom_blacklist TEXT', 'custom_whitelist TEXT',
     'use_global_blacklist INTEGER', 'use_global_whitelist INTEGER',
     'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT', 'qa_language TEXT', 'qa_event_dates TEXT',
-    'admin_language TEXT', 'custom_ai_trigger_words TEXT'
+    'admin_language TEXT', 'custom_ai_trigger_words TEXT', 'enable_join_profile_screening INTEGER'
 ];
 colsToAdd.forEach(col => {
     try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch (e) { }
@@ -213,6 +214,7 @@ function loadConfigFromDB() {
     let newConfig = {
         enableWordFilter: true, enableAIFilter: false, enableAIMedia: false,
         autoAction: false, enableBlacklist: true, enableWhitelist: true, enableAntiSpam: false,
+        enableJoinProfileScreening: false,
         safeMode: false,
         spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll',
         blockedTypes: [], blockedAction: 'delete',
@@ -225,7 +227,7 @@ function loadConfigFromDB() {
 
     db.prepare('SELECT * FROM global_settings').all().forEach(row => {
         if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits', 'aiFilterTriggerWords'].includes(row.key)) newConfig[row.key] = JSON.parse(row.value);
-        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode'].includes(row.key)) {
+        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
         } else if (['spamDuplicateLimit', 'spamFloodLimit'].includes(row.key)) {
             newConfig[row.key] = parseInt(row.value, 10);
@@ -253,7 +255,8 @@ function loadConfigFromDB() {
             panicTimeWindow: g.panic_time_window || 5, panicLockoutDuration: g.panic_lockout_duration || 10,
             panicAlertTarget: g.panic_alert_target || 'both', panicAlertMessage: g.panic_alert_message || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.',
             enableQAFeature: g.enable_qa_feature === 1, qaList: JSON.parse(g.custom_qa || '[]'), eventDate: g.qa_event_date || '', qaLanguage: g.qa_language || 'ar', eventDates: JSON.parse(g.qa_event_dates || '[]'),
-            aiFilterTriggerWords: JSON.parse(g.custom_ai_trigger_words || '[]')
+            aiFilterTriggerWords: JSON.parse(g.custom_ai_trigger_words || '[]'),
+            enableJoinProfileScreening: g.enable_join_profile_screening === 1
         };
     });
     return newConfig;
@@ -286,6 +289,7 @@ function saveConfigToDB(conf) {
         setGlobal.run('enableBlacklist', conf.enableBlacklist ? '1' : '0');
         setGlobal.run('enableWhitelist', conf.enableWhitelist ? '1' : '0');
         setGlobal.run('enableAntiSpam', conf.enableAntiSpam ? '1' : '0');
+        setGlobal.run('enableJoinProfileScreening', conf.enableJoinProfileScreening ? '1' : '0');
         setGlobal.run('safeMode', conf.safeMode ? '1' : '0');
         setGlobal.run('spamDuplicateLimit', conf.spamDuplicateLimit.toString());
         setGlobal.run('spamAction', conf.spamAction);
@@ -310,8 +314,8 @@ function saveConfigToDB(conf) {
                 blocked_types, blocked_action, spam_types, spam_limits,
                 enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
                 panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist,
-                enable_qa_feature, custom_qa, qa_event_date, qa_language, qa_event_dates, custom_ai_trigger_words
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                enable_qa_feature, custom_qa, qa_event_date, qa_language, qa_event_dates, custom_ai_trigger_words, enable_join_profile_screening
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
@@ -326,7 +330,7 @@ function saveConfigToDB(conf) {
                 gData.panicLockoutDuration, gData.panicAlertTarget, gData.panicAlertMessage,
                 JSON.stringify(gData.customBlacklist || []), JSON.stringify(gData.customWhitelist || []),
                 gData.useGlobalBlacklist ? 1 : 0, gData.useGlobalWhitelist ? 1 : 0,
-                gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || '', gData.qaLanguage || 'ar', JSON.stringify(gData.eventDates || []), JSON.stringify(gData.aiFilterTriggerWords || [])
+                gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || '', gData.qaLanguage || 'ar', JSON.stringify(gData.eventDates || []), JSON.stringify(gData.aiFilterTriggerWords || []), gData.enableJoinProfileScreening ? 1 : 0
             );
         }
     });
@@ -344,6 +348,7 @@ let currentQR = '';
 let botStatus = '<i class="fas fa-spinner fa-spin"></i> جاري تهيئة النظام وبدء التشغيل...';
 const userTrackers = new Map(); const abortedMessages = new Set(); const spamMutedUsers = new Map();
 const groupRaidTrackers = new Map(); const lockedGroups = new Set();
+const joinProfileReviewCache = new Map();
 
 // Client initialization tracking and debugging
 let isInitializing = false;
@@ -705,8 +710,8 @@ app.post('/api/import', (req, res) => {
                         enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
                         panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, 
                         use_global_blacklist, use_global_whitelist, enable_qa_feature, custom_qa, qa_event_date, 
-                        qa_language, qa_event_dates, custom_ai_trigger_words
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        qa_language, qa_event_dates, custom_ai_trigger_words, enable_join_profile_screening
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `);
                 for (const row of dataset.custom_groups) {
                     stmt.run(
@@ -719,7 +724,7 @@ app.post('/api/import', (req, res) => {
                         row.panic_lockout_duration, row.panic_alert_target, row.panic_alert_message,
                         row.custom_blacklist, row.custom_whitelist, row.use_global_blacklist,
                         row.use_global_whitelist, row.enable_qa_feature, row.custom_qa, row.qa_event_date,
-                        row.qa_language, row.qa_event_dates, row.custom_ai_trigger_words || '[]'
+                        row.qa_language, row.qa_event_dates, row.custom_ai_trigger_words || '[]', row.enable_join_profile_screening || 0
                     );
                 }
             }
@@ -1030,11 +1035,24 @@ client.on('group_join', async (notification) => {
         const groupConfig = config.groupsConfig[groupId];
         let isBlacklistEnabledForGroup = config.enableBlacklist;
         let isWhitelistEnabledForGroup = config.enableWhitelist;
+        let isJoinProfileScreeningEnabled = config.enableJoinProfileScreening;
         let targetAdminGroup = config.defaultAdminGroup;
+        let isWordFilterEnabled = config.enableWordFilter;
+        let isAIFilterEnabled = config.enableAIFilter;
+        let forbiddenWords = [...config.defaultWords];
+        let aiTriggerWords = Array.isArray(config.aiFilterTriggerWords) && config.aiFilterTriggerWords.length > 0 ? config.aiFilterTriggerWords : ['نعم'];
 
         if (groupConfig) {
             if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabledForGroup = groupConfig.enableBlacklist;
             if (typeof groupConfig.enableWhitelist !== 'undefined') isWhitelistEnabledForGroup = groupConfig.enableWhitelist;
+            if (typeof groupConfig.enableJoinProfileScreening !== 'undefined') isJoinProfileScreeningEnabled = groupConfig.enableJoinProfileScreening;
+            if (typeof groupConfig.enableWordFilter !== 'undefined') isWordFilterEnabled = groupConfig.enableWordFilter;
+            if (typeof groupConfig.enableAIFilter !== 'undefined') isAIFilterEnabled = groupConfig.enableAIFilter;
+            if (groupConfig.useDefaultWords === false) forbiddenWords = [];
+            if (groupConfig.words && groupConfig.words.length > 0) forbiddenWords = [...forbiddenWords, ...groupConfig.words];
+            if (Array.isArray(groupConfig.aiFilterTriggerWords) && groupConfig.aiFilterTriggerWords.length > 0) {
+                aiTriggerWords = groupConfig.aiFilterTriggerWords;
+            }
             if (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') targetAdminGroup = groupConfig.adminGroup.trim();
         }
 
@@ -1093,9 +1111,118 @@ client.on('group_join', async (notification) => {
                     } catch (err) { }
                 }, 3500);
             }
+
+            if (!isKicked && isJoinProfileScreeningEnabled && !isWhitelisted && (isWordFilterEnabled || isAIFilterEnabled)) {
+                setTimeout(async () => {
+                    try {
+                        const profileResult = await evaluateJoinProfileViolation({
+                            participantId,
+                            cleanUserId: cleanJoinedId,
+                            groupName: chat.name,
+                            isWordFilterEnabled,
+                            isAIFilterEnabled,
+                            forbiddenWords,
+                            aiTriggerWords
+                        });
+                        if (!profileResult.isViolating) return;
+
+                        await safeDelay();
+                        await chat.removeParticipants([participantId]);
+                        if (isBlacklistEnabledForGroup) {
+                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanJoinedId); } catch (e) { }
+                        }
+
+                        const reportText = tAdmin(
+                            groupConfig,
+                            config,
+                            `🚫 *فحص الانضمام*
+تم طرد عضو جديد بعد فحص الاسم/النبذة.
+المجموعة: "${chat.name}"
+الرقم: @${cleanJoinedId.split('@')[0]}
+السبب: ${profileResult.reason}
+البيانات:
+"${profileResult.profileText || 'غير متوفر'}"`,
+                            `🚫 *Join Screening*
+A newly joined member was removed after profile screening.
+Group: "${chat.name}"
+Number: @${cleanJoinedId.split('@')[0]}
+Reason: ${profileResult.reason}
+Profile:
+"${profileResult.profileText || 'Unavailable'}"`
+                        );
+                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanJoinedId] });
+                    } catch (err) { }
+                }, 2800);
+            }
         }
     } catch (error) { }
 });
+
+async function resolveContactForJoinScreening(participantId, cleanUserId) {
+    const candidates = [participantId, cleanUserId];
+    const numberOnly = typeof cleanUserId === 'string' ? cleanUserId.split('@')[0] : '';
+    if (numberOnly) candidates.push(`${numberOnly}@c.us`);
+    if (numberOnly) candidates.push(`${numberOnly}@lid`);
+    for (const id of candidates) {
+        if (!id) continue;
+        try {
+            const c = await client.getContactById(id);
+            if (c) return c;
+        } catch (e) { }
+    }
+    return null;
+}
+
+async function extractJoinProfileText(participantId, cleanUserId) {
+    const contact = await resolveContactForJoinScreening(participantId, cleanUserId);
+    const displayName = contact ? (contact.pushname || contact.name || contact.shortName || '') : '';
+    let about = '';
+    if (contact && typeof contact.getAbout === 'function') {
+        try {
+            const aboutText = await contact.getAbout();
+            if (typeof aboutText === 'string') about = aboutText.trim();
+        } catch (e) { }
+    }
+
+    const lines = [];
+    if (displayName) lines.push(`name: ${displayName}`);
+    if (about) lines.push(`bio: ${about}`);
+    return lines.join('\n').trim();
+}
+
+async function evaluateJoinProfileViolation({ participantId, cleanUserId, groupName, isWordFilterEnabled, isAIFilterEnabled, forbiddenWords, aiTriggerWords }) {
+    const profileText = await extractJoinProfileText(participantId, cleanUserId);
+    if (!profileText) return { isViolating: false, reason: '', profileText: '' };
+
+    if (isWordFilterEnabled && Array.isArray(forbiddenWords) && forbiddenWords.length > 0) {
+        const lowered = profileText.toLowerCase();
+        const matchedWord = forbiddenWords.find(word => typeof word === 'string' && word.trim() && lowered.includes(word.toLowerCase()));
+        if (matchedWord) {
+            return { isViolating: true, reason: `كلمة محظورة في الملف الشخصي: [${matchedWord}]`, profileText };
+        }
+    }
+
+    if (isAIFilterEnabled) {
+        try {
+            const payload = {
+                model: config.ollamaModel,
+                prompt: `Profile screening for group join in "${groupName}".\nCheck this profile text:\n${profileText}`,
+                stream: false
+            };
+            const response = await fetch(`${config.ollamaUrl}/api/generate`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            const aiText = data && typeof data.response === 'string' ? data.response : '';
+            const triggers = Array.isArray(aiTriggerWords) && aiTriggerWords.length > 0 ? aiTriggerWords : ['نعم'];
+            if (aiText && triggers.some(word => aiText.includes(word))) {
+                return { isViolating: true, reason: 'تم تصنيف الملف الشخصي كمخالفة عبر الذكاء الاصطناعي', profileText };
+            }
+        } catch (e) { }
+    }
+
+    return { isViolating: false, reason: '', profileText };
+}
 
 client.on('group_update', async (notification) => {
     try {
@@ -1105,6 +1232,54 @@ client.on('group_update', async (notification) => {
 });
 
 const pendingBans = new Map();
+
+function resolvePollOptionLocalIds(parentMessage) {
+    const opts = (parentMessage && (parentMessage.pollOptions || (parentMessage._data && parentMessage._data.pollOptions))) || [];
+    const yesLocalId = opts[0] && opts[0].localId ? opts[0].localId : null;
+    const noLocalId = opts[1] && opts[1].localId ? opts[1].localId : null;
+    return { yesLocalId, noLocalId };
+}
+
+function normalizeSelectedOptionName(option) {
+    if (!option) return '';
+    if (typeof option === 'string') return option;
+    if (typeof option.name === 'string') return option.name;
+    return '';
+}
+
+function isYesVoteSelected(vote, parentMessage) {
+    const { yesLocalId } = resolvePollOptionLocalIds(parentMessage);
+    const options = Array.isArray(vote && vote.selectedOptions) ? vote.selectedOptions : [];
+    for (const option of options) {
+        const name = normalizeSelectedOptionName(option);
+        if (name && (name.includes('نعم') || /\byes\b/i.test(name))) return true;
+        if (option && typeof option === 'object' && yesLocalId && option.localId && option.localId === yesLocalId) return true;
+    }
+    return false;
+}
+
+function isNoVoteSelected(vote, parentMessage) {
+    const { noLocalId } = resolvePollOptionLocalIds(parentMessage);
+    const options = Array.isArray(vote && vote.selectedOptions) ? vote.selectedOptions : [];
+    for (const option of options) {
+        const name = normalizeSelectedOptionName(option);
+        if (name && (name.includes('لا') || /\bno\b/i.test(name))) return true;
+        if (option && typeof option === 'object' && noLocalId && option.localId && option.localId === noLocalId) return true;
+    }
+    return false;
+}
+
+async function tryKickFromChat(chat, candidateIds) {
+    if (!chat || !chat.isGroup || !Array.isArray(candidateIds) || candidateIds.length === 0) return false;
+    for (const id of candidateIds) {
+        if (!id || typeof id !== 'string') continue;
+        try {
+            await chat.removeParticipants([id]);
+            return true;
+        } catch (e) { }
+    }
+    return false;
+}
 
 client.on('message', async msg => {
     try {
@@ -1291,7 +1466,13 @@ client.on('message', async msg => {
                         : `🚨 إشعار بمخالفة في "${chat.name}"\nالمرسل: @${cleanAuthorId.split('@')[0]}\nالسبب: إرسال نوع ممنوع (${internalMsgType})\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
                     const poll = new Poll(pollTitle, isBlacklistEnabled ? (adminMessageLang === 'en' ? ['Yes, remove and blacklist', 'No'] : ['نعم، طرد وحظر', 'لا']) : (adminMessageLang === 'en' ? ['Yes, remove', 'No'] : ['نعم، طرد', 'لا']));
                     const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [cleanAuthorId] });
-                    pendingBans.set(pollMsg.id._serialized, { senderId: cleanAuthorId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
+                    pendingBans.set(pollMsg.id._serialized, {
+                        senderId: cleanAuthorId,
+                        rawSenderId: rawAuthorId,
+                        sourceGroupId: groupId,
+                        pollMsg: pollMsg,
+                        isBlacklistEnabled: isBlacklistEnabled
+                    });
                 }
                 return;
             }
@@ -1384,7 +1565,13 @@ client.on('message', async msg => {
                             : `🚨 إشعار إزعاج في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${spamFlagReason}\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
                         const poll = new Poll(pollTitle, pollOptions);
                         const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
-                        pendingBans.set(pollMsg.id._serialized, { senderId: senderId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
+                        pendingBans.set(pollMsg.id._serialized, {
+                            senderId: senderId,
+                            rawSenderId: rawAuthorId,
+                            sourceGroupId: groupId,
+                            pollMsg: pollMsg,
+                            isBlacklistEnabled: isBlacklistEnabled
+                        });
                     }
                     return;
                 }
@@ -1580,7 +1767,13 @@ client.on('message', async msg => {
                     const poll = new Poll(pollTitle, pollOptions);
 
                     const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
-                    pendingBans.set(pollMsg.id._serialized, { senderId: senderId, pollMsg: pollMsg, isBlacklistEnabled: isBlacklistEnabled });
+                    pendingBans.set(pollMsg.id._serialized, {
+                        senderId: senderId,
+                        rawSenderId: rawAuthorId,
+                        sourceGroupId: groupId,
+                        pollMsg: pollMsg,
+                        isBlacklistEnabled: isBlacklistEnabled
+                    });
                 }
             }
         }
@@ -1588,37 +1781,64 @@ client.on('message', async msg => {
 });
 
 client.on('vote_update', async vote => {
-    const pollId = vote.parentMessage.id._serialized;
-    if (pendingBans.has(pollId)) {
-        if (vote.selectedOptions && vote.selectedOptions.length > 0) {
-            const selectedOption = vote.selectedOptions[0].name;
-            const data = pendingBans.get(pollId);
-            const userToBan = data.senderId;
+    const pollId = vote && vote.parentMessage && vote.parentMessage.id ? vote.parentMessage.id._serialized : null;
+    if (!pollId || !pendingBans.has(pollId)) return;
 
-            if (selectedOption && (selectedOption.includes('نعم') || /\byes\b/i.test(selectedOption))) {
-                if (data.isBlacklistEnabled) {
-                    try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan); } catch (e) { }
-                }
-                const botId = client.info.wid._serialized;
-                const chats = await client.getChats();
-                for (const chat of chats) {
-                    if (chat.isGroup) {
-                        const botData = chat.participants.find(p => p.id._serialized === botId);
-                        if (botData && (botData.isAdmin || botData.isSuperAdmin)) {
-                            try {
-                                await chat.removeParticipants([userToBan]);
-                                await new Promise(resolve => setTimeout(resolve, 1000));
-                            } catch (e) { }
-                        }
-                    }
-                }
-                const replyText = data.isBlacklistEnabled ? '✅ *تم تطبيق الطرد وإدراج الرقم في القائمة السوداء بنجاح.*' : '✅ *تم تطبيق الطرد بنجاح.*';
-                await data.pollMsg.reply(replyText);
-            } else if (selectedOption.includes('لا')) {
-                await data.pollMsg.reply('🛑 *تم إلغاء الطرد بناءً على تصويت الإدارة.*');
-            }
-            pendingBans.delete(pollId);
+    const data = pendingBans.get(pollId);
+    const userToBan = data.senderId;
+    const userNumber = (typeof userToBan === 'string' ? userToBan.split('@')[0] : '').trim();
+    const candidateIds = [];
+    if (data.rawSenderId) candidateIds.push(data.rawSenderId);
+    if (userToBan) candidateIds.push(userToBan);
+    if (userNumber) candidateIds.push(`${userNumber}@c.us`);
+    if (userNumber) candidateIds.push(`${userNumber}@lid`);
+
+    const yesSelected = isYesVoteSelected(vote, vote.parentMessage);
+    const noSelected = isNoVoteSelected(vote, vote.parentMessage);
+
+    if (!yesSelected && !noSelected) {
+        return;
+    }
+
+    if (yesSelected) {
+        if (data.isBlacklistEnabled) {
+            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan); } catch (e) { }
         }
+
+        let removed = false;
+        if (data.sourceGroupId) {
+            try {
+                const sourceChat = await client.getChatById(data.sourceGroupId);
+                removed = await tryKickFromChat(sourceChat, candidateIds);
+            } catch (e) { }
+        }
+
+        if (!removed) {
+            const botId = client.info && client.info.wid ? client.info.wid._serialized : null;
+            const chats = await client.getChats();
+            for (const chat of chats) {
+                if (!chat.isGroup) continue;
+                const botData = botId ? chat.participants.find(p => p.id._serialized === botId) : null;
+                if (!botData || !(botData.isAdmin || botData.isSuperAdmin)) continue;
+                const done = await tryKickFromChat(chat, candidateIds);
+                if (done) {
+                    removed = true;
+                    break;
+                }
+            }
+        }
+
+        const replyText = removed
+            ? (data.isBlacklistEnabled ? '✅ *تم تطبيق الطرد وإدراج الرقم في القائمة السوداء بنجاح.*' : '✅ *تم تطبيق الطرد بنجاح.*')
+            : (data.isBlacklistEnabled ? '⚠️ *تم إدراج الرقم في القائمة السوداء، لكن فشل الطرد الآن. قد يكون العضو غير موجود أو ليست هناك صلاحية كافية.*' : '⚠️ *فشل الطرد الآن. قد يكون العضو غير موجود أو ليست هناك صلاحية كافية.*');
+        await data.pollMsg.reply(replyText);
+        pendingBans.delete(pollId);
+        return;
+    }
+
+    if (noSelected) {
+        await data.pollMsg.reply('🛑 *تم إلغاء الطرد بناءً على تصويت الإدارة.*');
+        pendingBans.delete(pollId);
     }
 });
 
@@ -1729,3 +1949,114 @@ process.on('SIGINT', async () => {
     }
     process.exit(0);
 });
+
+async function screenPendingMembershipRequests() {
+    try {
+        const chats = await client.getChats();
+        for (const chat of chats) {
+            if (!chat.isGroup) continue;
+
+            const groupId = chat.id._serialized;
+            const groupConfig = config.groupsConfig[groupId];
+
+            let isJoinProfileScreeningEnabled = config.enableJoinProfileScreening;
+            let isWordFilterEnabled = config.enableWordFilter;
+            let isAIFilterEnabled = config.enableAIFilter;
+            let isBlacklistEnabled = config.enableBlacklist;
+            let isWhitelistEnabled = config.enableWhitelist;
+            let targetAdminGroup = config.defaultAdminGroup;
+            let forbiddenWords = [...config.defaultWords];
+            let aiTriggerWords = Array.isArray(config.aiFilterTriggerWords) && config.aiFilterTriggerWords.length > 0 ? config.aiFilterTriggerWords : ['نعم'];
+
+            if (groupConfig) {
+                if (typeof groupConfig.enableJoinProfileScreening !== 'undefined') isJoinProfileScreeningEnabled = groupConfig.enableJoinProfileScreening;
+                if (typeof groupConfig.enableWordFilter !== 'undefined') isWordFilterEnabled = groupConfig.enableWordFilter;
+                if (typeof groupConfig.enableAIFilter !== 'undefined') isAIFilterEnabled = groupConfig.enableAIFilter;
+                if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabled = groupConfig.enableBlacklist;
+                if (typeof groupConfig.enableWhitelist !== 'undefined') isWhitelistEnabled = groupConfig.enableWhitelist;
+                if (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') targetAdminGroup = groupConfig.adminGroup.trim();
+                if (groupConfig.useDefaultWords === false) forbiddenWords = [];
+                if (groupConfig.words && groupConfig.words.length > 0) forbiddenWords = [...forbiddenWords, ...groupConfig.words];
+                if (Array.isArray(groupConfig.aiFilterTriggerWords) && groupConfig.aiFilterTriggerWords.length > 0) {
+                    aiTriggerWords = groupConfig.aiFilterTriggerWords;
+                }
+            }
+
+            if (!isJoinProfileScreeningEnabled || (!isWordFilterEnabled && !isAIFilterEnabled)) continue;
+
+            let pendingReqs = [];
+            try {
+                pendingReqs = await chat.getGroupMembershipRequests();
+            } catch (e) {
+                continue;
+            }
+            if (!pendingReqs || pendingReqs.length === 0) continue;
+
+            for (const req of pendingReqs) {
+                const rawRequesterId = (req && (req.id || req.requesterId || req.author)) ? (req.id || req.requesterId || req.author) : null;
+                if (!rawRequesterId) continue;
+
+                const cacheKey = `${groupId}::${rawRequesterId}`;
+                const lastTs = joinProfileReviewCache.get(cacheKey) || 0;
+                if (Date.now() - lastTs < 2 * 60 * 1000) continue;
+                joinProfileReviewCache.set(cacheKey, Date.now());
+
+                const cleanRequesterId = rawRequesterId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+
+                if (isWhitelistEnabled) {
+                    const globalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanRequesterId);
+                    const useGlobalWl = groupConfig ? (groupConfig.useGlobalWhitelist !== false) : true;
+                    const inCustomWl = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanRequesterId) : false;
+                    if ((useGlobalWl && globalWl) || inCustomWl) {
+                        continue;
+                    }
+                }
+
+                const profileResult = await evaluateJoinProfileViolation({
+                    participantId: rawRequesterId,
+                    cleanUserId: cleanRequesterId,
+                    groupName: chat.name,
+                    isWordFilterEnabled,
+                    isAIFilterEnabled,
+                    forbiddenWords,
+                    aiTriggerWords
+                });
+                if (!profileResult.isViolating) continue;
+
+                try {
+                    await chat.rejectGroupMembershipRequests({ requesterIds: [rawRequesterId] });
+                } catch (e) {
+                    continue;
+                }
+
+                if (isBlacklistEnabled) {
+                    try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanRequesterId); } catch (e) { }
+                }
+
+                const reportText = tAdmin(
+                    groupConfig,
+                    config,
+                    `🚫 *فحص طلب الانضمام*
+تم رفض طلب انضمام بعد فحص الاسم/النبذة.
+المجموعة: "${chat.name}"
+الرقم: @${cleanRequesterId.split('@')[0]}
+السبب: ${profileResult.reason}
+البيانات:
+"${profileResult.profileText || 'غير متوفر'}"`,
+                    `🚫 *Join Request Screening*
+Join request was rejected after profile screening.
+Group: "${chat.name}"
+Number: @${cleanRequesterId.split('@')[0]}
+Reason: ${profileResult.reason}
+Profile:
+"${profileResult.profileText || 'Unavailable'}"`
+                );
+                try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanRequesterId] }); } catch (e) { }
+            }
+        }
+    } catch (e) { }
+}
+
+setInterval(() => {
+    screenPendingMembershipRequests().catch(() => { });
+}, 30000);
