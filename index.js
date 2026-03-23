@@ -1311,13 +1311,8 @@ client.on('message', async msg => {
 
             if (canSendToAI) {
                 try {
-                    const msgText = msg.body || '[صورة بدون نص مرفق]';
-                    const aiPromptText = `${config.aiPrompt}
-
-بناء على التعليمات، هل هذا المحتوى يعتبر مخالف؟ أجب بكلمة "نعم" أو "لا" فقط.
-المحتوى: "${msgText}"`;
-
-                    const payload = { model: config.ollamaModel, prompt: aiPromptText, stream: false };
+                    const msgText = typeof msg.body === 'string' ? msg.body : '';
+                    const payload = { model: config.ollamaModel, prompt: msgText, stream: false };
                     if (base64Image) payload.images = [base64Image];
 
                     const response = await fetch(`${config.ollamaUrl}/api/generate`, {
