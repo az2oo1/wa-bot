@@ -84,25 +84,29 @@ DB_DIR="$(dirname "$DB_PATH")"\n\
 mkdir -p "$DB_DIR"\n\
 if [ -L "$DB_PATH" ]; then\n\
   LINK_TARGET="$(readlink "$DB_PATH" || true)"\n\
-  if [ -n "$LINK_TARGET" ]; then\n\
-    case "$LINK_TARGET" in\n\
-      /*) TARGET_PATH="$LINK_TARGET" ;;\n\
-      *) TARGET_PATH="$DB_DIR/$LINK_TARGET" ;;\n\
-    esac\n\
-    TARGET_DIR="$(dirname "$TARGET_PATH")"\n\
-    if ! mkdir -p "$TARGET_DIR" 2>/dev/null || ! touch "$TARGET_PATH" 2>/dev/null; then\n\
-      echo "⚠️ Broken or unwritable DB symlink detected: $DB_PATH -> $LINK_TARGET"\n\
-      echo "🔧 Replacing symlink with local database file at $DB_PATH"\n\
-      rm -f "$DB_PATH"\n\
-    fi\n\
-  else\n\
-    echo "⚠️ Invalid DB symlink detected at $DB_PATH"\n\
-    echo "🔧 Replacing symlink with local database file at $DB_PATH"\n\
-    rm -f "$DB_PATH"\n\
+  if [ -z "$LINK_TARGET" ]; then\n\
+    echo "❌ Invalid DB symlink detected at $DB_PATH (empty target)."\n\
+    echo "🔒 Refusing to replace DB path automatically to prevent data loss."\n\
+    exit 1\n\
+  fi\n\
+  case "$LINK_TARGET" in\n\
+    /*) TARGET_PATH="$LINK_TARGET" ;;\n\
+    *) TARGET_PATH="$DB_DIR/$LINK_TARGET" ;;\n\
+  esac\n\
+  TARGET_DIR="$(dirname "$TARGET_PATH")"\n\
+  if ! mkdir -p "$TARGET_DIR" 2>/dev/null || ! touch "$TARGET_PATH" 2>/dev/null; then\n\
+    echo "❌ Broken or unwritable DB symlink detected: $DB_PATH -> $LINK_TARGET"\n\
+    echo "🔒 Refusing to replace DB path automatically to prevent data loss."\n\
+    exit 1\n\
   fi\n\
 fi\n\
 if [ -d "$DB_PATH" ]; then\n\
-  mv "$DB_PATH" "${DB_PATH}.dir-backup-$(date +%s)"\n\
+  echo "❌ DB path points to a directory: $DB_PATH"\n\
+  echo "🔒 Refusing to auto-move directory to prevent accidental data replacement."\n\
+  exit 1\n\
+fi\n\
+if [ -f "$DB_PATH" ]; then\n\
+  cp -n "$DB_PATH" "${DB_PATH}.startup-backup" 2>/dev/null || true\n\
 fi\n\
 if ! touch "$DB_PATH"; then\n\
   echo "❌ Cannot create database file at $DB_PATH"\n\

@@ -1871,14 +1871,22 @@ module.exports = function renderDashboard(req, db, config) {
                 const answer = answerInput.value.trim();
                 const questions = groupsArr[groupIndex].currentQAQuestions || [];
                 const mediaFile = groupsArr[groupIndex].pendingMediaFile || '';
+                const editingIndex = Number.isInteger(groupsArr[groupIndex].editingQAIndex)
+                    ? groupsArr[groupIndex].editingQAIndex
+                    : null;
                 
                 if (questions.length > 0 && (answer || mediaFile)) {
                     if (!groupsArr[groupIndex].qaList) groupsArr[groupIndex].qaList = [];
                     const newPair = { questions: questions, answer: answer };
                     if (mediaFile) newPair.mediaFile = mediaFile;
-                    groupsArr[groupIndex].qaList.push(newPair);
+                    if (editingIndex !== null && editingIndex >= 0 && editingIndex < groupsArr[groupIndex].qaList.length) {
+                        groupsArr[groupIndex].qaList[editingIndex] = newPair;
+                    } else {
+                        groupsArr[groupIndex].qaList.push(newPair);
+                    }
                     answerInput.value = '';
                     groupsArr[groupIndex].currentQAQuestions = [];
+                    groupsArr[groupIndex].editingQAIndex = null;
                     // Clear media selection
                     groupsArr[groupIndex].pendingMediaFile = '';
                     const indicator = document.getElementById(\`qa_media_selected_\${groupIndex}\`);
@@ -1904,6 +1912,13 @@ module.exports = function renderDashboard(req, db, config) {
                 if (groupsArr[groupIndex].qaList) {
                     groupsArr[groupIndex].qaList.splice(qaIndex, 1);
                     renderGroupQA(groupIndex);
+                }
+                const editingIndex = Number.isInteger(groupsArr[groupIndex].editingQAIndex)
+                    ? groupsArr[groupIndex].editingQAIndex
+                    : null;
+                if (editingIndex !== null) {
+                    if (editingIndex === qaIndex) groupsArr[groupIndex].editingQAIndex = null;
+                    if (editingIndex > qaIndex) groupsArr[groupIndex].editingQAIndex = editingIndex - 1;
                 }
             }
             
@@ -2042,13 +2057,25 @@ module.exports = function renderDashboard(req, db, config) {
                 if (!qa) return;
                 // Pre-fill questions
                 groupsArr[groupIndex].currentQAQuestions = [...(qa.questions || [])];
+                groupsArr[groupIndex].editingQAIndex = qaIndex;
                 renderQAQuestions(groupIndex);
                 // Pre-fill answer
                 const answerEl = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
                 if (answerEl) answerEl.value = qa.answer || '';
-                // Remove the old entry so saving creates a fresh one
-                groupsArr[groupIndex].qaList.splice(qaIndex, 1);
+                // Pre-fill media selection while editing
+                groupsArr[groupIndex].pendingMediaFile = qa.mediaFile || '';
+                const indicator = document.getElementById(\`qa_media_selected_\${groupIndex}\`);
+                const nameEl = document.getElementById(\`qa_media_selected_name_\${groupIndex}\`);
+                if (indicator && nameEl) {
+                    if (qa.mediaFile) {
+                        indicator.style.display = 'flex';
+                        nameEl.textContent = '📎 ' + qa.mediaFile;
+                    } else {
+                        indicator.style.display = 'none';
+                    }
+                }
                 renderGroupQA(groupIndex);
+                loadGroupMedia(groupIndex);
                 // Update save button appearance to indicate edit mode
                 const saveBtn = document.getElementById(\`saveQABtn_\${groupIndex}\`);
                 if (saveBtn) {
