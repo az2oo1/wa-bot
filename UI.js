@@ -797,8 +797,23 @@ module.exports = function renderDashboard(req, db, config) {
                             <input type="text" id="um_perm_desc" placeholder="${t('وصف مختصر', 'Short description')}">
                         </div>
                         <div class="field-group">
-                            <label class="field-label">${t('الصلاحيات (كل سطر صلاحية)', 'Permissions (one per line)')}</label>
-                            <textarea id="um_perm_list" rows="6" placeholder="dashboard:read&#10;groups:view&#10;users:manage"></textarea>
+                            <label class="field-label">${t('اختر الصلاحيات', 'Choose Permissions')}</label>
+                            <div id="um_perm_picker" class="cb-group" style="gap:8px;"></div>
+                        </div>
+                        <div class="field-row" style="margin-bottom:10px;">
+                            <button class="btn btn-ghost btn-sm" type="button" onclick="umSetAllCreatePerms(true)"><i class="fas fa-check-double"></i> ${t('تحديد الكل', 'Select All')}</button>
+                            <button class="btn btn-ghost btn-sm" type="button" onclick="umSetAllCreatePerms(false)"><i class="fas fa-eraser"></i> ${t('مسح الكل', 'Clear All')}</button>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('إضافة صلاحية مخصصة', 'Add Custom Permission')}</label>
+                            <div class="input-with-btn">
+                                <input type="text" id="um_perm_custom" placeholder="custom:permission" onkeypress="if(event.key==='Enter'){event.preventDefault();umAddCustomCreatePerm();}">
+                                <button class="btn btn-ghost" type="button" onclick="umAddCustomCreatePerm()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
+                            </div>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('الصلاحيات المختارة', 'Selected Permissions')}</label>
+                            <div id="um_perm_selected" class="chip-container" style="min-height:54px;"></div>
                         </div>
                         <button class="btn btn-primary" type="button" onclick="umCreatePermissionGroup()"><i class="fas fa-plus"></i> ${t('إضافة المجموعة', 'Create Group')}</button>
                         <div id="um_perm_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
@@ -1123,6 +1138,21 @@ module.exports = function renderDashboard(req, db, config) {
             const umNoPermsText = '${t('لا توجد مجموعات صلاحيات', 'No permission groups')}';
             const umSelectText = '${t('اختيار', 'Select')}';
             const umDeleteText = '${t('حذف', 'Delete')}';
+            const umCreatePermCatalog = [
+                'dashboard:read',
+                'groups:view',
+                'config:write',
+                'config:write-scoped',
+                'security:manage',
+                'media:manage',
+                'import-export:manage',
+                'bot:logout',
+                'logs:view',
+                'users:manage',
+                '*'
+            ];
+            const umNoCreatePermsText = '${t('لم يتم اختيار أي صلاحيات', 'No permissions selected')}';
+            let umCreatePermSet = new Set();
 
             async function umApi(url, options = {}) {
                 const res = await fetch(url, options);
@@ -1327,10 +1357,10 @@ module.exports = function renderDashboard(req, db, config) {
 
             async function umCreatePermissionGroup() {
                 try {
-                    const permissions = document.getElementById('um_perm_list').value
-                        .split('\\n')
-                        .map(s => s.trim())
-                        .filter(Boolean);
+                    const permissions = Array.from(umCreatePermSet);
+                    if (!permissions.length) {
+                        throw new Error(currentLang === 'en' ? 'Select at least one permission' : 'اختر صلاحية واحدة على الأقل');
+                    }
                     await umApi('/api/access/permission-groups/create', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -1343,7 +1373,10 @@ module.exports = function renderDashboard(req, db, config) {
                     umSetStatus('um_perm_status', currentLang === 'en' ? 'Permission group created' : 'تم إنشاء مجموعة الصلاحيات');
                     document.getElementById('um_perm_name').value = '';
                     document.getElementById('um_perm_desc').value = '';
-                    document.getElementById('um_perm_list').value = '';
+                    document.getElementById('um_perm_custom').value = '';
+                    umCreatePermSet = new Set();
+                    umRenderCreatePermPicker();
+                    umRenderCreatePermSelection();
                     await umLoadData(true);
                 } catch (e) {
                     umSetStatus('um_perm_status', e.message, true);
@@ -1408,15 +1441,92 @@ module.exports = function renderDashboard(req, db, config) {
             }
 
             function umUsePermPreset(preset) {
-                const target = document.getElementById('um_perm_list');
-                if (!target) return;
                 const presets = {
                     viewer: ['dashboard:read', 'groups:view', 'logs:view'],
                     operator: ['dashboard:read', 'groups:view', 'config:write', 'security:manage', 'media:manage', 'import-export:manage', 'bot:logout', 'logs:view', 'users:manage'],
                     admin: ['*']
                 };
                 const lines = presets[preset] || [];
-                target.value = lines.join('\\n');
+                umCreatePermSet = new Set(lines);
+                umRenderCreatePermPicker();
+                umRenderCreatePermSelection();
+            }
+
+            function umRenderCreatePermPicker() {
+                const picker = document.getElementById('um_perm_picker');
+                if (!picker) return;
+                picker.innerHTML = '';
+                umCreatePermCatalog.forEach(permission => {
+                    const label = document.createElement('label');
+                    label.className = 'cb-label';
+                    label.style.margin = '0';
+
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.checked = umCreatePermSet.has(permission);
+                    checkbox.addEventListener('change', () => umToggleCreatePerm(permission, checkbox.checked));
+                    label.appendChild(checkbox);
+
+                    const text = document.createElement('span');
+                    text.textContent = ' ' + permission;
+                    label.appendChild(text);
+
+                    picker.appendChild(label);
+                });
+            }
+
+            function umRenderCreatePermSelection() {
+                const selected = document.getElementById('um_perm_selected');
+                if (!selected) return;
+                const permissions = Array.from(umCreatePermSet);
+                if (!permissions.length) {
+                    selected.innerHTML = '<span style="color:var(--text-muted);font-size:13px;">' + umNoCreatePermsText + '</span>';
+                    return;
+                }
+                selected.innerHTML = '';
+                permissions.forEach(permission => {
+                    const chip = document.createElement('span');
+                    chip.className = 'chip';
+                    chip.textContent = permission;
+
+                    const remove = document.createElement('span');
+                    remove.className = 'chip-remove';
+                    remove.innerHTML = '&times;';
+                    remove.addEventListener('click', () => umRemoveCreatePerm(permission));
+                    chip.appendChild(document.createTextNode(' '));
+                    chip.appendChild(remove);
+
+                    selected.appendChild(chip);
+                });
+            }
+
+            function umToggleCreatePerm(permission, checked) {
+                if (checked) umCreatePermSet.add(permission);
+                else umCreatePermSet.delete(permission);
+                umRenderCreatePermSelection();
+            }
+
+            function umRemoveCreatePerm(permission) {
+                umCreatePermSet.delete(permission);
+                umRenderCreatePermPicker();
+                umRenderCreatePermSelection();
+            }
+
+            function umAddCustomCreatePerm() {
+                const input = document.getElementById('um_perm_custom');
+                if (!input) return;
+                const permission = String(input.value || '').trim();
+                if (!permission) return;
+                umCreatePermSet.add(permission);
+                input.value = '';
+                umRenderCreatePermPicker();
+                umRenderCreatePermSelection();
+            }
+
+            function umSetAllCreatePerms(checked) {
+                umCreatePermSet = checked ? new Set(umCreatePermCatalog) : new Set();
+                umRenderCreatePermPicker();
+                umRenderCreatePermSelection();
             }
 
             function umToggleAll(role, checked) {
@@ -1435,6 +1545,8 @@ module.exports = function renderDashboard(req, db, config) {
 
             const umQuickRoleEl = document.getElementById('um_create_quick_role');
             if (umQuickRoleEl) umQuickRoleEl.addEventListener('change', umHandleQuickRoleChange);
+            umRenderCreatePermPicker();
+            umRenderCreatePermSelection();
 
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
             let aiFilterTriggerWordsArr = ${JSON.stringify(config.aiFilterTriggerWords || ['نعم'])};

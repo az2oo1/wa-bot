@@ -46,6 +46,9 @@ module.exports = function renderUserManagement(authUser, lang) {
     .chips{display:flex;gap:6px;flex-wrap:wrap}
     .chip{border:1px solid rgba(64,196,255,.35);background:rgba(64,196,255,.1);color:var(--blue);border-radius:20px;padding:3px 10px;font-size:12px}
     .chip.warn{border-color:rgba(255,171,64,.35);background:rgba(255,171,64,.1);color:var(--orange)}
+    .perm-picker{display:flex;flex-wrap:wrap;gap:8px;padding:10px;background:var(--input-bg);border:1px solid var(--card-border);border-radius:10px;max-height:210px;overflow:auto}
+    .perm-option{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:999px;background:rgba(64,196,255,.08);border:1px solid rgba(64,196,255,.25);font-size:13px;color:var(--text)}
+    .perm-option input{width:auto;margin:0}
     .mono{font-family:monospace;font-size:12px;color:var(--text-muted)}
     .subtle{color:var(--text-muted);font-size:13px}
     .danger-text{color:#ff9f9f}
@@ -81,7 +84,25 @@ module.exports = function renderUserManagement(authUser, lang) {
         <h2><i class="fas fa-layer-group" style="color:var(--blue)"></i> ${t('إضافة مجموعة صلاحيات', 'Create Permission Group')}</h2>
         <div class="field"><label>${t('الاسم', 'Name')}</label><input id="permName" placeholder="${t('المشرفون', 'Moderators')}"></div>
         <div class="field"><label>${t('الوصف', 'Description')}</label><input id="permDescription" placeholder="${t('وصف قصير للمجموعة', 'Short group description')}"></div>
-        <div class="field"><label>${t('الصلاحيات (كل سطر صلاحية)', 'Permissions (one per line)')}</label><textarea id="permList" rows="6" placeholder="dashboard:read\ngroups:view\nconfig:write-scoped\nmedia:manage"></textarea></div>
+        <div class="field">
+          <label>${t('اختر الصلاحيات', 'Choose Permissions')}</label>
+          <div id="permPicker" class="perm-picker"></div>
+        </div>
+        <div class="row" style="margin-bottom:10px">
+          <button class="btn" onclick="setAllCreatePermissions(true)">${t('تحديد الكل', 'Select All')}</button>
+          <button class="btn" onclick="setAllCreatePermissions(false)">${t('مسح الكل', 'Clear All')}</button>
+        </div>
+        <div class="field">
+          <label>${t('إضافة صلاحية مخصصة', 'Add Custom Permission')}</label>
+          <div class="row">
+            <input id="permCustom" placeholder="custom:permission" onkeypress="if(event.key==='Enter'){event.preventDefault();addCustomCreatePermission();}">
+            <button class="btn" onclick="addCustomCreatePermission()">${t('إضافة', 'Add')}</button>
+          </div>
+        </div>
+        <div class="field">
+          <label>${t('الصلاحيات المختارة', 'Selected Permissions')}</label>
+          <div id="permSelected" class="chips"></div>
+        </div>
         <div class="row"><button class="btn btn-primary" onclick="createPermissionGroup()">${t('إضافة المجموعة', 'Create Group')}</button></div>
         <div id="permStatus" class="status"></div>
       </section>
@@ -148,10 +169,25 @@ module.exports = function renderUserManagement(authUser, lang) {
       perm_delete_ok: '${t('تم حذف مجموعة الصلاحيات', 'Permission group deleted')}',
       access_ok: '${t('تم حفظ الوصول بنجاح', 'Access saved successfully')}',
       user_delete_ok: '${t('تم حذف المستخدم', 'User deleted')}',
-      pick_user_first: '${t('اختر مستخدماً أولاً', 'Select a user first')}'
+      pick_user_first: '${t('اختر مستخدماً أولاً', 'Select a user first')}',
+      no_perm_selected: '${t('لم يتم اختيار أي صلاحيات', 'No permissions selected')}'
     };
 
     const state = { users: [], permissionGroups: [], waGroups: [], selectedUserId: null, selectedUserAccess: null };
+    const createPermissionCatalog = [
+      'dashboard:read',
+      'groups:view',
+      'config:write',
+      'config:write-scoped',
+      'security:manage',
+      'media:manage',
+      'import-export:manage',
+      'bot:logout',
+      'logs:view',
+      'users:manage',
+      '*'
+    ];
+    let selectedCreatePermissions = new Set();
 
     async function api(url, options = {}) {
       const res = await fetch(url, options);
@@ -342,7 +378,10 @@ module.exports = function renderUserManagement(authUser, lang) {
 
     async function createPermissionGroup() {
       try {
-        const permissions = document.getElementById('permList').value.split('\n').map(s => s.trim()).filter(Boolean);
+        const permissions = Array.from(selectedCreatePermissions);
+        if (!permissions.length) {
+          throw new Error('${t('اختر صلاحية واحدة على الأقل', 'Select at least one permission')}');
+        }
         await api('/api/access/permission-groups/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -355,11 +394,93 @@ module.exports = function renderUserManagement(authUser, lang) {
         setStatus('permStatus', dict.perm_create_ok);
         document.getElementById('permName').value = '';
         document.getElementById('permDescription').value = '';
-        document.getElementById('permList').value = '';
+        document.getElementById('permCustom').value = '';
+        selectedCreatePermissions = new Set();
+        renderCreatePermissionPicker();
+        renderSelectedCreatePermissions();
         await loadAll();
       } catch (err) {
         setStatus('permStatus', err.message, true);
       }
+    }
+
+    function renderCreatePermissionPicker() {
+      const picker = document.getElementById('permPicker');
+      if (!picker) return;
+      picker.innerHTML = '';
+
+      for (const permission of createPermissionCatalog) {
+        const option = document.createElement('label');
+        option.className = 'perm-option';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = selectedCreatePermissions.has(permission);
+        cb.onchange = () => toggleCreatePermission(permission, cb.checked);
+        option.appendChild(cb);
+        const text = document.createElement('span');
+        text.textContent = permission;
+        option.appendChild(text);
+        picker.appendChild(option);
+      }
+    }
+
+    function renderSelectedCreatePermissions() {
+      const selectedBox = document.getElementById('permSelected');
+      if (!selectedBox) return;
+      selectedBox.innerHTML = '';
+      const list = Array.from(selectedCreatePermissions);
+
+      if (!list.length) {
+        const empty = document.createElement('span');
+        empty.className = 'subtle';
+        empty.textContent = dict.no_perm_selected;
+        selectedBox.appendChild(empty);
+        return;
+      }
+
+      for (const permission of list) {
+        const chip = document.createElement('span');
+        chip.className = 'chip';
+        chip.textContent = permission;
+
+        const remove = document.createElement('span');
+        remove.style.cursor = 'pointer';
+        remove.style.fontWeight = '700';
+        remove.innerHTML = '&times;';
+        remove.onclick = () => removeCreatePermission(permission);
+
+        chip.appendChild(document.createTextNode(' '));
+        chip.appendChild(remove);
+        selectedBox.appendChild(chip);
+      }
+    }
+
+    function toggleCreatePermission(permission, checked) {
+      if (checked) selectedCreatePermissions.add(permission);
+      else selectedCreatePermissions.delete(permission);
+      renderSelectedCreatePermissions();
+    }
+
+    function removeCreatePermission(permission) {
+      selectedCreatePermissions.delete(permission);
+      renderCreatePermissionPicker();
+      renderSelectedCreatePermissions();
+    }
+
+    function addCustomCreatePermission() {
+      const input = document.getElementById('permCustom');
+      const permission = String(input.value || '').trim();
+      if (!permission) return;
+      selectedCreatePermissions.add(permission);
+      input.value = '';
+      renderCreatePermissionPicker();
+      renderSelectedCreatePermissions();
+    }
+
+    function setAllCreatePermissions(checked) {
+      selectedCreatePermissions = checked ? new Set(createPermissionCatalog) : new Set();
+      renderCreatePermissionPicker();
+      renderSelectedCreatePermissions();
     }
 
     async function deletePermissionGroup(id) {
@@ -447,6 +568,8 @@ module.exports = function renderUserManagement(authUser, lang) {
         .replace(/'/g, '&#039;');
     }
 
+    renderCreatePermissionPicker();
+    renderSelectedCreatePermissions();
     loadAll();
   </script>
 </body>
