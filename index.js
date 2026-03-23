@@ -45,6 +45,12 @@ function toLogPreview(value, maxLen = 140) {
     return normalized.length > maxLen ? `${normalized.slice(0, maxLen)}...` : normalized;
 }
 
+function compactMsgId(value) {
+    if (typeof value !== 'string' || value.length === 0) return 'n/a';
+    if (value.length <= 24) return value;
+    return `${value.slice(0, 8)}...${value.slice(-8)}`;
+}
+
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
@@ -1055,8 +1061,9 @@ client.on('message', async msg => {
             else if (msg.type === 'document') internalMsgType = 'document';
             else if (msg.type === 'sticker') internalMsgType = 'sticker';
 
-            const msgPreview = toLogPreview(msg.body) || `[${internalMsgType}]`;
-            console.log(`[رسالة] تم الاستلام | msgId=${msgId} | group="${chat.name}" | from=@${cleanAuthorId.split('@')[0]} | category=${internalMsgType} | text="${msgPreview}"`);
+            const compactId = compactMsgId(msgId);
+            const msgPreview = toLogPreview(msg.body, 100) || `[${internalMsgType}]`;
+            console.log(`[رسالة] استلام | id=${compactId} | نوع=${internalMsgType} | نص="${msgPreview}"`);
 
             let targetAdminGroup = config.defaultAdminGroup;
             let isWordFilterEnabled = config.enableWordFilter;
@@ -1356,7 +1363,7 @@ client.on('message', async msg => {
             if (canSendToAI) {
                 try {
                     const msgText = typeof msg.body === 'string' ? msg.body : '';
-                    console.log(`[AI] تم الإرسال | msgId=${msgId} | category=${internalMsgType} | prompt="${toLogPreview(msgText)}"`);
+                    console.log(`[AI] إرسال | id=${compactId} | نص="${toLogPreview(msgText, 100)}"`);
                     const payload = { model: config.ollamaModel, prompt: msgText, stream: false };
                     if (base64Image) payload.images = [base64Image];
 
@@ -1369,16 +1376,22 @@ client.on('message', async msg => {
                     const data = await response.json();
                     const triggerWords = config.aiFilterTriggerWords || ['نعم'];
                     const aiText = data && typeof data.response === 'string' ? data.response : '';
-                    console.log(`[AI] تم الاستلام | msgId=${msgId} | response="${toLogPreview(aiText, 220)}"`);
+                    console.log(`[AI] رد | id=${compactId} | نص="${toLogPreview(aiText, 140)}"`);
                     if (aiText && triggerWords.some(word => aiText.includes(word))) {
                         isViolating = true;
                         violationReason = 'تم التصنيف كمخالفة عبر الذكاء الاصطناعي';
                     }
                 } catch (error) {
-                    console.error(`[AI] فشل المعالجة | msgId=${msgId} | reason=${error.message || error}`);
+                    console.error(`[AI] خطأ | id=${compactId} | السبب=${error.message || error}`);
                 }
             } else {
-                console.log(`[AI] لم يتم الإرسال | msgId=${msgId} | category=${internalMsgType}`);
+                let aiSkipReason = 'غير مستوفية لشروط الفحص';
+                const hasText = typeof msg.body === 'string' && msg.body.trim().length > 0;
+                if (isViolating) aiSkipReason = 'تم اعتبارها مخالفة قبل AI';
+                else if (!isAIFilterEnabled) aiSkipReason = 'فلتر AI معطل';
+                else if (!hasText && !isAIMediaEnabled) aiSkipReason = 'وسائط بدون نص وفلتر الوسائط معطل';
+                else if (!hasText) aiSkipReason = 'لا يوجد نص للتحليل';
+                console.log(`[AI] تخطي | id=${compactId} | السبب=${aiSkipReason}`);
             }
 
             if (isViolating) {
