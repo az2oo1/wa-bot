@@ -1,6 +1,5 @@
 services:
   bot:
-    build: .
     image: ghcr.io/az2oo1/wa-bot:latest
     ports:
       - "3000:3000"
