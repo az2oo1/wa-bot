@@ -38,6 +38,13 @@ function saveLog(type, args) {
     if (logsHistory.length > 200) logsHistory.shift();
 }
 
+function toLogPreview(value, maxLen = 140) {
+    if (typeof value !== 'string') return '';
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (!normalized) return '';
+    return normalized.length > maxLen ? `${normalized.slice(0, maxLen)}...` : normalized;
+}
+
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
@@ -1014,6 +1021,9 @@ client.on('message', async msg => {
             else if (msg.type === 'document') internalMsgType = 'document';
             else if (msg.type === 'sticker') internalMsgType = 'sticker';
 
+            const msgPreview = toLogPreview(msg.body) || `[${internalMsgType}]`;
+            console.log(`[رسالة] تم الاستلام | msgId=${msgId} | group="${chat.name}" | from=@${cleanAuthorId.split('@')[0]} | category=${internalMsgType} | text="${msgPreview}"`);
+
             let targetAdminGroup = config.defaultAdminGroup;
             let isWordFilterEnabled = config.enableWordFilter;
             let isAIFilterEnabled = config.enableAIFilter;
@@ -1312,6 +1322,7 @@ client.on('message', async msg => {
             if (canSendToAI) {
                 try {
                     const msgText = typeof msg.body === 'string' ? msg.body : '';
+                    console.log(`[AI] تم الإرسال | msgId=${msgId} | category=${internalMsgType} | prompt="${toLogPreview(msgText)}"`);
                     const payload = { model: config.ollamaModel, prompt: msgText, stream: false };
                     if (base64Image) payload.images = [base64Image];
 
@@ -1323,11 +1334,17 @@ client.on('message', async msg => {
 
                     const data = await response.json();
                     const triggerWords = config.aiFilterTriggerWords || ['نعم'];
-                    if (data.response && triggerWords.some(word => data.response.includes(word))) {
+                    const aiText = data && typeof data.response === 'string' ? data.response : '';
+                    console.log(`[AI] تم الاستلام | msgId=${msgId} | response="${toLogPreview(aiText, 220)}"`);
+                    if (aiText && triggerWords.some(word => aiText.includes(word))) {
                         isViolating = true;
                         violationReason = 'تم التصنيف كمخالفة عبر الذكاء الاصطناعي';
                     }
-                } catch (error) { }
+                } catch (error) {
+                    console.error(`[AI] فشل المعالجة | msgId=${msgId} | reason=${error.message || error}`);
+                }
+            } else {
+                console.log(`[AI] لم يتم الإرسال | msgId=${msgId} | category=${internalMsgType}`);
             }
 
             if (isViolating) {
