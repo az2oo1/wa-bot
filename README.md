@@ -143,6 +143,8 @@ services:
       - "3000:3000"
     volumes:
       - /DATA/AppData/wa-bot:/app
+    environment:
+      - WA_DB_PATH=/app/bot_data.sqlite  # Explicit database path in persistent volume
     restart: unless-stopped
 ```
 

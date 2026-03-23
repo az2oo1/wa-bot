@@ -135,7 +135,12 @@ function resolveDbPath() {
 function openDatabaseWithFallback() {
     const primaryPath = resolveDbPath();
     const fallbackPath = path.join('/tmp', 'wa-bot', 'bot_data.sqlite');
-    const candidates = [primaryPath, fallbackPath];
+    const hasExplicitDbPath = Boolean(
+        (process.env.WA_DB_PATH && process.env.WA_DB_PATH.trim()) ||
+        (process.env.WA_DATA_DIR && process.env.WA_DATA_DIR.trim())
+    );
+    const allowTmpFallback = !hasExplicitDbPath && process.env.WA_ALLOW_TMP_DB_FALLBACK !== 'false';
+    const candidates = allowTmpFallback ? [primaryPath, fallbackPath] : [primaryPath];
 
     for (const dbPath of candidates) {
         try {
@@ -147,6 +152,10 @@ function openDatabaseWithFallback() {
         } catch (err) {
             console.error(`[DB] Failed to open database at ${dbPath}: ${err.message || err}`);
         }
+    }
+
+    if (!allowTmpFallback) {
+        throw new Error(`Could not open configured SQLite database path: ${primaryPath}. Temporary fallback is disabled.`);
     }
 
     throw new Error('Could not open any writable SQLite database path.');
