@@ -57,7 +57,7 @@ module.exports = function renderDashboard(req, db, config) {
             <button class="nav-item" onclick="showPage('page-import-export', this)">
                 <span class="nav-icon"><i class="fas fa-exchange-alt"></i></span> ${t('استيراد/تصدير', 'Import/Export')}
             </button>
-            <button class="nav-item" onclick="window.location.href='/users'">
+            <button class="nav-item" onclick="showPage('page-users', this)">
                 <span class="nav-icon"><i class="fas fa-user-shield"></i></span> ${t('إدارة المستخدمين', 'User Management')}
             </button>
             <button class="nav-item" onclick="showPage('page-about', this)">
@@ -726,6 +726,16 @@ module.exports = function renderDashboard(req, db, config) {
                 </div>
             </div>
 
+            <div class="page" id="page-users">
+                <div class="page-header">
+                    <h2><i class="fas fa-user-shield"></i> ${t('إدارة المستخدمين', 'User Management')}</h2>
+                    <p>${t('إدارة الحسابات والصلاحيات بدون مغادرة لوحة التحكم', 'Manage accounts and permissions without leaving the dashboard')}</p>
+                </div>
+                <div class="card" style="padding:10px;">
+                    <iframe id="usersFrame" src="/users" style="width:100%;min-height:78vh;border:1px solid var(--card-border);border-radius:10px;background:var(--card-bg);"></iframe>
+                </div>
+            </div>
+
             <div id="saveMsgToast" class="toast"><i class="fas fa-check-circle"></i> ${t('تم الحفظ في قاعدة البيانات بنجاح!', 'Saved to database successfully!')}</div>
 
             </form>
@@ -960,6 +970,7 @@ module.exports = function renderDashboard(req, db, config) {
                 'page-ai': '${t("الذكاء الاصطناعي", "AI Moderator")}',
                 'page-groups': '${t("المجموعات المخصصة", "Custom Groups")}',
                 'page-import-export': '${t("استيراد/تصدير", "Import/Export")}',
+                'page-users': '${t("إدارة المستخدمين", "User Management")}',
                 'page-about': '${t("حول", "About")}'
             };
             function showPage(pageId, btn) {
@@ -972,6 +983,10 @@ module.exports = function renderDashboard(req, db, config) {
                 if (pageId === 'page-groups') {
                     document.getElementById('groupsListView').style.display = 'block';
                     document.getElementById('groupsDetailView').style.display = 'none';
+                }
+                if (pageId === 'page-users') {
+                    const frame = document.getElementById('usersFrame');
+                    if (frame && !frame.src) frame.src = '/users';
                 }
             }
             function toggleSidebar() {

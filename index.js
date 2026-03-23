@@ -409,7 +409,7 @@ const DEFAULT_PERMISSION_GROUPS = [
     {
         name: 'Operator',
         description: 'Daily operations with import/export and bot actions',
-        permissions: ['dashboard:read', 'groups:view', 'config:write', 'security:manage', 'media:manage', 'import-export:manage', 'bot:logout', 'logs:view']
+        permissions: ['dashboard:read', 'groups:view', 'config:write', 'security:manage', 'media:manage', 'import-export:manage', 'bot:logout', 'logs:view', 'users:manage']
     }
 ];
 
@@ -481,7 +481,13 @@ function cleanupExpiredSessions() {
 setInterval(cleanupExpiredSessions, 15 * 60 * 1000).unref();
 
 function ensureDefaultPermissionGroups() {
-    const upsert = db.prepare('INSERT OR IGNORE INTO permission_groups (name, description, permissions) VALUES (?, ?, ?)');
+    const upsert = db.prepare(`
+        INSERT INTO permission_groups (name, description, permissions)
+        VALUES (?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET
+            description = excluded.description,
+            permissions = excluded.permissions
+    `);
     for (const group of DEFAULT_PERMISSION_GROUPS) {
         upsert.run(group.name, group.description, JSON.stringify(group.permissions));
     }
