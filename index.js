@@ -109,7 +109,8 @@ const colsToAdd = [
     'panic_lockout_duration INTEGER', 'panic_alert_target TEXT', 'panic_alert_message TEXT',
     'enable_whitelist INTEGER', 'custom_blacklist TEXT', 'custom_whitelist TEXT',
     'use_global_blacklist INTEGER', 'use_global_whitelist INTEGER',
-    'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT', 'qa_language TEXT', 'qa_event_dates TEXT'
+    'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT', 'qa_language TEXT', 'qa_event_dates TEXT',
+    'enable_blocked_extensions INTEGER'
 ];
 colsToAdd.forEach(col => {
     try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch (e) { }
@@ -146,6 +147,7 @@ function loadConfigFromDB() {
             enableWordFilter: g.enable_word_filter === 1, enableAIFilter: g.enable_ai_filter === 1,
             enableAIMedia: g.enable_ai_media === 1, autoAction: g.auto_action === 1,
             enableBlacklist: g.enable_blacklist === 1, enableWhitelist: g.enable_whitelist !== 0,
+            enableBlockedExtensions: g.enable_blocked_extensions !== 0,
             useGlobalBlacklist: g.use_global_blacklist !== 0, useGlobalWhitelist: g.use_global_whitelist !== 0,
             customBlacklist: JSON.parse(g.custom_blacklist || '[]'), customWhitelist: JSON.parse(g.custom_whitelist || '[]'),
             enableAntiSpam: g.enable_anti_spam === 1, spamDuplicateLimit: g.spam_duplicate_limit,
@@ -208,20 +210,21 @@ function saveConfigToDB(conf) {
         const insertGroup = db.prepare(`
             INSERT INTO custom_groups (
                 group_id, admin_group, use_default_words, enable_word_filter, enable_ai_filter, 
-                enable_ai_media, auto_action, enable_blacklist, enable_whitelist, enable_anti_spam, spam_duplicate_limit, 
+                enable_ai_media, auto_action, enable_blacklist, enable_blocked_extensions, enable_whitelist, enable_anti_spam, spam_duplicate_limit, 
                 spam_action, enable_welcome_message, welcome_message_text, custom_words,
                 blocked_types, blocked_action, spam_types, spam_limits,
                 enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
                 panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist,
                 enable_qa_feature, custom_qa, qa_event_date, qa_language, qa_event_dates
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
             insertGroup.run(
                 gId, gData.adminGroup, gData.useDefaultWords ? 1 : 0, gData.enableWordFilter ? 1 : 0,
                 gData.enableAIFilter ? 1 : 0, gData.enableAIMedia ? 1 : 0, gData.autoAction ? 1 : 0,
-                gData.enableBlacklist ? 1 : 0, gData.enableWhitelist ? 1 : 0, gData.enableAntiSpam ? 1 : 0, gData.spamDuplicateLimit,
+                gData.enableBlacklist ? 1 : 0, gData.enableBlockedExtensions === false ? 0 : 1,
+                gData.enableWhitelist ? 1 : 0, gData.enableAntiSpam ? 1 : 0, gData.spamDuplicateLimit,
                 gData.spamAction, gData.enableWelcomeMessage ? 1 : 0, gData.welcomeMessageText, JSON.stringify(gData.words),
                 JSON.stringify(gData.blockedTypes || []), gData.blockedAction || 'delete',
                 JSON.stringify(gData.spamTypes || []), JSON.stringify(gData.spamLimits || {}),
@@ -247,6 +250,90 @@ let currentQR = '';
 let botStatus = '<i class="fas fa-spinner fa-spin"></i> جاري تهيئة النظام وبدء التشغيل...';
 const userTrackers = new Map(); const abortedMessages = new Set(); const spamMutedUsers = new Map();
 const groupRaidTrackers = new Map(); const lockedGroups = new Set();
+let membershipRequestSweepInterval = null;
+
+function resolveGroupListControls(groupConfig) {
+    let isBlacklistEnabled = config.enableBlacklist;
+    let isBlockedExtensionsEnabled = true;
+
+    if (groupConfig) {
+        if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabled = groupConfig.enableBlacklist;
+        if (typeof groupConfig.enableBlockedExtensions !== 'undefined') isBlockedExtensionsEnabled = groupConfig.enableBlockedExtensions;
+    }
+
+    return { isBlacklistEnabled, isBlockedExtensionsEnabled };
+}
+
+async function rejectBlockedMembershipRequestsInGroup(chat, groupConfig, blockedExtensionsRows) {
+    try {
+        const pendingReqs = await chat.getGroupMembershipRequests();
+        if (!pendingReqs || pendingReqs.length === 0) return 0;
+
+        const { isBlacklistEnabled, isBlockedExtensionsEnabled } = resolveGroupListControls(groupConfig);
+        if (!isBlacklistEnabled && !isBlockedExtensionsEnabled) return 0;
+
+        const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
+        const customBlacklist = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist : [];
+        const usersToReject = [];
+
+        for (const req of pendingReqs) {
+            let rawId = typeof req.id === 'string' ? req.id : (req.id._serialized || (req.id.user && req.id.server ? `${req.id.user}@${req.id.server}` : null));
+            if (!rawId) continue;
+
+            let cleanId = rawId.replace(/:[0-9]+/, '');
+            if (cleanId.includes('@lid')) {
+                try {
+                    const contact = await client.getContactById(rawId);
+                    if (contact && contact.number) cleanId = `${contact.number}@c.us`;
+                    else cleanId = cleanId.replace('@lid', '@c.us');
+                } catch (err) { cleanId = cleanId.replace('@lid', '@c.us'); }
+            }
+
+            const digitsId = cleanId.replace(/:[0-9]+/, '').replace('@c.us', '');
+            const isExtBlocked = isBlockedExtensionsEnabled && blockedExtensionsRows.some(r => digitsId.startsWith(r.ext));
+
+            let isBlacklisted = false;
+            if (isBlacklistEnabled) {
+                const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanId);
+                const inCustom = customBlacklist.includes(cleanId);
+                isBlacklisted = (useGlobal && globalBl) || inCustom;
+            }
+
+            if (isExtBlocked || isBlacklisted) usersToReject.push(rawId);
+        }
+
+        if (usersToReject.length > 0) {
+            await chat.rejectGroupMembershipRequests({ requesterIds: usersToReject });
+            console.log(`[أمان] تم رفض ${usersToReject.length} طلبات انضمام مخالفة في: ${chat.name}`);
+        }
+
+        return usersToReject.length;
+    } catch (e) {
+        console.error(`[خطأ] فشل رفض طلبات الانضمام في ${chat.name}:`, e.message || e);
+        return 0;
+    }
+}
+
+async function sweepBlockedMembershipRequests() {
+    if (!client.info || !client.info.wid) return;
+
+    try {
+        const chats = await client.getChats();
+        const botId = client.info.wid._serialized;
+        const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+
+        for (const chat of chats) {
+            if (!chat.isGroup) continue;
+            const botData = chat.participants.find(p => p.id._serialized === botId);
+            const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
+            if (!botIsAdmin) continue;
+
+            const groupId = chat.id._serialized;
+            const groupConfig = config.groupsConfig[groupId];
+            await rejectBlockedMembershipRequestsInGroup(chat, groupConfig, blockedExtensionsRows);
+        }
+    } catch (e) { }
+}
 
 // Client initialization tracking and debugging
 let isInitializing = false;
@@ -354,6 +441,10 @@ app.post('/api/blacklist/purge', async (req, res) => {
 
         for (const chat of chats) {
             if (chat.isGroup) {
+                const groupConfig = config.groupsConfig[chat.id._serialized];
+                const isBlockedExtensionsEnabledForGroup = groupConfig && typeof groupConfig.enableBlockedExtensions !== 'undefined'
+                    ? groupConfig.enableBlockedExtensions
+                    : true;
                 const botData = chat.participants.find(p => p.id._serialized === botId);
                 const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
                 if (botIsAdmin) {
@@ -362,7 +453,7 @@ app.post('/api/blacklist/purge', async (req, res) => {
                         .filter(id => {
                             const cleanId = id.replace(/:[0-9]+/, '');
                             const finalCleanId = cleanId.replace('@c.us', '');
-                            const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                            const isExtBlocked = isBlockedExtensionsEnabledForGroup && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
                             return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(id);
                         });
                     if (usersToKick.length > 0) {
@@ -393,7 +484,7 @@ app.post('/api/blacklist/purge', async (req, res) => {
                                 }
 
                                 const finalCleanId = cleanId.replace(/:[0-9]+/, '').replace('@c.us', '');
-                                const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                                const isExtBlocked = isBlockedExtensionsEnabledForGroup && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
                                 if (isExtBlocked || blacklistArr.includes(finalCleanId) || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId)) {
                                     usersToReject.push(rawId);
                                 }
@@ -602,19 +693,20 @@ app.post('/api/import', (req, res) => {
                 const stmt = db.prepare(`
                     INSERT OR REPLACE INTO custom_groups (
                         group_id, admin_group, use_default_words, enable_word_filter, enable_ai_filter, 
-                        enable_ai_media, auto_action, enable_blacklist, enable_whitelist, enable_anti_spam, 
+                        enable_ai_media, auto_action, enable_blacklist, enable_blocked_extensions, enable_whitelist, enable_anti_spam, 
                         spam_duplicate_limit, spam_action, enable_welcome_message, welcome_message_text, custom_words,
                         blocked_types, blocked_action, spam_types, spam_limits,
                         enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
                         panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, 
                         use_global_blacklist, use_global_whitelist, enable_qa_feature, custom_qa, qa_event_date, 
                         qa_language, qa_event_dates
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `);
                 for (const row of dataset.custom_groups) {
                     stmt.run(
                         row.group_id, row.admin_group, row.use_default_words, row.enable_word_filter,
                         row.enable_ai_filter, row.enable_ai_media, row.auto_action, row.enable_blacklist,
+                        typeof row.enable_blocked_extensions === 'undefined' ? 1 : row.enable_blocked_extensions,
                         row.enable_whitelist, row.enable_anti_spam, row.spam_duplicate_limit, row.spam_action,
                         row.enable_welcome_message, row.welcome_message_text, row.custom_words,
                         row.blocked_types, row.blocked_action, row.spam_types, row.spam_limits,
@@ -736,6 +828,12 @@ client.on('ready', async () => {
         
         console.log('[معلومة] بدء تحديث قاعدة البيانات...');
         syncTx(chats);
+
+        if (membershipRequestSweepInterval) clearInterval(membershipRequestSweepInterval);
+        membershipRequestSweepInterval = setInterval(() => {
+            sweepBlockedMembershipRequests().catch(() => { });
+        }, 15000);
+        sweepBlockedMembershipRequests().catch(() => { });
         
         const syncDuration = Date.now() - readyStartTime;
         const totalInitTime = initializationStartTime ? Date.now() - initializationStartTime : 0;
@@ -826,6 +924,11 @@ client.on('disconnected', async (reason) => {
     botStatus = '<i class="fas fa-sign-out-alt"></i> تم تسجيل الخروج من الحساب...';
     currentQR = '';
     isInitializing = false;
+
+    if (membershipRequestSweepInterval) {
+        clearInterval(membershipRequestSweepInterval);
+        membershipRequestSweepInterval = null;
+    }
     
     console.error('[تنبيه] توقع البوت، السبب:', {
         reason: disconnectReason,
@@ -941,6 +1044,10 @@ client.on('group_join', async (notification) => {
             if (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') targetAdminGroup = groupConfig.adminGroup.trim();
         }
 
+        const isBlockedExtensionsEnabledForGroup = groupConfig && typeof groupConfig.enableBlockedExtensions !== 'undefined'
+            ? groupConfig.enableBlockedExtensions
+            : true;
+
         for (const participantId of notification.recipientIds) {
             let cleanJoinedId = participantId.replace(/:[0-9]+/, '');
             if (cleanJoinedId.includes('@lid')) {
@@ -961,12 +1068,12 @@ client.on('group_join', async (notification) => {
 
             let isKicked = false;
 
-            if (isBlacklistEnabledForGroup && !isWhitelisted) {
-                const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanJoinedId);
+            if ((isBlacklistEnabledForGroup || isBlockedExtensionsEnabledForGroup) && !isWhitelisted) {
+                const globalBl = isBlacklistEnabledForGroup ? db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanJoinedId) : null;
                 const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
-                const isExtBlocked = blockedExtensionsRows.some(r => cleanJoinedId.replace('@c.us', '').startsWith(r.ext));
+                const isExtBlocked = isBlockedExtensionsEnabledForGroup && blockedExtensionsRows.some(r => cleanJoinedId.replace('@c.us', '').startsWith(r.ext));
                 const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
-                const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanJoinedId) : false;
+                const inCustom = isBlacklistEnabledForGroup && groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanJoinedId) : false;
 
                 if ((useGlobal && (globalBl || isExtBlocked)) || inCustom) {
                     console.log(`[أمان] محاولة دخول رقم محظور (${cleanJoinedId}). جاري الطرد...`);
@@ -993,6 +1100,9 @@ client.on('group_join', async (notification) => {
                     } catch (err) { }
                 }, 3500);
             }
+
+            const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+            await rejectBlockedMembershipRequestsInGroup(chat, groupConfig, blockedExtensionsRows);
         }
     } catch (error) { }
 });
@@ -1110,6 +1220,7 @@ client.on('message', async msg => {
             let isAIMediaEnabled = config.enableAIMedia;
             let isAutoActionEnabled = config.autoAction;
             let isBlacklistEnabled = config.enableBlacklist;
+            let isBlockedExtensionsEnabled = true;
             let isAntiSpamEnabled = config.enableAntiSpam;
             let spamDuplicateLimit = config.spamDuplicateLimit;
             let spamAction = config.spamAction;
@@ -1126,6 +1237,7 @@ client.on('message', async msg => {
                 if (typeof groupConfig.enableAIMedia !== 'undefined') isAIMediaEnabled = groupConfig.enableAIMedia;
                 if (typeof groupConfig.autoAction !== 'undefined') isAutoActionEnabled = groupConfig.autoAction;
                 if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabled = groupConfig.enableBlacklist;
+                if (typeof groupConfig.enableBlockedExtensions !== 'undefined') isBlockedExtensionsEnabled = groupConfig.enableBlockedExtensions;
                 if (typeof groupConfig.enableAntiSpam !== 'undefined') {
                     isAntiSpamEnabled = groupConfig.enableAntiSpam;
                     spamDuplicateLimit = groupConfig.spamDuplicateLimit || 3;
@@ -1139,12 +1251,12 @@ client.on('message', async msg => {
                 if (groupConfig.words && groupConfig.words.length > 0) forbiddenWords = [...forbiddenWords, ...groupConfig.words];
             }
 
-            if (isBlacklistEnabled) {
-                const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanAuthorId);
+            if (isBlacklistEnabled || isBlockedExtensionsEnabled) {
+                const globalBl = isBlacklistEnabled ? db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanAuthorId) : null;
                 const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
-                const isExtBlocked = blockedExtensionsRows.some(r => cleanAuthorId.replace('@c.us', '').startsWith(r.ext));
+                const isExtBlocked = isBlockedExtensionsEnabled && blockedExtensionsRows.some(r => cleanAuthorId.replace('@c.us', '').startsWith(r.ext));
                 const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
-                const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanAuthorId) : false;
+                const inCustom = isBlacklistEnabled && groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanAuthorId) : false;
                 if ((useGlobal && (globalBl || isExtBlocked)) || inCustom) {
                     console.log(`[أمان] رقم محظور أرسل رسالة. سيتم حذفه.`);
                     await safeDelay();
