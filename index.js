@@ -100,6 +100,11 @@ function formatVCardsForDisplay(vcards) {
     return parsed.join('\n');
 }
 
+function stripRawVCardBlocks(text) {
+    if (typeof text !== 'string') return '';
+    return text.replace(/BEGIN:VCARD[\s\S]*?END:VCARD/gi, '').trim();
+}
+
 function normalizeAdminLang(value) {
     return value === 'en' ? 'en' : 'ar';
 }
@@ -1172,7 +1177,8 @@ client.on('message', async msg => {
 
             const normalizedMessageText = (() => {
                 const chunks = [];
-                if (typeof msg.body === 'string' && msg.body.trim().length > 0) chunks.push(msg.body);
+                const bodyWithoutVCard = stripRawVCardBlocks(msg.body || '');
+                if (bodyWithoutVCard.length > 0) chunks.push(bodyWithoutVCard);
                 if ((msg.type === 'vcard' || msg.type === 'multi_vcard') && Array.isArray(msg.vCards) && msg.vCards.length > 0) {
                     const prettyVcards = formatVCardsForDisplay(msg.vCards);
                     if (prettyVcards) chunks.push(prettyVcards);
