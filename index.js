@@ -611,12 +611,46 @@ async function safeDelay() {
     await new Promise(r => setTimeout(r, ms));
 };
 
-// Generate a unique temp directory for each client instance
-const tempProfileDir = `/tmp/chromium-wa-bot-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+const authDataPath = process.env.WA_AUTH_PATH || path.join(process.cwd(), '.wwebjs_auth');
+const browserProfileDir = process.env.WA_BROWSER_PROFILE_DIR || `/tmp/chromium-wa-bot-${process.pid}`;
+
+function cleanupStaleAuthLocks(authPath) {
+    try {
+        if (!fs.existsSync(authPath)) return;
+        const lockPatterns = [
+            /lock/i,
+            /^Singleton/i,
+            /^\.parent-lock$/i
+        ];
+        const walk = (dir) => {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    walk(fullPath);
+                    continue;
+                }
+                if (lockPatterns.some((pattern) => pattern.test(entry.name))) {
+                    try { fs.unlinkSync(fullPath); } catch (e) { }
+                }
+            }
+        };
+        walk(authPath);
+        console.log(`[أمان] تنظيف ملفات القفل القديمة من: ${authPath}`);
+    } catch (err) {
+        console.error(`[خطأ] فشل تنظيف أقفال المصادقة القديمة: ${err.message || err}`);
+    }
+}
+
+cleanupStaleAuthLocks(authDataPath);
 
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({
+        dataPath: authDataPath,
+        clientId: process.env.WA_CLIENT_ID || 'main'
+    }),
     puppeteer: { 
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
         headless: true,
         timeout: 60000,
         args: [
@@ -643,7 +677,7 @@ const client = new Client({
             '--disable-device-orientation-request-prompt',
             '--no-default-browser-check',
             '--start-maximized',
-            `--user-data-dir=${tempProfileDir}`
+            `--user-data-dir=${browserProfileDir}`
         ]
     }
 });

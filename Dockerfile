@@ -24,6 +24,16 @@ RUN cp UI.js UI.js.original && cp index.js index.js.original
 # 3. Create the Magic Startup Script
 # This script regenerates UI.js and index.js every time the container starts
 RUN echo '#!/bin/sh\n\
+set -e\n\
+DATA_DIR=${WA_DATA_DIR:-/data}\n\
+mkdir -p "$DATA_DIR"\n\
+mkdir -p /app\n\
+mkdir -p "$DATA_DIR/.wwebjs_auth" "$DATA_DIR/.wwebjs_cache" "$DATA_DIR/media"\n\
+ln -sfn "$DATA_DIR/.wwebjs_auth" /app/.wwebjs_auth\n\
+ln -sfn "$DATA_DIR/.wwebjs_cache" /app/.wwebjs_cache\n\
+ln -sfn "$DATA_DIR/media" /app/media\n\
+if [ ! -f "$DATA_DIR/bot_data.sqlite" ] && [ -f /app_staging/bot_data.sqlite ]; then cp /app_staging/bot_data.sqlite "$DATA_DIR/bot_data.sqlite"; fi\n\
+ln -sfn "$DATA_DIR/bot_data.sqlite" /app/bot_data.sqlite\n\
 echo "🔄 Regenerating UI.js and index.js..."\n\
 if [ -f /app_staging/UI.js.original ]; then\n\
   cp /app_staging/UI.js.original /app_staging/UI.js\n\
@@ -43,18 +53,14 @@ rm -rf /tmp/.pki 2>/dev/null || true\n\
 rm -rf /tmp/.X* 2>/dev/null || true\n\
 sleep 1\n\
 echo "🔧 Cleaning stale lock files only (preserving session data)..."\n\
-find /app/.wwebjs_auth -name "*lock*" -delete 2>/dev/null || true\n\
-find /app/.wwebjs_auth -name ".parent-lock" -delete 2>/dev/null || true\n\
+find "$DATA_DIR/.wwebjs_auth" -name "*lock*" -delete 2>/dev/null || true\n\
+find "$DATA_DIR/.wwebjs_auth" -name ".parent-lock" -delete 2>/dev/null || true\n\
+find "$DATA_DIR/.wwebjs_auth" -name "Singleton*" -delete 2>/dev/null || true\n\
 sleep 1\n\
 \n\
-if [ ! -f /app/index.js ]; then\n\
-  echo "First run detected! Copying files to your CasaOS server..."\n\
-  cp -r /app_staging/* /app/\n\
-else\n\
-  echo "Regenerating UI.js and index.js in /app..."\n\
-  cp /app_staging/UI.js /app/UI.js\n\
-  cp /app_staging/index.js /app/index.js\n\
-fi\n\
+echo "Regenerating UI.js and index.js in /app..."\n\
+cp /app_staging/UI.js /app/UI.js\n\
+cp /app_staging/index.js /app/index.js\n\
 \n\
 cd /app\n\
 echo "✅ Cleanup and regeneration complete. Starting bot..."\n\
