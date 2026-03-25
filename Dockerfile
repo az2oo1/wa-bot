@@ -20,7 +20,7 @@ RUN rm -f /app_staging/bot_data.sqlite /app_staging/bot_data.sqlite-wal /app_sta
 
 # 2. Ensure UI modules and index.js are regenerated on every image build
 # Store original versions for regeneration
-RUN cp UI.js UI.js.original && cp index.js index.js.original && cp userManagementUI.js userManagementUI.js.original
+RUN cp UI.js UI.js.original && cp index.js index.js.original
 
 # 3. Create the Magic Startup Script
 # This script regenerates UI.js and index.js every time the container starts
@@ -35,10 +35,7 @@ fi\n\
 if [ -f /app_staging/index.js.original ]; then\n\
   cp /app_staging/index.js.original /app_staging/index.js\n\
 fi\n\
-if [ -f /app_staging/userManagementUI.js.original ]; then\n\
-  cp /app_staging/userManagementUI.js.original /app_staging/userManagementUI.js\n\
-fi\n\
-\n\
+if [ ! -f /app/index.js ]; then\n\
 if [ ! -f /app/index.js ]; then\n\
   echo "First run detected! Copying app files to /app..."\n\
   for item in /app_staging/*; do\n\
@@ -52,7 +49,6 @@ else\n\
   echo "Updating UI modules and index.js in /app..."\n\
   cp /app_staging/UI.js /app/UI.js\n\
   cp /app_staging/index.js /app/index.js\n\
-  cp /app_staging/userManagementUI.js /app/userManagementUI.js\n\
 fi\n\
 mkdir -p /app/public\n\
 if [ -f /app_staging/public/logo.png ]; then\n\

@@ -407,12 +407,12 @@ module.exports = function renderDashboard(req, db, config) {
                     #page-blacklist .blacklist-grid { align-items: start; }
                     #page-blacklist .blacklist-main-card { grid-column: 1; grid-row: 1; }
                     #page-blacklist .blocked-ext-card { grid-column: 2; grid-row: 1; }
-                    #page-blacklist .whitelist-card { grid-column: 1; grid-row: 2; }
                     #page-blacklist .purge-card {
-                        grid-column: 1 / -1;
+                        grid-column: 1; grid-row: 2;
                         border-color: rgba(255,171,64,0.55);
                         box-shadow: 0 0 0 1px rgba(255,171,64,0.18) inset;
                     }
+                    #page-blacklist .whitelist-card { grid-column: 2; grid-row: 2; }
                     @media (max-width:1100px) {
                         #page-blacklist .blacklist-main-card,
                         #page-blacklist .blocked-ext-card,
@@ -466,6 +466,14 @@ module.exports = function renderDashboard(req, db, config) {
                         <div id="blockedExtensionsContainer" class="chip-container"></div>
                     </div>
 
+                    <div class="card warning purge-card">
+                        <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
+                        <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
+                        <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; justify-content:center; padding:15px; font-size:16px;" onclick="purgeBlacklisted()">
+                            <i class="fas fa-gavel"></i> ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
+                        </button>
+                    </div>
+
                     <div class="card success whitelist-card">
                         <div class="card-header">
                             <h3 style="color:var(--accent);"><i class="fas fa-star"></i> ${t('القائمة البيضاء (VIP)', 'Whitelist (VIP)')}</h3>
@@ -491,13 +499,7 @@ module.exports = function renderDashboard(req, db, config) {
                         </div>
                     </div>
 
-                    <div class="card warning card-grid-full purge-card">
-                        <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
-                        <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
-                        <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; justify-content:center; padding:15px; font-size:16px;" onclick="purgeBlacklisted()">
-                            <i class="fas fa-gavel"></i> ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
-                        </button>
-                    </div>
+
 
                 </div>
             </div>

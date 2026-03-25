@@ -9,13 +9,6 @@ const path = require('path');
 const multer = require('multer');
 const { exec } = require('child_process');
 const renderDashboard = require('./UI.js');
-let renderUserManagement;
-try {
-    renderUserManagement = require('./userManagementUI.js');
-} catch (err) {
-    console.error('[Auth] userManagementUI.js is missing. /users page will be unavailable until file is restored.');
-    renderUserManagement = () => `<!doctype html><html><head><meta charset="utf-8"><title>Missing UI Module</title></head><body style="font-family:Arial,sans-serif;padding:24px;"><h2>User Management module missing</h2><p>File <code>userManagementUI.js</code> was not found in runtime filesystem.</p><p>Rebuild/redeploy container image to restore the file.</p></body></html>`;
-}
 
 // Ensure media storage directory exists
 if (!fs.existsSync('./media')) fs.mkdirSync('./media');
@@ -894,12 +887,6 @@ app.post('/auth/first-login-change', requireAuthApi, (req, res) => {
 app.get('/', requireAuthPage, requirePermission('dashboard:read'), (req, res) => {
     const html = renderDashboard(req, db, config);
     res.send(html);
-});
-
-app.get('/users', requireAuthPage, requirePermission('users:manage'), (req, res) => {
-    const lang = req.headers.cookie && req.headers.cookie.includes('bot_lang=en') ? 'en' : 'ar';
-    const html = renderUserManagement(req.authUser, lang);
-        res.send(html);
 });
 
 app.get('/api/groups', requireAuthApi, requirePermission('groups:view'), (req, res) => {
