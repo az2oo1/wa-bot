@@ -256,7 +256,14 @@ module.exports = function renderDashboard(req, db, config) {
                         <label class="field-label">${t('الأرقام الموثوقة حالياً', 'Currently Trusted Numbers')}</label>
                         <div id="whitelistContainer" class="chip-container"></div>
 
-
+                        <div class="toggle-row green" style="margin-top:20px; margin-bottom:0;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableWhitelist" ${config.enableWhitelist ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label green">
+                                    ${t('تفعيل نظام القائمة البيضاء', 'Enable Whitelist System')}
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="card warning card-grid-full">

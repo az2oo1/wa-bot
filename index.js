@@ -698,7 +698,7 @@ app.get('/login', (req, res) => {
         body{font-family:'IBM Plex Sans Arabic',sans-serif;background:radial-gradient(circle at 0 0,#0f1720 0,#080c10 45%,#070a0d 100%);color:var(--text);min-height:100vh;display:grid;place-items:center;padding:18px}
         .card{width:min(96vw,460px);background:var(--card-bg);border:1px solid var(--card-border);border-radius:16px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.5)}
         .brand{display:flex;align-items:center;gap:12px;margin-bottom:12px}
-        .brand .icon{width:80px;height:80px;border-radius:14px;background:linear-gradient(135deg,#00e676,#00b0ff);display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;box-shadow:0 0 24px rgba(0,230,118,.35);overflow:hidden}
+        .brand .icon{width:80px;height:80px;border-radius:14px;background:transparent;display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;box-shadow:none;overflow:hidden}
         .brand .icon img{width:100%;height:100%;object-fit:cover}
         h1{margin:0;font-size:25px}
         p{margin:4px 0 0;color:var(--text-muted)}
