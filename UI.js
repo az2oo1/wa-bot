@@ -297,12 +297,6 @@ module.exports = function renderDashboard(req, db, config) {
                                 <div style="font-size:12px; color:var(--text-muted); margin-top:8px;">${t('هذا الخيار يفصل جلسة واتساب فقط وليس حساب لوحة التحكم', 'This disconnects only the WhatsApp session, not your dashboard account')}</div>
                             </div>
                         </div>
-                        <div class="card">
-                            <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
-                            <div class="field-group" id="defaultAdminGroupContainer">
-                                <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
-                                </div>
-                        </div>
                         <div class="card info">
                             <div class="card-header"><h3 style="color:var(--blue);"><i class="fas fa-info-circle"></i> ${t('تعليمات الاستخدام', 'Instructions')}</h3></div>
                             <div style="font-size:14px; color:var(--text-muted); line-height:2.2;">
@@ -406,7 +400,14 @@ module.exports = function renderDashboard(req, db, config) {
                     <p>${t('تطبّق على جميع المجموعات التي لا تملك إعدادات مخصصة', 'Applies to all groups without custom settings')}</p>
                 </div>
 
-                <div class="card" style="border-color:rgba(100,220,150,0.5); background:linear-gradient(160deg,rgba(100,220,150,0.07) 0,var(--card-bg) 55%); margin-bottom:24px; position:relative; overflow:hidden;">
+                <div class="card" style="max-width:860px; margin:0 auto 20px;">
+                    <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
+                    <div class="field-group" id="defaultAdminGroupContainer">
+                        <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
+                    </div>
+                </div>
+
+                <div class="card" style="max-width:860px; margin:0 auto 24px; border-color:rgba(100,220,150,0.5); background:linear-gradient(160deg,rgba(100,220,150,0.07) 0,var(--card-bg) 55%); position:relative; overflow:hidden;">
                     <style>
                         @keyframes safePulse {
                             0%,100% { box-shadow: 0 0 0 0 rgba(100,220,150,0.55); }
