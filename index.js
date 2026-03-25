@@ -530,7 +530,9 @@ function ensureBootstrapAdmin() {
         INSERT INTO app_users (username, password_hash, display_name, is_active, is_superadmin, created_at, updated_at)
         VALUES (?, ?, ?, 1, 1, ?, ?)
     `);
-    insertUser.run(username, hashPassword(password), 'System Admin', timestamp, timestamp);
+    const info = insertUser.run(username, hashPassword(password), 'System Admin', timestamp, timestamp);
+    db.prepare('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)')
+        .run(Number(info.lastInsertRowid), 'must_change_credentials', '1');
     console.log('[Auth] Created bootstrap superadmin user: admin / admin123 (change immediately).');
 }
 
@@ -540,6 +542,35 @@ function getUserByUsername(username) {
 
 function getUserById(userId) {
     return db.prepare('SELECT * FROM app_users WHERE id = ?').get(userId);
+}
+
+function isDefaultCredentialChangeRequired(userId) {
+    const row = db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(userId, 'must_change_credentials');
+    return Boolean(row && row.value === '1');
+}
+
+function setDefaultCredentialChangeRequired(userId, required) {
+    if (required) {
+        db.prepare('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)')
+            .run(userId, 'must_change_credentials', '1');
+        return;
+    }
+    db.prepare('DELETE FROM user_settings WHERE user_id = ? AND key = ?').run(userId, 'must_change_credentials');
+}
+
+function shouldShowDefaultLoginHint() {
+    const row = db.prepare("SELECT COUNT(*) AS count FROM user_settings WHERE key = 'must_change_credentials' AND value = '1'").get();
+    return row && row.count > 0;
+}
+
+function ensureLegacyBootstrapCredentialChangeFlag() {
+    const adminUser = getUserByUsername('admin');
+    if (!adminUser) return;
+    if (isDefaultCredentialChangeRequired(adminUser.id)) return;
+    if (verifyPassword('admin123', adminUser.password_hash)) {
+        setDefaultCredentialChangeRequired(adminUser.id, true);
+        console.log('[Auth] Marked legacy bootstrap admin account to require credential change.');
+    }
 }
 
 function getEffectivePermissions(user) {
@@ -649,6 +680,7 @@ function normalizeUserAccessPayload(payload) {
 
 ensureDefaultPermissionGroups();
 ensureBootstrapAdmin();
+ensureLegacyBootstrapCredentialChangeFlag();
 
 if (db.prepare('SELECT count(*) as count FROM global_settings').get().count === 0) saveConfigToDB(loadConfigFromDB());
 let config = loadConfigFromDB();
@@ -683,6 +715,7 @@ app.get('/login', (req, res) => {
         const lang = req.headers.cookie && req.headers.cookie.includes('bot_lang=en') ? 'en' : 'ar';
         const dir = lang === 'en' ? 'ltr' : 'rtl';
         const t = (ar, en) => lang === 'en' ? en : ar;
+    const showDefaultHint = shouldShowDefaultLoginHint();
         const html = `<!doctype html>
 <html lang="${lang}" dir="${dir}">
 <head>
@@ -730,7 +763,7 @@ app.get('/login', (req, res) => {
             <input id="password" name="password" type="password" autocomplete="current-password" required>
             <button class="btn" type="submit">${t('تسجيل الدخول', 'Sign In')}</button>
             <div class="error" id="error"></div>
-            <div class="hint">${t('بيانات الدخول الافتراضية أول مرة: admin / admin123', 'Default first login: admin / admin123')}</div>
+            ${showDefaultHint ? `<div class="hint">${t('بيانات الدخول الافتراضية أول مرة: admin / admin123', 'Default first login: admin / admin123')}</div>` : ''}
             <div class="lang-row">
                 <span style="color:var(--text-muted);font-size:12px">${t('اللغة', 'Language')}</span>
                 <button class="lang-btn" type="button" onclick="switchLanguage()">${lang === 'en' ? 'AR' : 'EN'}</button>
@@ -790,7 +823,7 @@ app.post('/auth/login', (req, res) => {
 
         const token = createSession(user.id);
         setSessionCookie(res, token);
-        return res.json({ success: true });
+        return res.json({ success: true, mustChangeCredentials: isDefaultCredentialChangeRequired(user.id) });
 });
 
 app.post('/auth/logout', requireAuthApi, (req, res) => {
@@ -806,8 +839,43 @@ app.get('/auth/me', requireAuthApi, (req, res) => {
                 displayName: req.authUser.display_name,
                 isSuperadmin: req.authUser.is_superadmin === 1,
                 permissions: req.authPermissions,
-                allowedGroupIds: allowedSet ? Array.from(allowedSet) : null
+        allowedGroupIds: allowedSet ? Array.from(allowedSet) : null,
+        mustChangeCredentials: isDefaultCredentialChangeRequired(req.authUser.id)
         });
+});
+
+app.post('/auth/first-login-change', requireAuthApi, (req, res) => {
+    if (!isDefaultCredentialChangeRequired(req.authUser.id)) {
+        return res.status(400).json({ error: 'Credential change not required' });
+    }
+
+    const username = sanitizeUsername(req.body.username);
+    const password = String(req.body.password || '');
+    const confirmPassword = String(req.body.confirmPassword || '');
+
+    if (!username || username.length < 3 || !/^[a-z0-9._-]+$/.test(username)) {
+        return res.status(400).json({ error: 'Username must be at least 3 chars and contain only a-z, 0-9, dot, underscore, hyphen' });
+    }
+    if (password.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 chars' });
+    }
+    if (password !== confirmPassword) {
+        return res.status(400).json({ error: 'Passwords do not match' });
+    }
+
+    const existing = db.prepare('SELECT id FROM app_users WHERE username = ?').get(username);
+    if (existing && existing.id !== req.authUser.id) {
+        return res.status(400).json({ error: 'Username already exists' });
+    }
+
+    const tx = db.transaction(() => {
+        db.prepare('UPDATE app_users SET username = ?, password_hash = ?, updated_at = ? WHERE id = ?')
+            .run(username, hashPassword(password), nowIso(), req.authUser.id);
+        setDefaultCredentialChangeRequired(req.authUser.id, false);
+    });
+    tx();
+
+    return res.json({ success: true });
 });
 
 app.get('/', requireAuthPage, requirePermission('dashboard:read'), (req, res) => {

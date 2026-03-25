@@ -944,10 +944,36 @@ module.exports = function renderDashboard(req, db, config) {
             </div>
         </div>
 
+        <div id="firstLoginModal" class="modal">
+            <div class="modal-content" style="max-width:620px; border-color:rgba(255,171,64,0.35); background:linear-gradient(180deg,rgba(255,171,64,0.06) 0,var(--card-bg) 60%);">
+                <div class="modal-header">
+                    <h3 style="color:var(--orange);"><i class="fas fa-user-lock"></i> ${t('تغيير بيانات الدخول مطلوب', 'Credential Change Required')}</h3>
+                </div>
+                <p style="color:var(--text-muted); margin-top:-8px; margin-bottom:14px; line-height:1.8;">
+                    ${t('تم تسجيل الدخول بالحساب الافتراضي. لأمان النظام، يجب تغيير اسم المستخدم وكلمة المرور قبل المتابعة.', 'You signed in with the default account. For security, you must change username and password before continuing.')}
+                </p>
+                <div class="field-group">
+                    <label class="field-label">${t('اسم المستخدم الجديد', 'New Username')}</label>
+                    <input id="firstLoginUsername" type="text" autocomplete="username" dir="ltr" style="text-align:left; font-family:monospace;" placeholder="admin_new">
+                </div>
+                <div class="field-group">
+                    <label class="field-label">${t('كلمة المرور الجديدة', 'New Password')}</label>
+                    <input id="firstLoginPassword" type="password" autocomplete="new-password" placeholder="${t('8 أحرف على الأقل', 'At least 8 characters')}">
+                </div>
+                <div class="field-group">
+                    <label class="field-label">${t('تأكيد كلمة المرور', 'Confirm Password')}</label>
+                    <input id="firstLoginConfirm" type="password" autocomplete="new-password" placeholder="${t('أعد كتابة كلمة المرور', 'Re-enter password')}">
+                </div>
+                <div id="firstLoginStatus" style="min-height:20px; color:var(--text-muted); margin-bottom:8px; font-size:13px;"></div>
+                <button type="button" class="btn btn-primary btn-full" onclick="submitFirstLoginChange()"><i class="fas fa-key"></i> ${t('حفظ ومتابعة', 'Save and Continue')}</button>
+            </div>
+        </div>
+
         <script>
             const currentLang = '${lang}';
             const currentDir = '${dir}';
             let fetchedGroups = [];
+            let firstLoginEnforced = false;
 
             const dict = {
                 'delete_confirm': '${t("هل أنت متأكد من رغبتك في حذف الإعدادات المخصصة لهذه المجموعة؟", "Are you sure you want to delete settings for this group?")}',
@@ -1018,7 +1044,10 @@ module.exports = function renderDashboard(req, db, config) {
                 'custom_bl': '${t("أرقام محظورة مخصصة لهذه المجموعة", "Custom banned numbers for this group")}',
                 'use_global_wl': '${t("تطبيق القائمة البيضاء العامة", "Apply Global Whitelist")}',
                 'ug_wl_desc': '${t("دمج الأرقام الموثوقة العامة مع هذه المجموعة", "Include globally trusted numbers")}',
-                'custom_wl': '${t("أرقام موثوقة مخصصة لهذه المجموعة", "Custom trusted numbers for this group")}'
+                'custom_wl': '${t("أرقام موثوقة مخصصة لهذه المجموعة", "Custom trusted numbers for this group")}',
+                'cred_change_saving': '${t("جاري حفظ بيانات الدخول الجديدة...", "Saving new credentials...")}',
+                'cred_change_done': '${t("تم تحديث بيانات الدخول بنجاح", "Credentials updated successfully")}',
+                'cred_change_failed': '${t("فشل تحديث بيانات الدخول", "Credential update failed")}'
             };
 
             async function loadKnownGroups() {
@@ -1101,6 +1130,64 @@ module.exports = function renderDashboard(req, db, config) {
                 clearInterval(debuggerInterval);
             }
 
+            async function enforceFirstLoginChange() {
+                try {
+                    const res = await fetch('/auth/me');
+                    if (!res.ok) return;
+                    const me = await res.json();
+                    if (!me || !me.mustChangeCredentials) return;
+
+                    firstLoginEnforced = true;
+                    const modal = document.getElementById('firstLoginModal');
+                    const usernameInput = document.getElementById('firstLoginUsername');
+                    const statusEl = document.getElementById('firstLoginStatus');
+                    if (statusEl) statusEl.textContent = '';
+                    if (usernameInput) usernameInput.value = me.username || '';
+                    modal.classList.add('open');
+                    document.body.style.overflow = 'hidden';
+                } catch (e) {}
+            }
+
+            async function submitFirstLoginChange() {
+                const usernameEl = document.getElementById('firstLoginUsername');
+                const passwordEl = document.getElementById('firstLoginPassword');
+                const confirmEl = document.getElementById('firstLoginConfirm');
+                const statusEl = document.getElementById('firstLoginStatus');
+                if (!usernameEl || !passwordEl || !confirmEl || !statusEl) return;
+
+                statusEl.style.color = 'var(--text-muted)';
+                statusEl.textContent = dict.cred_change_saving;
+
+                try {
+                    const response = await fetch('/auth/first-login-change', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            username: usernameEl.value,
+                            password: passwordEl.value,
+                            confirmPassword: confirmEl.value
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const data = await response.json().catch(() => ({ error: dict.cred_change_failed }));
+                        statusEl.style.color = 'var(--red)';
+                        statusEl.textContent = data.error || dict.cred_change_failed;
+                        return;
+                    }
+
+                    statusEl.style.color = 'var(--accent)';
+                    statusEl.textContent = dict.cred_change_done;
+                    firstLoginEnforced = false;
+                    document.getElementById('firstLoginModal').classList.remove('open');
+                    document.body.style.overflow = '';
+                    showToast('<i class="fas fa-check-circle"></i> ' + dict.cred_change_done);
+                } catch (e) {
+                    statusEl.style.color = 'var(--red)';
+                    statusEl.textContent = dict.cred_change_failed;
+                }
+            }
+
             window.onclick = function(event) {
                 if (event.target === document.getElementById('ollamaModal')) closeOllamaModal();
                 if (event.target === document.getElementById('debuggerModal')) closeDebuggerModal();
@@ -1137,6 +1224,7 @@ module.exports = function renderDashboard(req, db, config) {
             }
 
             async function signOutSession() {
+                if (firstLoginEnforced) return;
                 if (!confirm(dict.signout_confirm.replace(/<[^>]*>?/gm, ''))) return;
                 try {
                     await fetch('/auth/logout', { method: 'POST' });
@@ -2756,6 +2844,7 @@ module.exports = function renderDashboard(req, db, config) {
             renderDefaultWords();
             renderAITriggerWords();
             loadKnownGroups();
+            enforceFirstLoginChange();
 
             setInterval(async () => {
                 try {
