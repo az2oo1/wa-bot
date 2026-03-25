@@ -190,6 +190,7 @@ module.exports = function renderDashboard(req, db, config) {
 
             #page-groups #groupsContainer {
                 display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 12px;
             }
 
@@ -265,6 +266,10 @@ module.exports = function renderDashboard(req, db, config) {
             }
 
             @media (max-width: 900px) {
+                #page-groups #groupsContainer {
+                    grid-template-columns: 1fr;
+                }
+
                 #page-groups .glc-stats {
                     display: none;
                 }
@@ -2195,7 +2200,7 @@ module.exports = function renderDashboard(req, db, config) {
                 container.innerHTML = '';
 
                 if (groupsArr.length === 0) {
-                    container.innerHTML = \`<div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
+                    container.innerHTML = \`<div style="grid-column:1/-1; text-align:center; padding:60px 20px; color:var(--text-muted);">
                         <i class="fas fa-users-cog" style="font-size:48px; margin-bottom:16px; display:block; opacity:0.3;"></i>
                         <div style="font-size:16px; font-weight:600;">\${currentLang === 'en' ? 'No custom groups yet' : 'لا توجد مجموعات مخصصة بعد'}</div>
                         <div style="font-size:13px; margin-top:6px;">\${currentLang === 'en' ? 'Click "Add Group" to get started' : 'اضغط على "إضافة مجموعة" للبدء'}</div>
