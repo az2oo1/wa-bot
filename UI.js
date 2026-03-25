@@ -410,12 +410,12 @@ module.exports = function renderDashboard(req, db, config) {
                     #page-blacklist .field-label { color: var(--text); opacity: .78; }
                     #page-blacklist .toggle-label small { color: var(--text); opacity: .72; }
                     #page-blacklist .blacklist-grid { align-items: start; }
-                    #page-blacklist .blacklist-main-card { grid-column: 1; grid-row: 1 / span 2; }
+                    #page-blacklist .blacklist-main-card { grid-column: 1; grid-row: 1; }
                     #page-blacklist .blocked-ext-card { grid-column: 2; grid-row: 1; }
                     #page-blacklist .whitelist-card { grid-column: 2; grid-row: 2; }
                     #page-blacklist .purge-card {
-                        grid-column: 1 / -1;
-                        grid-row: 3;
+                        grid-column: 1;
+                        grid-row: 2;
                         border-color: rgba(255,171,64,0.55);
                         box-shadow: 0 0 0 1px rgba(255,171,64,0.18) inset;
                     }
@@ -497,7 +497,7 @@ module.exports = function renderDashboard(req, db, config) {
                         </div>
                     </div>
 
-                    <div class="card warning card-grid-full purge-card">
+                    <div class="card warning purge-card">
                         <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
                         <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
                         <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; max-width:460px; margin:0 auto; justify-content:center; padding:12px 18px; font-size:15px;" onclick="purgeBlacklisted()">
@@ -516,9 +516,20 @@ module.exports = function renderDashboard(req, db, config) {
 
                 <div class="card-grid general-top-grid">
                     <div class="card general-top-card" style="margin-bottom:0;">
-                        <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
-                        <div class="field-group" id="defaultAdminGroupContainer">
-                            <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
+                        <div class="card-header"><h3><i class="fas fa-filter"></i> ${t('فلتر الكلمات الممنوعة', 'Forbidden Word Filter')}</h3></div>
+                        <div class="toggle-row" style="margin-bottom:18px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableWordFilter" ${config.enableWordFilter ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label">${t('تفعيل فلتر الكلمات', 'Enable Word Filter')}<small>${t('حذف فوري عند رصد أي كلمة ممنوعة', 'Instant delete on detecting forbidden words')}</small></div>
+                            </div>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('الكلمات الممنوعة الافتراضية', 'Default Forbidden Words')}</label>
+                            <div class="input-with-btn">
+                                <input type="text" id="newDefaultWord" placeholder="${t('أدخل الكلمة الممنوعة...', 'Enter forbidden word...')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addDefaultWord();}">
+                                <button type="button" class="btn btn-primary" onclick="addDefaultWord()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
+                            </div>
+                            <div id="defaultWordsContainer" class="chip-container"></div>
                         </div>
                     </div>
 
@@ -573,20 +584,9 @@ module.exports = function renderDashboard(req, db, config) {
 
                 <div class="card-grid">
                     <div class="card">
-                        <div class="card-header"><h3><i class="fas fa-filter"></i> ${t('فلتر الكلمات الممنوعة', 'Forbidden Word Filter')}</h3></div>
-                        <div class="toggle-row" style="margin-bottom:18px;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="enableWordFilter" ${config.enableWordFilter ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label">${t('تفعيل فلتر الكلمات', 'Enable Word Filter')}<small>${t('حذف فوري عند رصد أي كلمة ممنوعة', 'Instant delete on detecting forbidden words')}</small></div>
-                            </div>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('الكلمات الممنوعة الافتراضية', 'Default Forbidden Words')}</label>
-                            <div class="input-with-btn">
-                                <input type="text" id="newDefaultWord" placeholder="${t('أدخل الكلمة الممنوعة...', 'Enter forbidden word...')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addDefaultWord();}">
-                                <button type="button" class="btn btn-primary" onclick="addDefaultWord()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
-                            </div>
-                            <div id="defaultWordsContainer" class="chip-container"></div>
+                        <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
+                        <div class="field-group" id="defaultAdminGroupContainer">
+                            <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
                         </div>
                     </div>
                     <div class="card">
