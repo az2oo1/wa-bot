@@ -315,9 +315,32 @@ module.exports = function renderDashboard(req, db, config) {
                     <h2><i class="fas fa-shield-alt"></i> ${t('إدارة الأرقام (حظر وتوثيق)', 'Number Management (Ban & VIP)')}</h2>
                     <p>${t('أضف الأرقام المحظورة (طرد فوري) أو الموثوقة (تخطي الفلاتر)', 'Add banned numbers (instant kick) or trusted VIPs (bypass filters)')}</p>
                 </div>
-                <div class="card-grid">
+                <style>
+                    #page-blacklist .page-header p { color: var(--text); opacity: .84; }
+                    #page-blacklist .field-label { color: var(--text); opacity: .78; }
+                    #page-blacklist .toggle-label small { color: var(--text); opacity: .72; }
+                    #page-blacklist .blacklist-grid { align-items: stretch; }
+                    #page-blacklist .blacklist-main-card { grid-column: 1; grid-row: 1 / span 2; }
+                    #page-blacklist .blocked-ext-card { grid-column: 2; grid-row: 1; }
+                    #page-blacklist .whitelist-card { grid-column: 2; grid-row: 2; }
+                    #page-blacklist .purge-card {
+                        grid-column: 1 / -1;
+                        border-color: rgba(255,171,64,0.55);
+                        box-shadow: 0 0 0 1px rgba(255,171,64,0.18) inset;
+                    }
+                    @media (max-width:1100px) {
+                        #page-blacklist .blacklist-main-card,
+                        #page-blacklist .blocked-ext-card,
+                        #page-blacklist .whitelist-card,
+                        #page-blacklist .purge-card {
+                            grid-column: auto;
+                            grid-row: auto;
+                        }
+                    }
+                </style>
+                <div class="card-grid blacklist-grid">
                     
-                    <div class="card danger">
+                    <div class="card danger blacklist-main-card">
                         <div class="card-header">
                             <h3 style="color:var(--red);"><i class="fas fa-user-plus"></i> ${t('القائمة السوداء (حظر)', 'Blacklist (Banned)')}</h3>
                             <span style="font-size: 13px; color: var(--text-muted); background:var(--red-dim); padding:4px 10px; border-radius:20px;">${t('طرد فوري', 'Instant Kick')}</span>
@@ -342,7 +365,7 @@ module.exports = function renderDashboard(req, db, config) {
                         </div>
                     </div>
 
-                    <div class="card danger">
+                    <div class="card danger blocked-ext-card">
                         <div class="card-header">
                             <h3 style="color:var(--red);"><i class="fas fa-globe"></i> ${t('رموز الدول المحظورة', 'Blocked Extensions')}</h3>
                             <span style="font-size: 13px; color: var(--text-muted); background:var(--red-dim); padding:4px 10px; border-radius:20px;">${t('حظر دول كاملة', 'Ban Entire Countries')}</span>
@@ -358,7 +381,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div id="blockedExtensionsContainer" class="chip-container"></div>
                     </div>
 
-                    <div class="card success">
+                    <div class="card success whitelist-card">
                         <div class="card-header">
                             <h3 style="color:var(--accent);"><i class="fas fa-star"></i> ${t('القائمة البيضاء (VIP)', 'Whitelist (VIP)')}</h3>
                             <span style="font-size: 13px; color: var(--text-muted); background:var(--accent-dim); padding:4px 10px; border-radius:20px;">${t('تخطي جميع القيود', 'Bypasses all rules')}</span>
@@ -383,7 +406,7 @@ module.exports = function renderDashboard(req, db, config) {
                         </div>
                     </div>
 
-                    <div class="card warning card-grid-full">
+                    <div class="card warning card-grid-full purge-card">
                         <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
                         <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
                         <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; justify-content:center; padding:15px; font-size:16px;" onclick="purgeBlacklisted()">
