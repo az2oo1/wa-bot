@@ -36,7 +36,6 @@ if [ -f /app_staging/index.js.original ]; then\n\
   cp /app_staging/index.js.original /app_staging/index.js\n\
 fi\n\
 if [ ! -f /app/index.js ]; then\n\
-if [ ! -f /app/index.js ]; then\n\
   echo "First run detected! Copying app files to /app..."\n\
   for item in /app_staging/*; do\n\
     base="$(basename "$item")"\n\
