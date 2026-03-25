@@ -704,6 +704,7 @@ app.use('/public', express.static(path.join(__dirname, 'public')));
 
 let currentQR = '';
 let botStatus = '<i class="fas fa-spinner fa-spin"></i> جاري تهيئة النظام وبدء التشغيل...';
+let botStatusKind = 'initializing';
 const userTrackers = new Map(); const abortedMessages = new Set(); const spamMutedUsers = new Map();
 const groupRaidTrackers = new Map(); const lockedGroups = new Set();
 const joinProfileReviewCache = new Map();
@@ -1065,7 +1066,8 @@ app.get('/api/status', requireAuthApi, requirePermission('dashboard:read'), (req
             .replace('تم تسجيل الخروج من الحساب...', 'Logged out of account...')
             .replace('جاري إنهاء الجلسة...', 'Terminating session...');
     }
-    res.json({ qr: currentQR, status: translatedStatus });
+    const statusText = String(translatedStatus).replace(/<[^>]*>/g, '').trim();
+    res.json({ qr: currentQR, status: translatedStatus, statusText, statusKind: botStatusKind });
 });
 
 app.get('/api/logs', requireAuthApi, requirePermission('logs:view'), (req, res) => res.json(logsHistory));
@@ -1074,7 +1076,7 @@ app.get('/api/logs', requireAuthApi, requirePermission('logs:view'), (req, res) 
 app.get('/api/connection-logs', requireAuthApi, requirePermission('logs:view'), (req, res) => {
     const connectionData = {
         currentStatus: botStatus,
-        isConnected: botStatus.includes('متصل'),
+        isConnected: botStatusKind === 'connected',
         isInitializing,
         connectionHistory: clientConnectionHistory,
         lastConnectionTimestamp,
@@ -1089,6 +1091,7 @@ app.get('/api/connection-logs', requireAuthApi, requirePermission('logs:view'), 
 app.post('/api/logout', requireAuthApi, requirePermission('bot:logout'), async (req, res) => {
     try {
         botStatus = '<i class="fas fa-spinner fa-pulse"></i> جاري إنهاء الجلسة...';
+        botStatusKind = 'terminating';
         await client.logout();
         res.sendStatus(200);
     } catch (error) { res.sendStatus(500); }
@@ -1660,6 +1663,7 @@ client.on('ready', async () => {
         });
         
         botStatus = '<i class="fas fa-check-circle"></i> متصل وجاهز للعمل';
+        botStatusKind = 'connected';
         addConnectionLog('متصل', `متصل وجاهز - ${chats.length} مجموعة`);
     } catch (error) {
         const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
@@ -1679,6 +1683,7 @@ client.on('authenticated', () => {
     addConnectionLog('مصرح', 'تم التحقق من الهوية بنجاح من خوادم WhatsApp');
     lastConnectionTimestamp = Date.now();
     botStatus = '<i class="fas fa-sync fa-spin"></i> تم تسجيل الدخول بنجاح، جاري جلب البيانات...';
+    botStatusKind = 'syncing';
     currentQR = '';
     
     if (initializationTimeout) {
@@ -1724,10 +1729,12 @@ client.on('qr', (qr) => {
         if (err) {
             console.error('[خطأ] فشل إنشاء QR code:', err.message);
             botStatus = '<i class="fas fa-exclamation-triangle"></i> خطأ في QR code';
+            botStatusKind = 'error';
             return;
         }
         currentQR = url;
         botStatus = '<i class="fas fa-qrcode"></i> بانتظار مسح رمز الاستجابة السريعة (QR Code)...';
+        botStatusKind = 'waiting_qr';
         console.log('[معلومة] QR code متاح للمسح');
     });
 });
@@ -1737,6 +1744,7 @@ client.on('disconnected', async (reason) => {
     addConnectionLog('قطع الاتصال', disconnectReason);
     
     botStatus = '<i class="fas fa-sign-out-alt"></i> تم تسجيل الخروج من الحساب...';
+    botStatusKind = 'disconnected';
     currentQR = '';
     isInitializing = false;
     
@@ -1792,6 +1800,7 @@ client.on('auth_failure', (msg) => {
     });
     addConnectionLog('فشل المصادقة', failureMsg);
     botStatus = '<i class="fas fa-exclamation-triangle"></i> خطأ في المصادقة: ' + failureMsg;
+    botStatusKind = 'error';
 });
 
 // Handle incoming call notifications
@@ -1818,6 +1827,7 @@ process.on('unhandledRejection', (reason, promise) => {
     addConnectionLog('رفض غير معالج', reasonMsg);
     if (!isInitializing && botStatus.includes('متصل')) {
         botStatus = '<i class="fas fa-exclamation-triangle"></i> حدث خطأ غير متوقع';
+        botStatusKind = 'error';
     }
 });
 
@@ -2671,6 +2681,7 @@ async function initializeClientWithRetry(retryCount = 0, maxRetries = 5) {
         }
         
         isInitializing = true;
+        botStatusKind = 'initializing';
         console.log(`[معلومة] مرحلة 1: اوضاي التهيئة...`);
         addConnectionLog('التهيئة الجارية', 'مرحلة 1/3: التهيئة');
         
@@ -2680,6 +2691,7 @@ async function initializeClientWithRetry(retryCount = 0, maxRetries = 5) {
             addConnectionLog('انتهاء الوقت', 'انقضى وقت التهيئة المسموح به (60 ثانية)');
             isInitializing = false;
             botStatus = '<i class="fas fa-exclamation-triangle"></i> خطأ: انقضى وقت التهيئة';
+            botStatusKind = 'error';
         }, 60000); // 60 second timeout
         
         await client.initialize();
@@ -2720,12 +2732,14 @@ async function initializeClientWithRetry(retryCount = 0, maxRetries = 5) {
         if (retryCount < maxRetries) {
             console.log(`[معلومة] سيتم إعادة المحاولة (رقم ${retryCount + 2} من ${maxRetries + 1})`);
             botStatus = `<i class="fas fa-spin fa-spinner"></i> خطأ - اعادة محاولة (${retryCount + 1}/${maxRetries})`;
+            botStatusKind = 'retrying';
             
             // Retry with exponential backoff
             return initializeClientWithRetry(retryCount + 1, maxRetries);
         } else {
             console.error(`[خطأ حرج] فشلت جميع محاولات التهيئة (${maxRetries + 1} محاولات)!`);
             botStatus = `<i class="fas fa-exclamation-triangle"></i> فشل بدء البوت بعد ${maxRetries + 1} محاولات`;
+            botStatusKind = 'error';
             addConnectionLog('فشل نهائي', `فشلت جميع ${maxRetries + 1} محاولات برسالة: ${errorMsg}`);
         }
     }

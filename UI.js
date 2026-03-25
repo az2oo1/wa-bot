@@ -260,7 +260,7 @@ module.exports = function renderDashboard(req, db, config) {
 
                     <div class="status-pill">
                         <div class="status-dot" id="statusDot"></div>
-                        <span id="status-text"><i class="fas fa-spinner fa-spin"></i> ${t('جاري تهيئة النظام وبدء التشغيل...', 'Initializing system...')}</span>
+                        <span id="status-text"><i id="status-text-icon" class="fas fa-spinner fa-spin"></i> <span id="status-text-label">${t('جاري تهيئة النظام وبدء التشغيل...', 'Initializing system...')}</span></span>
                     </div>
                 </div>
             </div>
@@ -288,7 +288,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card success">
                             <div class="card-header"><h3 style="color:var(--accent);"><i class="fas fa-chart-line"></i> ${t('حالة النظام', 'System Status')}</h3></div>
                             <div style="font-size:16px; color:var(--text-muted); line-height:2.2;">
-                                <div><i class="fas fa-robot"></i> <strong style="color:var(--text);">${t('البوت:', 'Bot:')}</strong> <span id="status-text-detail" style="color:var(--accent);">...</span></div>
+                                <div><i class="fas fa-robot"></i> <strong style="color:var(--text);">${t('البوت:', 'Bot:')}</strong> <span id="status-text-detail" style="color:var(--accent);">...</span> <i id="status-text-detail-check" class="fas fa-check" style="color:var(--accent);display:none;"></i></div>
                                 <div><i class="fas fa-database"></i> <strong style="color:var(--text);">${t('قاعدة البيانات:', 'Database:')}</strong> <span style="color:var(--accent);">${t('متصلة', 'Connected')} <i class="fas fa-check"></i></span></div>
                                 <div><i class="fas fa-globe"></i> <strong style="color:var(--text);">${t('المنفذ:', 'Port:')}</strong> <span style="color:var(--accent);">3000 <i class="fas fa-check"></i></span></div>
                             </div>
@@ -400,29 +400,34 @@ module.exports = function renderDashboard(req, db, config) {
                     <p>${t('تطبّق على جميع المجموعات التي لا تملك إعدادات مخصصة', 'Applies to all groups without custom settings')}</p>
                 </div>
 
-                <div class="card-grid">
-                    <div class="card">
+                <div class="card-grid general-top-grid">
+                    <div class="card general-top-card" style="margin-bottom:0;">
                         <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
                         <div class="field-group" id="defaultAdminGroupContainer">
                             <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
                         </div>
                     </div>
 
-                    <div class="card" style="border-color:rgba(100,220,150,0.5); background:linear-gradient(160deg,rgba(100,220,150,0.07) 0,var(--card-bg) 55%); position:relative; overflow:hidden;">
+                    <div class="card general-top-card" style="margin-bottom:0; border-color:rgba(100,220,150,0.35); background:linear-gradient(160deg,rgba(100,220,150,0.05) 0,var(--card-bg) 58%); position:relative; overflow:hidden;">
                     <style>
                         @keyframes safePulse {
                             0%,100% { box-shadow: 0 0 0 0 rgba(100,220,150,0.55); }
                             50%      { box-shadow: 0 0 0 8px rgba(100,220,150,0); }
                         }
+                        .general-top-grid { align-items: stretch; margin-bottom: 20px; }
+                        .general-top-card { display: flex; flex-direction: column; }
+                        .general-top-card .field-group { margin-bottom: 0; }
+                        #defaultWordsContainer { max-height: 160px; gap: 8px; }
+                        #defaultWordsContainer .chip { padding: 5px 10px; font-size: 13px; }
                         #safeMode + .slider { transition: background 0.35s ease, box-shadow 0.35s ease !important; }
                         #safeMode:not(:checked) + .slider { animation: safePulse 1.8s ease-in-out infinite; }
                     </style>
 
-                    <div style="display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,rgba(255,171,64,0.18),rgba(255,171,64,0.04));border:1px solid rgba(255,171,64,0.4);border-radius:10px;padding:11px 16px;margin-bottom:18px;">
+                    <div style="display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,rgba(255,171,64,0.16),rgba(255,171,64,0.03));border:1px solid rgba(255,171,64,0.35);border-radius:10px;padding:10px 14px;margin-bottom:14px;">
                         <i class="fas fa-exclamation-triangle" style="color:var(--orange);font-size:18px;flex-shrink:0;"></i>
                         <div>
-                            <strong style="color:var(--orange);font-size:14px;">${t('يُنصح بشدة بتفعيله', '⚠️ Strongly Recommended')}</strong>
-                            <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${t('تشغيل البوت بدون هذا الوضع يزيد من احتمالية حظر حسابك من واتساب', 'Running the bot without Safe Mode significantly increases the risk of your WhatsApp account being banned')}</div>
+                            <strong style="color:#ffd08a;font-size:14px;">${t('يُنصح بشدة بتفعيله', '⚠️ Strongly Recommended')}</strong>
+                            <div style="font-size:12px;color:var(--text);opacity:.88;margin-top:2px;">${t('تشغيل البوت بدون هذا الوضع يزيد من احتمالية حظر حسابك من واتساب', 'Running the bot without Safe Mode significantly increases the risk of your WhatsApp account being banned')}</div>
                         </div>
                     </div>
 
@@ -443,9 +448,9 @@ module.exports = function renderDashboard(req, db, config) {
             : `<span style="font-size:12px;background:rgba(255,82,82,0.12);color:var(--red);border:1px solid rgba(255,82,82,0.3);padding:3px 10px;border-radius:20px;font-weight:700;"><i class="fas fa-times"></i> ${t('معطّل', 'Off')}</span>`
         }
                     </div>
-                    <div style="font-size:13px; color:var(--text-muted); line-height:2.2; padding:14px; background:var(--input-bg); border-radius:10px; border:1px solid var(--card-border);">
-                        <div><i class="fas fa-times-circle" style="color:var(--red);"></i> <strong style="color:var(--text);">${t('إيقاف:', 'Off:')}</strong> ${t('إجراءات فورية — أسرع ولكن تُعرّض حسابك للحظر', 'Instant actions — faster but risks getting your account banned')}</div>
-                        <div><i class="fas fa-shield-alt" style="color:#64dc96;"></i> <strong style="color:var(--text);">${t('تشغيل:', 'On:')}</strong> ${t('تأخير عشوائي 10–60 ث — يحاكي سلوك الإنسان ويقلل خطر الحظر بشكل كبير', 'Random 10–60s delay — mimics human behaviour, greatly reduces ban risk')}</div>
+                    <div style="font-size:12px; color:var(--text-muted); line-height:1.9; padding:11px 12px; background:var(--input-bg); border-radius:10px; border:1px solid var(--card-border);">
+                        <div style="margin-bottom:6px;"><i class="fas fa-times-circle" style="color:var(--red);"></i> <strong style="color:var(--text);">${t('إيقاف:', 'Off:')}</strong> ${t('إجراءات فورية — أسرع ولكن تُعرّض حسابك للحظر', 'Instant actions — faster but risks getting your account banned')}</div>
+                        <div style="margin-bottom:6px;"><i class="fas fa-shield-alt" style="color:#64dc96;"></i> <strong style="color:var(--text);">${t('تشغيل:', 'On:')}</strong> ${t('تأخير عشوائي 10–60 ث — يحاكي سلوك الإنسان ويقلل خطر الحظر بشكل كبير', 'Random 10–60s delay — mimics human behaviour, greatly reduces ban risk')}</div>
                         <div><i class="fas fa-info-circle" style="color:var(--blue);"></i> <strong style="color:var(--text);">${t('يؤثر على:', 'Covers:')}</strong> ${t('الطرد، الحذف، التصويت، الإبلاغ، رسائل الترحيب', 'Kicks, deletes, polls, reports, welcome messages')}</div>
                     </div>
                 </div>
@@ -1375,8 +1380,7 @@ module.exports = function renderDashboard(req, db, config) {
 
             async function logoutBot() {
                 if(confirm(dict.logout_confirm.replace(/<[^>]*>?/gm, ''))) {
-                    document.getElementById('status-text').innerHTML = dict.logging_out;
-                    document.getElementById('logoutBtn').style.display = 'none';
+                    renderDashboardStatus(dict.logging_out.replace(/<[^>]*>?/gm, '').trim(), 'terminating');
                     await fetch('/api/logout', { method: 'POST' });
                 }
             }
@@ -3140,6 +3144,39 @@ module.exports = function renderDashboard(req, db, config) {
                 renderGroupChips(gIndex, 'whitelist');
             }
 
+            function getStatusIconClass(kind) {
+                if (kind === 'connected') return 'fas fa-check';
+                if (kind === 'waiting_qr') return 'fas fa-qrcode';
+                if (kind === 'syncing' || kind === 'initializing' || kind === 'retrying' || kind === 'terminating') return 'fas fa-spinner fa-spin';
+                if (kind === 'error') return 'fas fa-exclamation-triangle';
+                if (kind === 'disconnected') return 'fas fa-sign-out-alt';
+                return 'fas fa-info-circle';
+            }
+
+            function renderDashboardStatus(statusText, statusKind) {
+                const iconEl = document.getElementById('status-text-icon');
+                const labelEl = document.getElementById('status-text-label');
+                const detailEl = document.getElementById('status-text-detail');
+                const detailCheckEl = document.getElementById('status-text-detail-check');
+                const dot = document.getElementById('statusDot');
+                const logoutBtn = document.getElementById('logoutBtn');
+                const text = String(statusText || '').trim();
+                const kind = String(statusKind || 'unknown');
+
+                if (iconEl) iconEl.className = getStatusIconClass(kind);
+                if (labelEl) labelEl.textContent = text;
+                if (detailEl) detailEl.textContent = text;
+                if (detailCheckEl) detailCheckEl.style.display = kind === 'connected' ? 'inline-block' : 'none';
+
+                if (dot) {
+                    if (kind === 'connected') dot.className = 'status-dot online';
+                    else if (kind === 'waiting_qr') dot.className = 'status-dot waiting';
+                    else dot.className = 'status-dot';
+                }
+
+                if (logoutBtn) logoutBtn.style.display = kind === 'connected' ? 'block' : 'none';
+            }
+
             renderBlacklist();
             renderWhitelist();
             renderDefaultWords();
@@ -3151,21 +3188,7 @@ module.exports = function renderDashboard(req, db, config) {
                 try {
                     let res = await fetch('/api/status?lang=' + currentLang);
                     let data = await res.json();
-                    document.getElementById('status-text').innerHTML = data.status;
-                    const detailEl = document.getElementById('status-text-detail');
-                    if(detailEl) detailEl.innerHTML = data.status;
-                    
-                    const dot = document.getElementById('statusDot');
-                    if(data.status.includes('متصل') || data.status.includes('Connected')) {
-                        dot.className = 'status-dot online';
-                        document.getElementById('logoutBtn').style.display = 'block';
-                    } else if(data.status.includes('QR') || data.status.includes('انتظار') || data.status.includes('Waiting')) {
-                        dot.className = 'status-dot waiting';
-                        document.getElementById('logoutBtn').style.display = 'none';
-                    } else {
-                        dot.className = 'status-dot';
-                        document.getElementById('logoutBtn').style.display = 'none';
-                    }
+                    renderDashboardStatus(data.statusText || '', data.statusKind || 'unknown');
 
                     const qrImg = document.getElementById('qr-image');
                     const qrPlaceholder = document.getElementById('qr-placeholder');
