@@ -63,6 +63,80 @@ module.exports = function renderDashboard(req, db, config) {
                 border-color: var(--card-border) !important;
                 color: var(--text-muted) !important;
             }
+
+            .um-layout {
+                display: grid;
+                grid-template-columns: 1.15fr 1fr;
+                gap: 20px;
+                margin-bottom: 20px;
+            }
+
+            .um-stack {
+                display: flex;
+                flex-direction: column;
+                gap: 20px;
+            }
+
+            .um-stats {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 10px;
+                margin-bottom: 12px;
+            }
+
+            .um-stat {
+                border: 1px solid var(--card-border);
+                border-radius: 10px;
+                background: var(--input-bg);
+                padding: 10px 12px;
+            }
+
+            .um-stat-label {
+                color: var(--text-muted);
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: .6px;
+            }
+
+            .um-stat-value {
+                color: var(--text);
+                font-size: 20px;
+                font-weight: 700;
+                margin-top: 2px;
+                line-height: 1.2;
+            }
+
+            .um-card-note {
+                font-size: 13px;
+                color: var(--text-muted);
+                margin-top: -6px;
+                margin-bottom: 12px;
+            }
+
+            .um-scroll-box {
+                max-height: 360px;
+                overflow: auto;
+                padding-right: 4px;
+            }
+
+            .um-selected-user {
+                border: 1px solid rgba(64,196,255,0.28);
+                background: rgba(64,196,255,0.06);
+            }
+
+            .um-access-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 14px;
+            }
+
+            @media (max-width: 1100px) {
+                .um-layout,
+                .um-access-grid,
+                .um-stats {
+                    grid-template-columns: 1fr;
+                }
+            }
         </style>
         <nav class="sidebar" id="sidebar">
             <div class="sidebar-logo">
@@ -783,107 +857,129 @@ module.exports = function renderDashboard(req, db, config) {
                     <p>${t('إدارة الحسابات والصلاحيات بشكل مباشر داخل اللوحة', 'Manage users and permissions directly inside the dashboard')}</p>
                 </div>
 
-                <div class="card-grid">
-                    <div class="card">
-                        <div class="card-header"><h3><i class="fas fa-user-plus"></i> ${t('إضافة مستخدم', 'Create User')}</h3></div>
-                        <p style="font-size:13px;color:var(--text-muted);margin-bottom:12px;">${t('اكتب البيانات ثم اضغط إضافة المستخدم. يمكنك تعديل الصلاحيات بعد الإنشاء.', 'Enter details then click Create User. You can assign permissions after creation.')}</p>
-                        <div class="field-group">
-                            <label class="field-label">${t('اسم المستخدم', 'Username')}</label>
-                            <input type="text" id="um_create_username" placeholder="agent_1">
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('الاسم المعروض', 'Display Name')}</label>
-                            <input type="text" id="um_create_display_name" placeholder="Agent One">
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('كلمة المرور', 'Password')}</label>
-                            <input type="text" id="um_create_password" placeholder="${t('8 أحرف على الأقل', 'At least 8 characters')}">
-                        </div>
-                        <div class="field-row">
-                            <div class="field-group" style="margin-bottom:0;">
-                                <label class="field-label">${t('الدور السريع', 'Quick Role')}</label>
-                                <select id="um_create_quick_role">
-                                    <option value="viewer">${t('مشاهدة فقط', 'Viewer')}</option>
-                                    <option value="operator" selected>${t('مشغل', 'Operator')}</option>
-                                    <option value="admin">${t('مدير كامل', 'Full Admin')}</option>
-                                    <option value="custom">${t('مخصص (يدوي)', 'Custom (Manual)')}</option>
-                                </select>
+                <div class="um-stats">
+                    <div class="um-stat">
+                        <div class="um-stat-label">${t('إجمالي المستخدمين', 'Total Users')}</div>
+                        <div class="um-stat-value" id="um_users_count">0</div>
+                    </div>
+                    <div class="um-stat">
+                        <div class="um-stat-label">${t('المديرون العامون', 'Superadmins')}</div>
+                        <div class="um-stat-value" id="um_superadmins_count">0</div>
+                    </div>
+                    <div class="um-stat">
+                        <div class="um-stat-label">${t('مجموعات الصلاحيات', 'Permission Groups')}</div>
+                        <div class="um-stat-value" id="um_perm_count">0</div>
+                    </div>
+                </div>
+
+                <div class="um-layout">
+                    <div class="um-stack">
+                        <div class="card success">
+                            <div class="card-header"><h3><i class="fas fa-user-plus"></i> ${t('إضافة مستخدم', 'Create User')}</h3></div>
+                            <p class="um-card-note">${t('أنشئ حساباً جديداً بسرعة ثم عدّل وصوله من لوحة الوصول بالأسفل.', 'Create a user quickly, then fine-tune access in the access panel below.')}</p>
+                            <div class="field-row">
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('اسم المستخدم', 'Username')}</label>
+                                    <input type="text" id="um_create_username" placeholder="agent_1">
+                                </div>
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('الاسم المعروض', 'Display Name')}</label>
+                                    <input type="text" id="um_create_display_name" placeholder="Agent One">
+                                </div>
                             </div>
-                            <div class="field-group" style="margin-bottom:0;">
-                                <label class="field-label">${t('نطاق المجموعات', 'Groups Scope')}</label>
-                                <select id="um_create_group_scope">
-                                    <option value="all" selected>${t('كل المجموعات', 'All Groups')}</option>
-                                    <option value="none">${t('بدون صلاحيات مجموعات الآن', 'No Groups Yet')}</option>
-                                </select>
+                            <div class="field-row" style="margin-top:12px;">
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('كلمة المرور', 'Password')}</label>
+                                    <input type="password" id="um_create_password" placeholder="${t('8 أحرف على الأقل', 'At least 8 characters')}">
+                                </div>
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('الدور السريع', 'Quick Role')}</label>
+                                    <select id="um_create_quick_role">
+                                        <option value="viewer">${t('مشاهدة فقط', 'Viewer')}</option>
+                                        <option value="operator" selected>${t('مشغل', 'Operator')}</option>
+                                        <option value="admin">${t('مدير كامل', 'Full Admin')}</option>
+                                        <option value="custom">${t('مخصص (يدوي)', 'Custom (Manual)')}</option>
+                                    </select>
+                                </div>
                             </div>
-                        </div>
-                        <div class="toggle-row" style="margin-bottom:16px;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="um_create_superadmin"><span class="slider"></span></label>
-                                <div class="toggle-label">${t('صلاحية مدير عام', 'Superadmin Permission')}</div>
+                            <div class="field-row" style="margin-top:12px;">
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('نطاق المجموعات', 'Groups Scope')}</label>
+                                    <select id="um_create_group_scope">
+                                        <option value="all" selected>${t('كل المجموعات', 'All Groups')}</option>
+                                        <option value="none">${t('بدون صلاحيات مجموعات الآن', 'No Groups Yet')}</option>
+                                    </select>
+                                </div>
+                                <div class="toggle-row" style="margin-bottom:0; margin-top:21px;">
+                                    <div class="toggle-left">
+                                        <label class="switch"><input type="checkbox" id="um_create_superadmin"><span class="slider"></span></label>
+                                        <div class="toggle-label">${t('صلاحية مدير عام', 'Superadmin Permission')}</div>
+                                    </div>
+                                </div>
                             </div>
+                            <div class="field-row" style="margin-top:12px;">
+                                <button class="btn btn-primary" type="button" onclick="umCreateUser()"><i class="fas fa-wand-magic-sparkles"></i> ${t('إضافة المستخدم', 'Create User')}</button>
+                                <button class="btn btn-ghost" type="button" onclick="umLoadData(true)"><i class="fas fa-sync"></i> ${t('تحديث', 'Refresh')}</button>
+                            </div>
+                            <div id="um_create_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
                         </div>
-                        <div class="field-row">
-                            <button class="btn btn-primary" type="button" onclick="umCreateUser()"><i class="fas fa-wand-magic-sparkles"></i> ${t('إضافة سريعة للمستخدم', 'Quick Create User')}</button>
-                            <button class="btn btn-ghost" type="button" onclick="umLoadData()"><i class="fas fa-sync"></i> ${t('تحديث', 'Refresh')}</button>
+
+                        <div class="card info">
+                            <div class="card-header"><h3><i class="fas fa-users"></i> ${t('المستخدمون', 'Users')}</h3></div>
+                            <div class="um-scroll-box" id="um_users_list"></div>
                         </div>
-                        <div id="um_create_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
                     </div>
 
-                    <div class="card">
-                        <div class="card-header"><h3><i class="fas fa-layer-group"></i> ${t('إضافة مجموعة صلاحيات', 'Create Permission Group')}</h3></div>
-                        <div class="field-group" style="margin-bottom:12px;">
-                            <label class="field-label">${t('قوالب جاهزة سريعة', 'Quick Presets')}</label>
-                            <div class="field-row">
+                    <div class="um-stack">
+                        <div class="card purple">
+                            <div class="card-header"><h3><i class="fas fa-layer-group"></i> ${t('إضافة مجموعة صلاحيات', 'Create Permission Group')}</h3></div>
+                            <p class="um-card-note">${t('استخدم القوالب الجاهزة ثم عدّل الصلاحيات كما تريد.', 'Start with presets, then customize permissions as needed.')}</p>
+                            <div class="field-row" style="margin-bottom:10px;">
                                 <button class="btn btn-ghost btn-sm" type="button" onclick="umUsePermPreset('viewer')">${t('مشاهدة فقط', 'Viewer')}</button>
                                 <button class="btn btn-ghost btn-sm" type="button" onclick="umUsePermPreset('operator')">${t('مشغل', 'Operator')}</button>
                                 <button class="btn btn-ghost btn-sm" type="button" onclick="umUsePermPreset('admin')">${t('مدير كامل', 'Full Admin')}</button>
                             </div>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('اسم المجموعة', 'Group Name')}</label>
-                            <input type="text" id="um_perm_name" placeholder="${t('المشرفون', 'Moderators')}">
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('الوصف', 'Description')}</label>
-                            <input type="text" id="um_perm_desc" placeholder="${t('وصف مختصر', 'Short description')}">
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('اختر الصلاحيات', 'Choose Permissions')}</label>
-                            <div id="um_perm_picker" class="cb-group" style="gap:8px;"></div>
-                        </div>
-                        <div class="field-row" style="margin-bottom:10px;">
-                            <button class="btn btn-ghost btn-sm" type="button" onclick="umSetAllCreatePerms(true)"><i class="fas fa-check-double"></i> ${t('تحديد الكل', 'Select All')}</button>
-                            <button class="btn btn-ghost btn-sm" type="button" onclick="umSetAllCreatePerms(false)"><i class="fas fa-eraser"></i> ${t('مسح الكل', 'Clear All')}</button>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('إضافة صلاحية مخصصة', 'Add Custom Permission')}</label>
-                            <div class="input-with-btn">
-                                <input type="text" id="um_perm_custom" placeholder="custom:permission" onkeypress="if(event.key==='Enter'){event.preventDefault();umAddCustomCreatePerm();}">
-                                <button class="btn btn-ghost" type="button" onclick="umAddCustomCreatePerm()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
+                            <div class="field-row">
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('اسم المجموعة', 'Group Name')}</label>
+                                    <input type="text" id="um_perm_name" placeholder="${t('المشرفون', 'Moderators')}">
+                                </div>
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('الوصف', 'Description')}</label>
+                                    <input type="text" id="um_perm_desc" placeholder="${t('وصف مختصر', 'Short description')}">
+                                </div>
                             </div>
+                            <div class="field-group" style="margin-top:12px;">
+                                <label class="field-label">${t('اختر الصلاحيات', 'Choose Permissions')}</label>
+                                <div id="um_perm_picker" class="cb-group" style="gap:8px;"></div>
+                            </div>
+                            <div class="field-row" style="margin-bottom:10px;">
+                                <button class="btn btn-ghost btn-sm" type="button" onclick="umSetAllCreatePerms(true)"><i class="fas fa-check-double"></i> ${t('تحديد الكل', 'Select All')}</button>
+                                <button class="btn btn-ghost btn-sm" type="button" onclick="umSetAllCreatePerms(false)"><i class="fas fa-eraser"></i> ${t('مسح الكل', 'Clear All')}</button>
+                            </div>
+                            <div class="field-group">
+                                <label class="field-label">${t('إضافة صلاحية مخصصة', 'Add Custom Permission')}</label>
+                                <div class="input-with-btn">
+                                    <input type="text" id="um_perm_custom" placeholder="custom:permission" onkeypress="if(event.key==='Enter'){event.preventDefault();umAddCustomCreatePerm();}">
+                                    <button class="btn btn-ghost" type="button" onclick="umAddCustomCreatePerm()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
+                                </div>
+                            </div>
+                            <div class="field-group">
+                                <label class="field-label">${t('الصلاحيات المختارة', 'Selected Permissions')}</label>
+                                <div id="um_perm_selected" class="chip-container" style="min-height:54px;"></div>
+                            </div>
+                            <button class="btn btn-primary" type="button" onclick="umCreatePermissionGroup()"><i class="fas fa-plus"></i> ${t('إضافة المجموعة', 'Create Group')}</button>
+                            <div id="um_perm_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
                         </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('الصلاحيات المختارة', 'Selected Permissions')}</label>
-                            <div id="um_perm_selected" class="chip-container" style="min-height:54px;"></div>
+
+                        <div class="card">
+                            <div class="card-header"><h3><i class="fas fa-key"></i> ${t('مجموعات الصلاحيات', 'Permission Groups')}</h3></div>
+                            <div class="um-scroll-box" id="um_perm_groups_list"></div>
                         </div>
-                        <button class="btn btn-primary" type="button" onclick="umCreatePermissionGroup()"><i class="fas fa-plus"></i> ${t('إضافة المجموعة', 'Create Group')}</button>
-                        <div id="um_perm_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
                     </div>
                 </div>
 
-                <div class="card-grid">
-                    <div class="card">
-                        <div class="card-header"><h3><i class="fas fa-users"></i> ${t('المستخدمون', 'Users')}</h3></div>
-                        <div id="um_users_list"></div>
-                    </div>
-                    <div class="card">
-                        <div class="card-header"><h3><i class="fas fa-key"></i> ${t('مجموعات الصلاحيات', 'Permission Groups')}</h3></div>
-                        <div id="um_perm_groups_list"></div>
-                    </div>
-                </div>
-
-                <div class="card">
+                <div class="card warning">
                     <div class="card-header"><h3><i class="fas fa-sliders-h"></i> ${t('صلاحيات المستخدم المحدد', 'Selected User Access')}</h3></div>
                     <p id="um_selected_user" style="color:var(--text-muted);margin-bottom:14px;">${t('اختر مستخدماً من القائمة', 'Select a user from the list')}</p>
                     <div class="field-row" style="margin-bottom:10px;">
@@ -892,7 +988,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-wa', true)"><i class="fas fa-check-double"></i> ${t('تحديد كل المجموعات', 'Select All Groups')}</button>
                         <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-wa', false)"><i class="fas fa-eraser"></i> ${t('إلغاء كل المجموعات', 'Clear Groups')}</button>
                     </div>
-                    <div class="card-grid">
+                    <div class="um-access-grid">
                         <div>
                             <label class="field-label">${t('ماذا يمكن لهذا المستخدم أن يفعل؟', 'What can this user do?')}</label>
                             <div id="um_assign_perm_groups" class="chip-container" style="display:block;min-height:120px;"></div>
@@ -1330,6 +1426,15 @@ module.exports = function renderDashboard(req, db, config) {
                 el.style.color = isErr ? 'var(--red)' : 'var(--text-muted)';
             }
 
+            function umUpdateSummary() {
+                const usersCountEl = document.getElementById('um_users_count');
+                const superadminsCountEl = document.getElementById('um_superadmins_count');
+                const permsCountEl = document.getElementById('um_perm_count');
+                if (usersCountEl) usersCountEl.textContent = String((umState.users || []).length);
+                if (superadminsCountEl) superadminsCountEl.textContent = String((umState.users || []).filter(u => u.is_superadmin).length);
+                if (permsCountEl) permsCountEl.textContent = String((umState.permissionGroups || []).length);
+            }
+
             function umEscapeHtml(value) {
                 return String(value)
                     .replace(/&/g, '&amp;')
@@ -1351,6 +1456,7 @@ module.exports = function renderDashboard(req, db, config) {
                     umState.permissionGroups = permissionGroups || [];
                     umState.waGroups = waGroups || [];
                     umState.loaded = true;
+                    umUpdateSummary();
                     umRenderUsers();
                     umRenderPermissionGroups();
                     umRenderSelectedUserAccess();
@@ -1371,8 +1477,9 @@ module.exports = function renderDashboard(req, db, config) {
                     const activeTxt = user.is_active ? (currentLang === 'en' ? 'Active' : 'مفعل') : (currentLang === 'en' ? 'Disabled' : 'معطل');
                     const superTxt = user.is_superadmin ? '<span class="chip" style="margin-inline-start:6px;">' + (currentLang === 'en' ? 'Superadmin' : 'مدير عام') + '</span>' : '';
                     const activeClass = user.is_active ? 'green' : 'red';
+                    const selectedClass = Number(umState.selectedUserId) === Number(user.id) ? ' um-selected-user' : '';
                     return '' +
-                        '<div class="group-list-card" style="padding:12px 14px;margin-bottom:10px;align-items:center;" onclick="umSelectUser(' + user.id + ')">' +
+                        '<div class="group-list-card' + selectedClass + '" style="padding:12px 14px;margin-bottom:10px;align-items:center;" onclick="umSelectUser(' + user.id + ')">' +
                             '<div class="glc-info">' +
                                 '<div class="glc-name">' + umEscapeHtml(user.display_name) + ' <span class="mono">(' + umEscapeHtml(user.username) + ')</span></div>' +
                                 '<div class="glc-chips" style="margin-top:6px;">' +
