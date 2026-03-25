@@ -900,9 +900,14 @@ module.exports = function renderDashboard(req, db, config) {
                 <style>
                     #page-about .about-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
                     #page-about .about-card { margin-bottom: 0; }
-                    #page-about .about-grid ul { font-size: 13px; line-height: 1.75; }
-                    #page-about .about-grid p { font-size: 13px; line-height: 1.55; }
-                    #page-about .about-license-card { grid-column: 2 / 3; }
+                    #page-about .about-grid ul { font-size: 14px; line-height: 1.8; }
+                    #page-about .about-grid p { font-size: 14px; line-height: 1.65; }
+                    #page-about .about-card .card-header h3 { font-size: 17px !important; }
+                    #page-about .about-list { margin: 0; padding-inline-start: 18px; font-size: 14px; line-height: 1.8; }
+                    #page-about .about-list li { margin-bottom: 2px; }
+                    #page-about .about-link-list { display: flex; flex-direction: column; gap: 8px; }
+                    #page-about .about-link-list .btn { text-align: start; padding: 8px 10px; font-size: 13px; }
+                    #page-about .about-license-card { grid-column: auto; }
                     @media (max-width: 1200px) {
                         #page-about .about-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
                         #page-about .about-license-card { grid-column: auto; }
@@ -917,19 +922,19 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-user-circle"></i> ${t('المطور', 'Developer')}</h3>
                         </div>
-                        <p style="font-size:15px; font-weight:700; color:var(--accent); margin:8px 0 0 0;">Abdulaziz Algassem</p>
-                        <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"><i class="fas fa-code-branch"></i> INTERSTELLAR</p>
-                        <p style="font-size:12px; color:var(--text); margin-bottom:10px; line-height:1.4;">
+                        <p style="font-size:16px; font-weight:700; color:var(--accent); margin:8px 0 0 0;">Abdulaziz Algassem</p>
+                        <p style="font-size:13px; color:var(--text-muted); margin-bottom:10px;"><i class="fas fa-code-branch"></i> INTERSTELLAR</p>
+                        <p style="font-size:14px; color:var(--text); margin-bottom:12px; line-height:1.6;">
                             ${t('طالب تقنية المعلومات', 'IT student')}
                         </p>
-                        <div style="display:flex; flex-direction:column; gap:4px;">
-                            <a href="https://github.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                        <div class="about-link-list">
+                            <a href="https://github.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
                                 <i class="fab fa-github"></i> GitHub
                             </a>
-                            <a href="https://instagram.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                            <a href="https://instagram.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
                                 <i class="fab fa-instagram"></i> Instagram
                             </a>
-                            <a href="https://github.com/az2oo1?tab=repositories" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                            <a href="https://github.com/az2oo1?tab=repositories" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
                                 <i class="fas fa-star"></i> ${t('المشاريع', 'Projects')}
                             </a>
                         </div>
@@ -939,7 +944,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-rocket"></i> ${t('الميزات', 'Features')}</h3>
                         </div>
-                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
+                        <ul class="about-list">
                             <li>🧠 AI Moderation</li>
                             <li>⚡ Anti-Spam</li>
                             <li>🚫 Blacklist/Whitelist</li>
@@ -953,7 +958,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-microchip"></i> ${t('المكونات', 'Tech')}</h3>
                         </div>
-                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
+                        <ul class="about-list">
                             <li>whatsapp-web.js</li>
                             <li>better-sqlite3</li>
                             <li>Ollama AI</li>
@@ -967,7 +972,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-cube"></i> ${t('المتطلبات', 'Requirements')}</h3>
                         </div>
-                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
+                        <ul class="about-list">
                             <li><strong>Min:</strong> 2GB RAM</li>
                             <li><strong>Storage:</strong> 5GB+</li>
                             <li><strong>AI:</strong> 8GB+ RAM</li>
@@ -980,17 +985,17 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-link"></i> ${t('الروابط', 'Links')}</h3>
                         </div>
-                        <div style="display:flex; flex-direction:column; gap:4px;">
-                            <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                        <div class="about-link-list">
+                            <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
                                 <i class="fab fa-github"></i> GitHub Repo
                             </a>
-                            <a href="https://github.com/az2oo1/wa-bot/issues" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                            <a href="https://github.com/az2oo1/wa-bot/issues" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
                                 <i class="fas fa-bug"></i> Report Issues
                             </a>
-                            <a href="https://github.com/az2oo1/wa-bot/discussions" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                            <a href="https://github.com/az2oo1/wa-bot/discussions" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
                                 <i class="fas fa-comments"></i> Discussions
                             </a>
-                            <a href="https://github.com/az2oo1/wa-bot/releases" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                            <a href="https://github.com/az2oo1/wa-bot/releases" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
                                 <i class="fas fa-tags"></i> Releases
                             </a>
                         </div>
@@ -1000,7 +1005,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-heart"></i> ${t('التبعيات', 'Dependencies')}</h3>
                         </div>
-                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
+                        <ul class="about-list">
                             <li>whatsapp-web.js</li>
                             <li>better-sqlite3</li>
                             <li>Ollama</li>
@@ -1014,7 +1019,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-file-contract"></i> ${t('الترخيص', 'License')}</h3>
                         </div>
-                        <p style="font-size:12px; margin:8px 0; line-height:1.5;">
+                        <p style="font-size:14px; margin:8px 0; line-height:1.65;">
                             ${t('مشروع مفتوح المصدر', 'Open Source Project')}
                         </p>
                         <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
