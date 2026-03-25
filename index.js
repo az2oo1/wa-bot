@@ -457,6 +457,18 @@ function parseJsonArray(value) {
     }
 }
 
+function normalizePermissionGroupName(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function normalizePermissionList(values) {
+    if (!Array.isArray(values)) return [];
+    const cleaned = values
+        .map(v => String(v || '').trim())
+        .filter(Boolean);
+    return Array.from(new Set(cleaned));
+}
+
 function hashPassword(password, saltHex) {
     const salt = saltHex || crypto.randomBytes(16).toString('hex');
     const digest = crypto.scryptSync(password, salt, 64).toString('hex');
@@ -1288,14 +1300,41 @@ app.get('/api/access/permission-groups', requireAuthApi, requirePermission('user
 });
 
 app.post('/api/access/permission-groups/create', requireAuthApi, requirePermission('users:manage'), (req, res) => {
-    const name = String(req.body.name || '').trim();
+    const name = normalizePermissionGroupName(req.body.name);
     const description = String(req.body.description || '').trim();
-    const permissions = Array.isArray(req.body.permissions) ? req.body.permissions.map(p => String(p).trim()).filter(Boolean) : [];
+    const permissions = normalizePermissionList(req.body.permissions);
     if (!name || permissions.length === 0) return res.status(400).json({ error: 'Invalid permission group payload' });
 
     try {
+        const existing = db.prepare('SELECT id FROM permission_groups WHERE lower(name) = lower(?)').get(name);
+        if (existing) return res.status(409).json({ error: 'Permission group name already exists' });
+
         db.prepare('INSERT INTO permission_groups (name, description, permissions) VALUES (?, ?, ?)')
-            .run(name, description, JSON.stringify(Array.from(new Set(permissions))));
+            .run(name, description, JSON.stringify(permissions));
+        res.sendStatus(200);
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+app.post('/api/access/permission-groups/update', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const id = parseInt(req.body.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+    const name = normalizePermissionGroupName(req.body.name);
+    const description = String(req.body.description || '').trim();
+    const permissions = normalizePermissionList(req.body.permissions);
+    if (!name || permissions.length === 0) return res.status(400).json({ error: 'Invalid permission group payload' });
+
+    try {
+        const current = db.prepare('SELECT id FROM permission_groups WHERE id = ?').get(id);
+        if (!current) return res.status(404).json({ error: 'Permission group not found' });
+
+        const duplicate = db.prepare('SELECT id FROM permission_groups WHERE lower(name) = lower(?) AND id <> ?').get(name, id);
+        if (duplicate) return res.status(409).json({ error: 'Permission group name already exists' });
+
+        db.prepare('UPDATE permission_groups SET name = ?, description = ?, permissions = ? WHERE id = ?')
+            .run(name, description, JSON.stringify(permissions), id);
         res.sendStatus(200);
     } catch (e) {
         res.status(400).json({ error: e.message });
@@ -1306,12 +1345,19 @@ app.post('/api/access/permission-groups/delete', requireAuthApi, requirePermissi
     const id = parseInt(req.body.id, 10);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
 
-    const tx = db.transaction(() => {
-        db.prepare('DELETE FROM user_permission_groups WHERE permission_group_id = ?').run(id);
-        db.prepare('DELETE FROM permission_groups WHERE id = ?').run(id);
-    });
-    tx();
-    res.sendStatus(200);
+    try {
+        const tx = db.transaction(() => {
+            db.prepare('DELETE FROM user_permission_groups WHERE permission_group_id = ?').run(id);
+            const info = db.prepare('DELETE FROM permission_groups WHERE id = ?').run(id);
+            if (!info || info.changes === 0) {
+                throw new Error('Permission group not found');
+            }
+        });
+        tx();
+        res.sendStatus(200);
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
 });
 
 app.get('/api/users', requireAuthApi, requirePermission('users:manage'), (req, res) => {
