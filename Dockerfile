@@ -1,11 +1,19 @@
 FROM node:20.20.0
 
 # Install Chromium and dependencies
-RUN apt-get update && apt-get install -y \
-    chromium \
-    fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf \
-    --no-install-recommends \
-    && rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+  apt-get update; \
+  apt-get install -y --no-install-recommends \
+    ca-certificates \
+    fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf; \
+  if apt-get install -y --no-install-recommends chromium; then \
+    CHROME_BIN="$(command -v chromium)"; \
+  else \
+    apt-get install -y --no-install-recommends chromium-browser; \
+    CHROME_BIN="$(command -v chromium-browser)"; \
+  fi; \
+  ln -sf "$CHROME_BIN" /usr/bin/chromium; \
+  rm -rf /var/lib/apt/lists/*
 
 ENV PUPPETEER_SKIP_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
