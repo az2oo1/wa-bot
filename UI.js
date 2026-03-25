@@ -50,196 +50,146 @@ module.exports = function renderDashboard(req, db, config) {
             #page-users .btn-warning {
                 background: var(--orange-dim) !important;
                 border-color: rgba(255,171,64,0.45) !important;
-                    #page-about .about-card { margin-bottom: 0; }
-                    #page-about .about-hero {
-                        border-color: rgba(64,196,255,0.42);
-                        background: linear-gradient(135deg, rgba(64,196,255,0.11) 0, rgba(0,200,83,0.06) 55%, var(--card-bg) 100%);
-                        margin-bottom: 18px;
-                    }
-                    #page-about .about-hero-title {
-                        font-size: 24px;
-                        font-weight: 700;
-                        line-height: 1.25;
-                        color: var(--text);
-                        margin-bottom: 6px;
-                    }
-                    #page-about .about-hero-sub {
-                        font-size: 14px;
-                        color: var(--text-muted);
-                    }
-                    #page-about .about-badges {
-                        display: flex;
-                        flex-wrap: wrap;
-                        gap: 8px;
-                        margin-top: 14px;
-                    }
-                    #page-about .about-badge {
-                        border: 1px solid var(--card-border);
-                        background: var(--input-bg);
-                        color: var(--text-muted);
-                        padding: 4px 10px;
-                        border-radius: 999px;
-                        font-size: 12px;
-                        font-weight: 600;
-                    }
-                    #page-about .about-layout {
-                        display: grid;
-                        grid-template-columns: minmax(0, 1.12fr) minmax(0, 0.88fr);
-                        gap: 18px;
-                    }
-                    #page-about .about-stack {
-                        display: grid;
-                        gap: 18px;
-                    }
-                    #page-about .about-card .card-header h3 { font-size: 17px !important; }
-                    #page-about .about-list {
-                        margin: 0;
-                        padding-inline-start: 18px;
-                        font-size: 14px;
-                        line-height: 1.85;
-                    }
-                    #page-about .about-list li { margin-bottom: 2px; }
-                    #page-about .about-link-grid {
-                        display: grid;
-                        grid-template-columns: 1fr 1fr;
-                        gap: 8px;
-                    }
-                    #page-about .about-link-list {
-                        display: flex;
-                        flex-direction: column;
-                        gap: 8px;
-                    }
-                    #page-about .about-link-list .btn,
-                    #page-about .about-link-grid .btn {
-                        text-align: start;
-                        padding: 8px 10px;
-                        font-size: 13px;
-                    }
-                    @media (max-width: 1100px) {
-                        #page-about .about-layout { grid-template-columns: 1fr; }
-                    }
-                    @media (max-width: 760px) {
-                        #page-about .about-link-grid { grid-template-columns: 1fr; }
-                        #page-about .about-hero-title { font-size: 21px; }
-                    }
+                color: var(--orange) !important;
+            }
+
+            #page-users .btn-blue {
+                background: var(--blue-dim) !important;
+                border-color: rgba(64,196,255,0.45) !important;
+                color: var(--blue) !important;
+            }
+
+            #page-users .btn-ghost {
+                background: var(--input-bg) !important;
+                border-color: var(--card-border) !important;
+                color: var(--text-muted) !important;
+            }
+
+            .um-actions-row {
+                display: flex;
                 flex-wrap: wrap;
+                gap: 8px;
+            }
 
-                <div class="card about-hero">
-                    <div class="about-hero-title">${t('المشرف الآلي لواتساب', 'WhatsApp Auto Mod')}</div>
-                    <div class="about-hero-sub">${t('نظام إدارة مجموعات عملي، سريع، ومصمم للعمل على سيرفرات صغيرة مع ذكاء اصطناعي محلي.', 'A practical, fast group-management system designed for lightweight servers with local AI support.')}</div>
-                    <div class="about-badges">
-                        <span class="about-badge"><i class="fas fa-shield-alt"></i> ${t('مستقر', 'Stable')}</span>
-                        <span class="about-badge"><i class="fas fa-language"></i> AR/EN</span>
-                        <span class="about-badge"><i class="fas fa-code-branch"></i> v6.4.0</span>
-                        <span class="about-badge"><i class="fas fa-star"></i> 2 Stars</span>
-                    </div>
-                </div>
+            .um-actions-row .btn {
+                flex: 1 1 170px;
+            }
 
-                <div class="about-layout">
-                    <div class="about-stack">
-                        <div class="card info about-card">
-                            <div class="card-header">
-                                <h3 style="font-size:16px;"><i class="fas fa-user-circle"></i> ${t('المطور', 'Developer')}</h3>
-                            </div>
-                            <p style="font-size:16px; font-weight:700; color:var(--accent); margin:8px 0 0 0;">Abdulaziz Algassem</p>
-                            <p style="font-size:13px; color:var(--text-muted); margin-bottom:10px;"><i class="fas fa-code-branch"></i> INTERSTELLAR</p>
-                            <p style="font-size:14px; color:var(--text); margin-bottom:12px; line-height:1.6;">
-                                ${t('طالب تقنية المعلومات', 'IT student')}
-                            </p>
-                            <div class="about-link-grid">
-                                <a href="https://github.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;"><i class="fab fa-github"></i> GitHub</a>
-                                <a href="https://instagram.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;"><i class="fab fa-instagram"></i> Instagram</a>
-                                <a href="https://github.com/az2oo1?tab=repositories" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; grid-column:1 / -1;"><i class="fas fa-star"></i> ${t('المشاريع', 'Projects')}</a>
-                            </div>
-                        </div>
+            .um-layout {
+                display: grid;
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+                gap: 18px;
+                margin-bottom: 20px;
+            }
 
-                        <div class="card success about-card">
-                            <div class="card-header">
-                                <h3 style="font-size:16px;"><i class="fas fa-rocket"></i> ${t('الميزات', 'Features')}</h3>
-                            </div>
-                            <ul class="about-list">
-                                <li>🧠 AI Moderation</li>
-                                <li>⚡ Anti-Spam</li>
-                                <li>🚫 Blacklist/Whitelist</li>
-                                <li>📂 Media Filter</li>
-                                <li>🛠️ Dashboard AR/EN</li>
-                                <li><i class="fas fa-check-circle"></i> v6.4.0</li>
-                            </ul>
-                        </div>
+            .um-stack {
+                display: flex;
+                flex-direction: column;
+                gap: 20px;
+            }
 
-                        <div class="card danger about-card">
-                            <div class="card-header">
-                                <h3 style="font-size:16px;"><i class="fas fa-link"></i> ${t('الروابط', 'Links')}</h3>
-                            </div>
-                            <div class="about-link-list">
-                                <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;"><i class="fab fa-github"></i> GitHub Repo</a>
-                                <a href="https://github.com/az2oo1/wa-bot/issues" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;"><i class="fas fa-bug"></i> Report Issues</a>
-                                <a href="https://github.com/az2oo1/wa-bot/discussions" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;"><i class="fas fa-comments"></i> Discussions</a>
-                                <a href="https://github.com/az2oo1/wa-bot/releases" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;"><i class="fas fa-tags"></i> Releases</a>
-                            </div>
-                        </div>
-                    </div>
+            .um-stats {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 10px;
+                margin-bottom: 12px;
+            }
 
-                    <div class="about-stack">
-                        <div class="card warning about-card">
-                            <div class="card-header">
-                                <h3 style="font-size:16px;"><i class="fas fa-microchip"></i> ${t('المكونات', 'Tech')}</h3>
-                            </div>
-                            <ul class="about-list">
-                                <li>whatsapp-web.js</li>
-                                <li>better-sqlite3</li>
-                                <li>Ollama AI</li>
-                                <li>Express.js</li>
-                                <li>Node.js 16+</li>
-                                <li><i class="fas fa-check-circle" style="color:var(--accent);"></i> Active</li>
-                            </ul>
-                        </div>
+            .um-stat {
+                border: 1px solid var(--card-border);
+                border-radius: 10px;
+                background: var(--input-bg);
+                padding: 10px 12px;
+            }
 
-                        <div class="card about-card">
-                            <div class="card-header">
-                                <h3 style="font-size:16px;"><i class="fas fa-cube"></i> ${t('المتطلبات', 'Requirements')}</h3>
-                            </div>
-                            <ul class="about-list">
-                                <li><strong>Min:</strong> 2GB RAM</li>
-                                <li><strong>Storage:</strong> 5GB+</li>
-                                <li><strong>AI:</strong> 8GB+ RAM</li>
-                                <li><strong>AI Storage:</strong> 10-20GB</li>
-                                <li><strong>OS:</strong> Linux/macOS/Windows</li>
-                            </ul>
-                        </div>
+            .um-stat-label {
+                color: var(--text-muted);
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: .6px;
+            }
 
-                        <div class="card purple about-card">
-                            <div class="card-header">
-                                <h3 style="font-size:16px;"><i class="fas fa-heart"></i> ${t('التبعيات', 'Dependencies')}</h3>
-                            </div>
-                            <ul class="about-list">
-                                <li>whatsapp-web.js</li>
-                                <li>better-sqlite3</li>
-                                <li>Ollama</li>
-                                <li>Express</li>
-                                <li>qrcode</li>
-                                <li>multer</li>
-                            </ul>
-                        </div>
+            .um-stat-value {
+                color: var(--text);
+                font-size: 20px;
+                font-weight: 700;
+                margin-top: 2px;
+                line-height: 1.2;
+            }
 
-                        <div class="card info about-card">
-                            <div class="card-header">
-                                <h3 style="font-size:16px;"><i class="fas fa-file-contract"></i> ${t('الترخيص', 'License')}</h3>
-                            </div>
-                            <p style="font-size:14px; margin:8px 0; line-height:1.65;">${t('مشروع مفتوح المصدر', 'Open Source Project')}</p>
-                            <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
-                                <span style="background:var(--accent-dim); color:var(--accent); padding:3px 8px; border-radius:14px; font-size:11px; font-weight:600;"><i class="fas fa-star"></i> 2 Stars</span>
-                                <span style="background:var(--blue-dim); color:var(--blue); padding:3px 8px; border-radius:14px; font-size:11px; font-weight:600;">v6.4.0</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
+            .um-card-note {
+                font-size: 13px;
+                color: var(--text-muted);
+                margin-top: -6px;
+                margin-bottom: 12px;
+            }
+
+            .um-scroll-box {
+                max-height: 330px;
+                overflow: auto;
+                padding-right: 4px;
+            }
+
+            .um-selected-user {
+                border: 1px solid rgba(64,196,255,0.28);
+                background: rgba(64,196,255,0.06);
+            }
+
+            .um-access-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 14px;
+            }
+
+            .um-perm-drawer {
+                overflow: hidden;
+                max-height: 0;
+                opacity: 0;
+                transition: max-height .35s ease, opacity .25s ease, margin-top .25s ease;
+                margin-top: 0;
+            }
+
+            .um-perm-drawer.open {
+                max-height: 420px;
+                opacity: 1;
+                margin-top: 12px;
+            }
+
+            .um-perm-help {
+                margin-top: 12px;
+                border: 1px solid rgba(64,196,255,0.28);
+                background: rgba(64,196,255,0.06);
+                border-radius: 10px;
+                padding: 12px;
+                max-height: 280px;
+                overflow: auto;
+            }
+
+            .um-perm-help-item {
+                padding: 7px 0;
+                border-bottom: 1px dashed rgba(255,255,255,0.08);
+            }
+
+            .um-perm-help-item:last-child {
+                border-bottom: 0;
+                padding-bottom: 0;
+            }
+
+            .um-perm-help-key {
+                font-family: monospace;
+                font-size: 12px;
+                color: var(--blue);
+                margin-bottom: 4px;
+            }
+
+            .um-perm-help-desc {
+                color: var(--text-muted);
+                font-size: 12px;
                 line-height: 1.5;
             }
 
             #page-groups #groupsContainer {
                 display: grid;
-                grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 12px;
             }
 
@@ -315,10 +265,6 @@ module.exports = function renderDashboard(req, db, config) {
             }
 
             @media (max-width: 900px) {
-                #page-groups #groupsContainer {
-                    grid-template-columns: 1fr;
-                }
-
                 #page-groups .glc-stats {
                     display: none;
                 }
@@ -463,8 +409,7 @@ module.exports = function renderDashboard(req, db, config) {
                     #page-blacklist .blocked-ext-card { grid-column: 2; grid-row: 1; }
                     #page-blacklist .whitelist-card { grid-column: 1; grid-row: 2; }
                     #page-blacklist .purge-card {
-                        grid-column: 2;
-                        grid-row: 2;
+                        grid-column: 1 / -1;
                         border-color: rgba(255,171,64,0.55);
                         box-shadow: 0 0 0 1px rgba(255,171,64,0.18) inset;
                     }
@@ -546,10 +491,10 @@ module.exports = function renderDashboard(req, db, config) {
                         </div>
                     </div>
 
-                    <div class="card warning purge-card">
+                    <div class="card warning card-grid-full purge-card">
                         <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
                         <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
-                        <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; max-width:460px; margin:0 auto; justify-content:center; padding:12px 18px; font-size:15px;" onclick="purgeBlacklisted()">
+                        <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; justify-content:center; padding:15px; font-size:16px;" onclick="purgeBlacklisted()">
                             <i class="fas fa-gavel"></i> ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
                         </button>
                     </div>
@@ -565,20 +510,9 @@ module.exports = function renderDashboard(req, db, config) {
 
                 <div class="card-grid general-top-grid">
                     <div class="card general-top-card" style="margin-bottom:0;">
-                        <div class="card-header"><h3><i class="fas fa-filter"></i> ${t('فلتر الكلمات الممنوعة', 'Forbidden Word Filter')}</h3></div>
-                        <div class="toggle-row" style="margin-bottom:18px;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="enableWordFilter" ${config.enableWordFilter ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label">${t('تفعيل فلتر الكلمات', 'Enable Word Filter')}<small>${t('حذف فوري عند رصد أي كلمة ممنوعة', 'Instant delete on detecting forbidden words')}</small></div>
-                            </div>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('الكلمات الممنوعة الافتراضية', 'Default Forbidden Words')}</label>
-                            <div class="input-with-btn">
-                                <input type="text" id="newDefaultWord" placeholder="${t('أدخل الكلمة الممنوعة...', 'Enter forbidden word...')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addDefaultWord();}">
-                                <button type="button" class="btn btn-primary" onclick="addDefaultWord()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
-                            </div>
-                            <div id="defaultWordsContainer" class="chip-container"></div>
+                        <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
+                        <div class="field-group" id="defaultAdminGroupContainer">
+                            <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
                         </div>
                     </div>
 
@@ -588,8 +522,8 @@ module.exports = function renderDashboard(req, db, config) {
                             0%,100% { box-shadow: 0 0 0 0 rgba(100,220,150,0.55); }
                             50%      { box-shadow: 0 0 0 8px rgba(100,220,150,0); }
                         }
-                        .general-top-grid { align-items: start; margin-bottom: 20px; }
-                        .general-top-card { display: flex; flex-direction: column; align-self: start; }
+                        .general-top-grid { align-items: stretch; margin-bottom: 20px; }
+                        .general-top-card { display: flex; flex-direction: column; }
                         .general-top-card .field-group { margin-bottom: 0; }
                         #defaultWordsContainer { max-height: 160px; gap: 8px; }
                         #defaultWordsContainer .chip { padding: 5px 10px; font-size: 13px; }
@@ -633,9 +567,20 @@ module.exports = function renderDashboard(req, db, config) {
 
                 <div class="card-grid">
                     <div class="card">
-                        <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
-                        <div class="field-group" id="defaultAdminGroupContainer">
-                            <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
+                        <div class="card-header"><h3><i class="fas fa-filter"></i> ${t('فلتر الكلمات الممنوعة', 'Forbidden Word Filter')}</h3></div>
+                        <div class="toggle-row" style="margin-bottom:18px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableWordFilter" ${config.enableWordFilter ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label">${t('تفعيل فلتر الكلمات', 'Enable Word Filter')}<small>${t('حذف فوري عند رصد أي كلمة ممنوعة', 'Instant delete on detecting forbidden words')}</small></div>
+                            </div>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('الكلمات الممنوعة الافتراضية', 'Default Forbidden Words')}</label>
+                            <div class="input-with-btn">
+                                <input type="text" id="newDefaultWord" placeholder="${t('أدخل الكلمة الممنوعة...', 'Enter forbidden word...')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addDefaultWord();}">
+                                <button type="button" class="btn btn-primary" onclick="addDefaultWord()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
+                            </div>
+                            <div id="defaultWordsContainer" class="chip-container"></div>
                         </div>
                     </div>
                     <div class="card">
@@ -955,14 +900,9 @@ module.exports = function renderDashboard(req, db, config) {
                 <style>
                     #page-about .about-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
                     #page-about .about-card { margin-bottom: 0; }
-                    #page-about .about-grid ul { font-size: 14px; line-height: 1.8; }
-                    #page-about .about-grid p { font-size: 14px; line-height: 1.65; }
-                    #page-about .about-card .card-header h3 { font-size: 17px !important; }
-                    #page-about .about-list { margin: 0; padding-inline-start: 18px; font-size: 14px; line-height: 1.8; }
-                    #page-about .about-list li { margin-bottom: 2px; }
-                    #page-about .about-link-list { display: flex; flex-direction: column; gap: 8px; }
-                    #page-about .about-link-list .btn { text-align: start; padding: 8px 10px; font-size: 13px; }
-                    #page-about .about-license-card { grid-column: auto; }
+                    #page-about .about-grid ul { font-size: 13px; line-height: 1.75; }
+                    #page-about .about-grid p { font-size: 13px; line-height: 1.55; }
+                    #page-about .about-license-card { grid-column: 2 / 3; }
                     @media (max-width: 1200px) {
                         #page-about .about-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
                         #page-about .about-license-card { grid-column: auto; }
@@ -977,19 +917,19 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-user-circle"></i> ${t('المطور', 'Developer')}</h3>
                         </div>
-                        <p style="font-size:16px; font-weight:700; color:var(--accent); margin:8px 0 0 0;">Abdulaziz Algassem</p>
-                        <p style="font-size:13px; color:var(--text-muted); margin-bottom:10px;"><i class="fas fa-code-branch"></i> INTERSTELLAR</p>
-                        <p style="font-size:14px; color:var(--text); margin-bottom:12px; line-height:1.6;">
+                        <p style="font-size:15px; font-weight:700; color:var(--accent); margin:8px 0 0 0;">Abdulaziz Algassem</p>
+                        <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"><i class="fas fa-code-branch"></i> INTERSTELLAR</p>
+                        <p style="font-size:12px; color:var(--text); margin-bottom:10px; line-height:1.4;">
                             ${t('طالب تقنية المعلومات', 'IT student')}
                         </p>
-                        <div class="about-link-list">
-                            <a href="https://github.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                            <a href="https://github.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
                                 <i class="fab fa-github"></i> GitHub
                             </a>
-                            <a href="https://instagram.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
+                            <a href="https://instagram.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
                                 <i class="fab fa-instagram"></i> Instagram
                             </a>
-                            <a href="https://github.com/az2oo1?tab=repositories" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
+                            <a href="https://github.com/az2oo1?tab=repositories" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
                                 <i class="fas fa-star"></i> ${t('المشاريع', 'Projects')}
                             </a>
                         </div>
@@ -999,7 +939,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-rocket"></i> ${t('الميزات', 'Features')}</h3>
                         </div>
-                        <ul class="about-list">
+                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
                             <li>🧠 AI Moderation</li>
                             <li>⚡ Anti-Spam</li>
                             <li>🚫 Blacklist/Whitelist</li>
@@ -1013,7 +953,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-microchip"></i> ${t('المكونات', 'Tech')}</h3>
                         </div>
-                        <ul class="about-list">
+                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
                             <li>whatsapp-web.js</li>
                             <li>better-sqlite3</li>
                             <li>Ollama AI</li>
@@ -1027,7 +967,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-cube"></i> ${t('المتطلبات', 'Requirements')}</h3>
                         </div>
-                        <ul class="about-list">
+                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
                             <li><strong>Min:</strong> 2GB RAM</li>
                             <li><strong>Storage:</strong> 5GB+</li>
                             <li><strong>AI:</strong> 8GB+ RAM</li>
@@ -1040,17 +980,17 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-link"></i> ${t('الروابط', 'Links')}</h3>
                         </div>
-                        <div class="about-link-list">
-                            <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                            <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
                                 <i class="fab fa-github"></i> GitHub Repo
                             </a>
-                            <a href="https://github.com/az2oo1/wa-bot/issues" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
+                            <a href="https://github.com/az2oo1/wa-bot/issues" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
                                 <i class="fas fa-bug"></i> Report Issues
                             </a>
-                            <a href="https://github.com/az2oo1/wa-bot/discussions" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
+                            <a href="https://github.com/az2oo1/wa-bot/discussions" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
                                 <i class="fas fa-comments"></i> Discussions
                             </a>
-                            <a href="https://github.com/az2oo1/wa-bot/releases" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer;">
+                            <a href="https://github.com/az2oo1/wa-bot/releases" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
                                 <i class="fas fa-tags"></i> Releases
                             </a>
                         </div>
@@ -1060,7 +1000,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-heart"></i> ${t('التبعيات', 'Dependencies')}</h3>
                         </div>
-                        <ul class="about-list">
+                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
                             <li>whatsapp-web.js</li>
                             <li>better-sqlite3</li>
                             <li>Ollama</li>
@@ -1074,7 +1014,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div class="card-header">
                             <h3 style="font-size:16px;"><i class="fas fa-file-contract"></i> ${t('الترخيص', 'License')}</h3>
                         </div>
-                        <p style="font-size:14px; margin:8px 0; line-height:1.65;">
+                        <p style="font-size:12px; margin:8px 0; line-height:1.5;">
                             ${t('مشروع مفتوح المصدر', 'Open Source Project')}
                         </p>
                         <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
@@ -2250,7 +2190,7 @@ module.exports = function renderDashboard(req, db, config) {
                 container.innerHTML = '';
 
                 if (groupsArr.length === 0) {
-                    container.innerHTML = \`<div style="grid-column:1/-1; text-align:center; padding:60px 20px; color:var(--text-muted);">
+                    container.innerHTML = \`<div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
                         <i class="fas fa-users-cog" style="font-size:48px; margin-bottom:16px; display:block; opacity:0.3;"></i>
                         <div style="font-size:16px; font-weight:600;">\${currentLang === 'en' ? 'No custom groups yet' : 'لا توجد مجموعات مخصصة بعد'}</div>
                         <div style="font-size:13px; margin-top:6px;">\${currentLang === 'en' ? 'Click "Add Group" to get started' : 'اضغط على "إضافة مجموعة" للبدء'}</div>
