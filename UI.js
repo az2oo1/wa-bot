@@ -130,6 +130,51 @@ module.exports = function renderDashboard(req, db, config) {
                 gap: 14px;
             }
 
+            .um-perm-drawer {
+                overflow: hidden;
+                max-height: 0;
+                opacity: 0;
+                transition: max-height .35s ease, opacity .25s ease, margin-top .25s ease;
+                margin-top: 0;
+            }
+
+            .um-perm-drawer.open {
+                max-height: 420px;
+                opacity: 1;
+                margin-top: 12px;
+            }
+
+            .um-perm-help {
+                margin-top: 12px;
+                border: 1px solid rgba(64,196,255,0.28);
+                background: rgba(64,196,255,0.06);
+                border-radius: 10px;
+                padding: 12px;
+            }
+
+            .um-perm-help-item {
+                padding: 8px 0;
+                border-bottom: 1px dashed rgba(255,255,255,0.08);
+            }
+
+            .um-perm-help-item:last-child {
+                border-bottom: 0;
+                padding-bottom: 0;
+            }
+
+            .um-perm-help-key {
+                font-family: monospace;
+                font-size: 12px;
+                color: var(--blue);
+                margin-bottom: 4px;
+            }
+
+            .um-perm-help-desc {
+                color: var(--text-muted);
+                font-size: 12px;
+                line-height: 1.5;
+            }
+
             @media (max-width: 1100px) {
                 .um-layout,
                 .um-access-grid,
@@ -953,6 +998,10 @@ module.exports = function renderDashboard(req, db, config) {
                                 <label class="field-label">${t('اختر الصلاحيات', 'Choose Permissions')}</label>
                                 <div id="um_perm_picker" class="cb-group" style="gap:8px;"></div>
                             </div>
+                            <div class="um-perm-help">
+                                <label class="field-label" style="margin-bottom:8px;"><i class="fas fa-circle-info"></i> ${t('شرح الصلاحيات', 'Permissions Guide')}</label>
+                                <div id="um_perm_help"></div>
+                            </div>
                             <div class="field-row" style="margin-bottom:10px;">
                                 <button class="btn btn-ghost btn-sm" type="button" onclick="umSetAllCreatePerms(true)"><i class="fas fa-check-double"></i> ${t('تحديد الكل', 'Select All')}</button>
                                 <button class="btn btn-ghost btn-sm" type="button" onclick="umSetAllCreatePerms(false)"><i class="fas fa-eraser"></i> ${t('مسح الكل', 'Clear All')}</button>
@@ -970,11 +1019,16 @@ module.exports = function renderDashboard(req, db, config) {
                             </div>
                             <button class="btn btn-primary" type="button" onclick="umCreatePermissionGroup()"><i class="fas fa-plus"></i> ${t('إضافة المجموعة', 'Create Group')}</button>
                             <div id="um_perm_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
-                        </div>
 
-                        <div class="card">
-                            <div class="card-header"><h3><i class="fas fa-key"></i> ${t('مجموعات الصلاحيات', 'Permission Groups')}</h3></div>
-                            <div class="um-scroll-box" id="um_perm_groups_list"></div>
+                            <button class="btn btn-ghost btn-sm" type="button" onclick="umTogglePermissionGroupsDrawer()" style="margin-top:10px; width:100%; justify-content:space-between;">
+                                <span><i class="fas fa-key"></i> ${t('عرض مجموعات الصلاحيات الحالية', 'Show Current Permission Groups')}</span>
+                                <i id="um_perm_drawer_icon" class="fas fa-chevron-down"></i>
+                            </button>
+                            <div id="um_perm_drawer" class="um-perm-drawer">
+                                <div class="card" style="margin:0; padding:14px; background:var(--input-bg); border-color:var(--card-border);">
+                                    <div class="um-scroll-box" id="um_perm_groups_list"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1395,6 +1449,52 @@ module.exports = function renderDashboard(req, db, config) {
                 'users:manage',
                 '*'
             ];
+            const umPermissionDescriptions = {
+                'dashboard:read': {
+                    ar: 'عرض لوحة التحكم والحالة العامة.',
+                    en: 'View dashboard pages and overall status.'
+                },
+                'groups:view': {
+                    ar: 'عرض المجموعات وبياناتها داخل النظام.',
+                    en: 'View WhatsApp groups and related data.'
+                },
+                'config:write': {
+                    ar: 'تعديل جميع الإعدادات العامة وإعدادات المجموعات.',
+                    en: 'Edit all global and group configuration.'
+                },
+                'config:write-scoped': {
+                    ar: 'تعديل الإعدادات فقط ضمن المجموعات المسموح بها للمستخدم.',
+                    en: 'Edit settings only for groups assigned to this user.'
+                },
+                'security:manage': {
+                    ar: 'إدارة القوائم السوداء/البيضاء وإجراءات الأمان.',
+                    en: 'Manage blacklist/whitelist and security actions.'
+                },
+                'media:manage': {
+                    ar: 'رفع/حذف وإدارة الوسائط الخاصة بالمجموعات.',
+                    en: 'Upload/delete/manage group media files.'
+                },
+                'import-export:manage': {
+                    ar: 'استخدام أدوات الاستيراد والتصدير للبيانات.',
+                    en: 'Use data import and export tools.'
+                },
+                'bot:logout': {
+                    ar: 'فصل جلسة واتساب (تسجيل خروج البوت).',
+                    en: 'Disconnect WhatsApp session (bot logout).'
+                },
+                'logs:view': {
+                    ar: 'عرض سجل الأحداث والعمليات.',
+                    en: 'View event and activity logs.'
+                },
+                'users:manage': {
+                    ar: 'إدارة المستخدمين والصلاحيات.',
+                    en: 'Manage users and permissions.'
+                },
+                '*': {
+                    ar: 'وصول كامل لكل الصلاحيات بدون قيود.',
+                    en: 'Full unrestricted access to all permissions.'
+                }
+            };
             const umNoCreatePermsText = '${t('لم يتم اختيار أي صلاحيات', 'No permissions selected')}';
             let umCreatePermSet = new Set();
 
@@ -1707,6 +1807,16 @@ module.exports = function renderDashboard(req, db, config) {
                 umRenderCreatePermSelection();
             }
 
+            function umTogglePermissionGroupsDrawer(forceOpen = null) {
+                const drawer = document.getElementById('um_perm_drawer');
+                const icon = document.getElementById('um_perm_drawer_icon');
+                if (!drawer || !icon) return;
+
+                const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : !drawer.classList.contains('open');
+                drawer.classList.toggle('open', shouldOpen);
+                icon.className = shouldOpen ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
+            }
+
             function umRenderCreatePermPicker() {
                 const picker = document.getElementById('um_perm_picker');
                 if (!picker) return;
@@ -1728,6 +1838,22 @@ module.exports = function renderDashboard(req, db, config) {
 
                     picker.appendChild(label);
                 });
+            }
+
+            function umRenderPermissionHelp() {
+                const helpBox = document.getElementById('um_perm_help');
+                if (!helpBox) return;
+                helpBox.innerHTML = umCreatePermCatalog.map(permission => {
+                    const desc = umPermissionDescriptions[permission] || {
+                        ar: 'صلاحية مخصصة.',
+                        en: 'Custom permission.'
+                    };
+                    const text = currentLang === 'en' ? desc.en : desc.ar;
+                    return '<div class="um-perm-help-item">' +
+                        '<div class="um-perm-help-key">' + umEscapeHtml(permission) + '</div>' +
+                        '<div class="um-perm-help-desc">' + umEscapeHtml(text) + '</div>' +
+                    '</div>';
+                }).join('');
             }
 
             function umRenderCreatePermSelection() {
@@ -1801,6 +1927,7 @@ module.exports = function renderDashboard(req, db, config) {
             const umQuickRoleEl = document.getElementById('um_create_quick_role');
             if (umQuickRoleEl) umQuickRoleEl.addEventListener('change', umHandleQuickRoleChange);
             umRenderCreatePermPicker();
+            umRenderPermissionHelp();
             umRenderCreatePermSelection();
 
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
