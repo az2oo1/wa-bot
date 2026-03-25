@@ -410,11 +410,12 @@ module.exports = function renderDashboard(req, db, config) {
                     #page-blacklist .field-label { color: var(--text); opacity: .78; }
                     #page-blacklist .toggle-label small { color: var(--text); opacity: .72; }
                     #page-blacklist .blacklist-grid { align-items: start; }
-                    #page-blacklist .blacklist-main-card { grid-column: 1; grid-row: 1; }
+                    #page-blacklist .blacklist-main-card { grid-column: 1; grid-row: 1 / span 2; }
                     #page-blacklist .blocked-ext-card { grid-column: 2; grid-row: 1; }
-                    #page-blacklist .whitelist-card { grid-column: 1; grid-row: 2; }
+                    #page-blacklist .whitelist-card { grid-column: 2; grid-row: 2; }
                     #page-blacklist .purge-card {
                         grid-column: 1 / -1;
+                        grid-row: 3;
                         border-color: rgba(255,171,64,0.55);
                         box-shadow: 0 0 0 1px rgba(255,171,64,0.18) inset;
                     }
@@ -499,7 +500,7 @@ module.exports = function renderDashboard(req, db, config) {
                     <div class="card warning card-grid-full purge-card">
                         <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
                         <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
-                        <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; justify-content:center; padding:15px; font-size:16px;" onclick="purgeBlacklisted()">
+                        <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; max-width:460px; margin:0 auto; justify-content:center; padding:12px 18px; font-size:15px;" onclick="purgeBlacklisted()">
                             <i class="fas fa-gavel"></i> ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
                         </button>
                     </div>
@@ -527,8 +528,8 @@ module.exports = function renderDashboard(req, db, config) {
                             0%,100% { box-shadow: 0 0 0 0 rgba(100,220,150,0.55); }
                             50%      { box-shadow: 0 0 0 8px rgba(100,220,150,0); }
                         }
-                        .general-top-grid { align-items: stretch; margin-bottom: 20px; }
-                        .general-top-card { display: flex; flex-direction: column; }
+                        .general-top-grid { align-items: start; margin-bottom: 20px; }
+                        .general-top-card { display: flex; flex-direction: column; align-self: start; }
                         .general-top-card .field-group { margin-bottom: 0; }
                         #defaultWordsContainer { max-height: 160px; gap: 8px; }
                         #defaultWordsContainer .chip { padding: 5px 10px; font-size: 13px; }
