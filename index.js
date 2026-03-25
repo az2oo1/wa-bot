@@ -20,6 +20,32 @@ try {
 // Ensure media storage directory exists
 if (!fs.existsSync('./media')) fs.mkdirSync('./media');
 
+function ensureDashboardLogo() {
+    const publicDir = path.join(process.cwd(), 'public');
+    const logoPath = path.join(publicDir, 'logo.png');
+
+    try {
+        if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
+        if (fs.existsSync(logoPath) && fs.statSync(logoPath).isFile()) return;
+
+        const rootFiles = fs.readdirSync(process.cwd(), { withFileTypes: true })
+            .filter(entry => entry.isFile())
+            .map(entry => entry.name);
+
+        const imageCandidates = rootFiles.filter(name => /\.(png|jpg|jpeg|webp)$/i.test(name));
+        const firstImage = imageCandidates.find(name => name.toLowerCase() !== 'logo.png');
+
+        if (firstImage) {
+            fs.copyFileSync(path.join(process.cwd(), firstImage), logoPath);
+            console.log(`[UI] Seeded missing logo from ${firstImage} -> public/logo.png`);
+        }
+    } catch (err) {
+        console.error(`[UI] Failed to ensure dashboard logo: ${err.message || err}`);
+    }
+}
+
+ensureDashboardLogo();
+
 // Multer: dynamic storage per group
 const mediaStorage = multer.diskStorage({
     destination: (req, file, cb) => {

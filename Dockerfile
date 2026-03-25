@@ -54,6 +54,16 @@ else\n\
   cp /app_staging/index.js /app/index.js\n\
   cp /app_staging/userManagementUI.js /app/userManagementUI.js\n\
 fi\n\
+mkdir -p /app/public\n\
+if [ -f /app_staging/public/logo.png ]; then\n\
+  cp /app_staging/public/logo.png /app/public/logo.png\n\
+fi\n\
+if [ ! -f /app/public/logo.png ]; then\n\
+  FIRST_IMAGE="$(find /app -maxdepth 1 -type f \( -iname "*.png" -o -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.webp" \) | head -n 1)"\n\
+  if [ -n "$FIRST_IMAGE" ]; then\n\
+    cp "$FIRST_IMAGE" /app/public/logo.png\n\
+  fi\n\
+fi\n\
 \n\
 if [ ! -d /app/node_modules ] || [ ! -f /app/node_modules/express/package.json ]; then\n\
   echo "📦 Restoring node_modules to /app..."\n\
