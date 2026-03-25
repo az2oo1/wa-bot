@@ -630,6 +630,7 @@ let config = loadConfigFromDB();
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+app.use('/public', express.static(path.join(__dirname, 'public')));
 
 let currentQR = '';
 let botStatus = '<i class="fas fa-spinner fa-spin"></i> جاري تهيئة النظام وبدء التشغيل...';

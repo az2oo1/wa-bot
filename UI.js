@@ -66,7 +66,7 @@ module.exports = function renderDashboard(req, db, config) {
         </style>
         <nav class="sidebar" id="sidebar">
             <div class="sidebar-logo">
-                <div class="logo-icon"><i class="fas fa-robot"></i></div>
+                <div class="logo-icon"><img src="/public/logo.png" alt="${t('شعار البوت', 'Bot Logo')}" style="width:100%;height:100%;object-fit:cover;border-radius:14px;"></div>
                 <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V6.4', 'Dashboard V6.4')}</small></div>
             </div>
 
