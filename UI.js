@@ -973,6 +973,32 @@ module.exports = function renderDashboard(req, db, config) {
                             <div class="card-header"><h3><i class="fas fa-users"></i> ${t('المستخدمون', 'Users')}</h3></div>
                             <div class="um-scroll-box" id="um_users_list"></div>
                         </div>
+
+                        <div class="card warning" style="margin-bottom:0;">
+                            <div class="card-header"><h3><i class="fas fa-sliders-h"></i> ${t('صلاحيات المستخدم المحدد', 'Selected User Access')}</h3></div>
+                            <p id="um_selected_user" style="color:var(--text-muted);margin-bottom:14px;">${t('اختر مستخدماً من القائمة', 'Select a user from the list')}</p>
+                            <div class="field-row" style="margin-bottom:10px;">
+                                <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-perm', true)"><i class="fas fa-check-double"></i> ${t('تحديد كل الصلاحيات', 'Select All Permissions')}</button>
+                                <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-perm', false)"><i class="fas fa-eraser"></i> ${t('إلغاء كل الصلاحيات', 'Clear Permissions')}</button>
+                                <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-wa', true)"><i class="fas fa-check-double"></i> ${t('تحديد كل المجموعات', 'Select All Groups')}</button>
+                                <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-wa', false)"><i class="fas fa-eraser"></i> ${t('إلغاء كل المجموعات', 'Clear Groups')}</button>
+                            </div>
+                            <div class="um-access-grid">
+                                <div>
+                                    <label class="field-label">${t('ماذا يمكن لهذا المستخدم أن يفعل؟', 'What can this user do?')}</label>
+                                    <div id="um_assign_perm_groups" class="chip-container" style="display:block;min-height:120px;"></div>
+                                </div>
+                                <div>
+                                    <label class="field-label">${t('في أي مجموعات يمكنه إدارة الإعدادات؟', 'Which groups can they manage?')}</label>
+                                    <div id="um_assign_wa_groups" class="chip-container" style="display:block;min-height:120px;"></div>
+                                </div>
+                            </div>
+                            <div class="field-row" style="margin-top:12px;">
+                                <button class="btn btn-primary" type="button" onclick="umSaveSelectedUserAccess()"><i class="fas fa-save"></i> ${t('حفظ الوصول', 'Save Access')}</button>
+                                <button class="btn btn-danger" type="button" onclick="umDeleteSelectedUser()"><i class="fas fa-trash"></i> ${t('حذف المستخدم', 'Delete User')}</button>
+                            </div>
+                            <div id="um_access_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
+                        </div>
                     </div>
 
                     <div class="um-stack">
@@ -1031,32 +1057,6 @@ module.exports = function renderDashboard(req, db, config) {
                             </div>
                         </div>
                     </div>
-                </div>
-
-                <div class="card warning">
-                    <div class="card-header"><h3><i class="fas fa-sliders-h"></i> ${t('صلاحيات المستخدم المحدد', 'Selected User Access')}</h3></div>
-                    <p id="um_selected_user" style="color:var(--text-muted);margin-bottom:14px;">${t('اختر مستخدماً من القائمة', 'Select a user from the list')}</p>
-                    <div class="field-row" style="margin-bottom:10px;">
-                        <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-perm', true)"><i class="fas fa-check-double"></i> ${t('تحديد كل الصلاحيات', 'Select All Permissions')}</button>
-                        <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-perm', false)"><i class="fas fa-eraser"></i> ${t('إلغاء كل الصلاحيات', 'Clear Permissions')}</button>
-                        <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-wa', true)"><i class="fas fa-check-double"></i> ${t('تحديد كل المجموعات', 'Select All Groups')}</button>
-                        <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-wa', false)"><i class="fas fa-eraser"></i> ${t('إلغاء كل المجموعات', 'Clear Groups')}</button>
-                    </div>
-                    <div class="um-access-grid">
-                        <div>
-                            <label class="field-label">${t('ماذا يمكن لهذا المستخدم أن يفعل؟', 'What can this user do?')}</label>
-                            <div id="um_assign_perm_groups" class="chip-container" style="display:block;min-height:120px;"></div>
-                        </div>
-                        <div>
-                            <label class="field-label">${t('في أي مجموعات يمكنه إدارة الإعدادات؟', 'Which groups can they manage?')}</label>
-                            <div id="um_assign_wa_groups" class="chip-container" style="display:block;min-height:120px;"></div>
-                        </div>
-                    </div>
-                    <div class="field-row" style="margin-top:12px;">
-                        <button class="btn btn-primary" type="button" onclick="umSaveSelectedUserAccess()"><i class="fas fa-save"></i> ${t('حفظ الوصول', 'Save Access')}</button>
-                        <button class="btn btn-danger" type="button" onclick="umDeleteSelectedUser()"><i class="fas fa-trash"></i> ${t('حذف المستخدم', 'Delete User')}</button>
-                    </div>
-                    <div id="um_access_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
                 </div>
             </div>
 
