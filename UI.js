@@ -1484,6 +1484,55 @@ module.exports = function renderDashboard(req, db, config) {
             window.onclick = function(event) {
                 if (event.target === document.getElementById('ollamaModal')) closeOllamaModal();
                 if (event.target === document.getElementById('debuggerModal')) closeDebuggerModal();
+                if (event.target === document.getElementById('confirmModal')) closeConfirmModal(false);
+            }
+
+            let confirmResolver = null;
+
+            function closeConfirmModal(result) {
+                const modal = document.getElementById('confirmModal');
+                if (!modal) return;
+                modal.classList.remove('open');
+                document.body.style.overflow = '';
+                if (confirmResolver) {
+                    const resolve = confirmResolver;
+                    confirmResolver = null;
+                    resolve(Boolean(result));
+                }
+            }
+
+            function showConfirmModal(message, options = {}) {
+                return new Promise(resolve => {
+                    const modal = document.getElementById('confirmModal');
+                    const titleEl = document.getElementById('confirmModalTitle');
+                    const msgEl = document.getElementById('confirmModalMessage');
+                    const closeBtn = document.getElementById('confirmModalClose');
+                    const cancelBtn = document.getElementById('confirmModalCancel');
+                    const confirmBtn = document.getElementById('confirmModalConfirm');
+
+                    if (!modal || !titleEl || !msgEl || !closeBtn || !cancelBtn || !confirmBtn) {
+                        resolve(window.confirm(message));
+                        return;
+                    }
+
+                    const title = options.title || (currentLang === 'en' ? 'Confirm Action' : 'تأكيد الإجراء');
+                    const confirmText = options.confirmText || (currentLang === 'en' ? 'Confirm' : 'تأكيد');
+                    const cancelText = options.cancelText || (currentLang === 'en' ? 'Cancel' : 'إلغاء');
+
+                    titleEl.innerHTML = '<i class="fas fa-circle-question"></i> ' + umEscapeHtml(title);
+                    msgEl.textContent = String(message || '');
+                    confirmBtn.textContent = confirmText;
+                    cancelBtn.textContent = cancelText;
+                    confirmBtn.className = 'btn ' + (options.confirmClass || 'btn-danger');
+
+                    confirmResolver = resolve;
+                    modal.classList.add('open');
+                    document.body.style.overflow = 'hidden';
+
+                    confirmBtn.onclick = () => closeConfirmModal(true);
+                    cancelBtn.onclick = () => closeConfirmModal(false);
+                    closeBtn.onclick = () => closeConfirmModal(false);
+                });
             }
 
             async function fetchLogs() {
@@ -1509,7 +1558,7 @@ module.exports = function renderDashboard(req, db, config) {
             }
 
             async function logoutBot() {
-                if(confirm(dict.logout_confirm.replace(/<[^>]*>?/gm, ''))) {
+                if(await showConfirmModal(dict.logout_confirm.replace(/<[^>]*>?/gm, ''))) {
                     renderDashboardStatus(dict.logging_out.replace(/<[^>]*>?/gm, '').trim(), 'terminating');
                     await fetch('/api/logout', { method: 'POST' });
                 }
@@ -1517,7 +1566,7 @@ module.exports = function renderDashboard(req, db, config) {
 
             async function signOutSession() {
                 if (firstLoginEnforced) return;
-                if (!confirm(dict.signout_confirm.replace(/<[^>]*>?/gm, ''))) return;
+                if (!await showConfirmModal(dict.signout_confirm.replace(/<[^>]*>?/gm, ''))) return;
                 try {
                     await fetch('/auth/logout', { method: 'POST' });
                 } catch (e) {}
