@@ -190,6 +190,7 @@ module.exports = function renderDashboard(req, db, config) {
 
             #page-groups #groupsContainer {
                 display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
                 gap: 12px;
             }
 
@@ -265,6 +266,10 @@ module.exports = function renderDashboard(req, db, config) {
             }
 
             @media (max-width: 900px) {
+                #page-groups #groupsContainer {
+                    grid-template-columns: 1fr;
+                }
+
                 #page-groups .glc-stats {
                     display: none;
                 }
