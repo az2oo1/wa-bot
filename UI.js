@@ -400,14 +400,15 @@ module.exports = function renderDashboard(req, db, config) {
                     <p>${t('تطبّق على جميع المجموعات التي لا تملك إعدادات مخصصة', 'Applies to all groups without custom settings')}</p>
                 </div>
 
-                <div class="card" style="max-width:860px; margin:0 auto 20px;">
-                    <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
-                    <div class="field-group" id="defaultAdminGroupContainer">
-                        <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
+                <div class="card-grid">
+                    <div class="card">
+                        <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
+                        <div class="field-group" id="defaultAdminGroupContainer">
+                            <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
+                        </div>
                     </div>
-                </div>
 
-                <div class="card" style="max-width:860px; margin:0 auto 24px; border-color:rgba(100,220,150,0.5); background:linear-gradient(160deg,rgba(100,220,150,0.07) 0,var(--card-bg) 55%); position:relative; overflow:hidden;">
+                    <div class="card" style="border-color:rgba(100,220,150,0.5); background:linear-gradient(160deg,rgba(100,220,150,0.07) 0,var(--card-bg) 55%); position:relative; overflow:hidden;">
                     <style>
                         @keyframes safePulse {
                             0%,100% { box-shadow: 0 0 0 0 rgba(100,220,150,0.55); }
@@ -447,6 +448,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <div><i class="fas fa-shield-alt" style="color:#64dc96;"></i> <strong style="color:var(--text);">${t('تشغيل:', 'On:')}</strong> ${t('تأخير عشوائي 10–60 ث — يحاكي سلوك الإنسان ويقلل خطر الحظر بشكل كبير', 'Random 10–60s delay — mimics human behaviour, greatly reduces ban risk')}</div>
                         <div><i class="fas fa-info-circle" style="color:var(--blue);"></i> <strong style="color:var(--text);">${t('يؤثر على:', 'Covers:')}</strong> ${t('الطرد، الحذف، التصويت، الإبلاغ، رسائل الترحيب', 'Kicks, deletes, polls, reports, welcome messages')}</div>
                     </div>
+                </div>
                 </div>
 
 
