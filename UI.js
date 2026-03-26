@@ -362,9 +362,7 @@ module.exports = function renderDashboard(req, db, config) {
                 <div class="card-grid general-top-grid">
                     <div class="card general-top-card" style="margin-bottom:0;">
                         <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
-                        <div class="field-group" id="defaultAdminGroupContainer">
-                            <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
-                        </div>
+                        <div class="field-group" id="defaultAdminGroupContainer" style="min-height:50px;"></div>
                     </div>
 
                     <div class="card general-top-card" style="margin-bottom:0; border-color:rgba(100,220,150,0.35); background:linear-gradient(160deg,rgba(100,220,150,0.05) 0,var(--card-bg) 58%); position:relative; overflow:hidden;">
@@ -2088,7 +2086,10 @@ module.exports = function renderDashboard(req, db, config) {
             function renderDefaultAdminGroupSelect() {
                 try {
                     const defAdminContainer = document.getElementById('defaultAdminGroupContainer');
-                    if (!defAdminContainer) return;
+                    if (!defAdminContainer) {
+                        console.warn("defaultAdminGroupContainer not found");
+                        return;
+                    }
                     const availableGroups = getSelectableGroups();
                     const existingSelect = document.getElementById('defaultAdminGroup');
                     const existingLangSelect = document.getElementById('defaultAdminLanguage');
@@ -2104,7 +2105,7 @@ module.exports = function renderDashboard(req, db, config) {
                             </span>
                             <span style="cursor:pointer; color:var(--accent); font-size:14px;" onclick="loadKnownGroups()" title="Refresh Groups"><i class="fas fa-sync"></i></span>
                         </label>
-                        <select id="defaultAdminGroup" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">
+                        <select id="defaultAdminGroup" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'}; width: 100%; padding: 10px 12px; margin-top: 8px; background: var(--input-bg); border: 1.5px solid var(--card-border); border-radius: 10px; color: var(--text); font-family: inherit; font-size: 14px; cursor: pointer;">
                     \`;
                     defHTML += \`<option value="">-- \${dict.select_group} --</option>\`;
 
@@ -2122,13 +2123,14 @@ module.exports = function renderDashboard(req, db, config) {
                     defHTML += \`
                         <div class="field-group" style="margin-top:12px; margin-bottom:0;">
                             <label class="field-label">\${dict.admin_msg_lang}</label>
-                            <select id="defaultAdminLanguage" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">
+                            <select id="defaultAdminLanguage" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'}; width: 100%; padding: 10px 12px; background: var(--input-bg); border: 1.5px solid var(--card-border); border-radius: 10px; color: var(--text); font-family: inherit; font-size: 14px; cursor: pointer;">
                                 <option value="ar" \${selectedLang === 'ar' ? 'selected' : (selectedLang === 'en' ? '' : 'selected')}>\${dict.lang_ar}</option>
                                 <option value="en" \${selectedLang === 'en' ? 'selected' : ''}>\${dict.lang_en}</option>
                             </select>
                         </div>
                     \`;
                     defAdminContainer.innerHTML = defHTML;
+                    console.log("Default admin group rendered with " + availableGroups.length + " groups");
                 } catch(e) {
                     console.error("Error in renderDefaultAdminGroupSelect", e);
                 }
@@ -3291,6 +3293,10 @@ module.exports = function renderDashboard(req, db, config) {
             renderDefaultWords();
             renderAITriggerWords();
             loadKnownGroups();
+            // Ensure default admin group renders
+            setTimeout(() => {
+                renderDefaultAdminGroupSelect();
+            }, 100);
             enforceFirstLoginChange();
 
             setInterval(async () => {
