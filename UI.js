@@ -1106,8 +1106,10 @@ module.exports = function renderDashboard(req, db, config) {
                             <span class="status-badge blue"><i class="fas fa-code-branch"></i> v6.5.0</span>
                             <span class="status-badge"><i class="fab fa-osi"></i> ${t('مفتوح المصدر', 'Open Source')}</span>
                         </div>
-                        <div style="margin-top: 20px;">
-                            <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="social-btn" style="border-color: var(--accent); color: var(--accent); background: var(--accent-dim);"><i class="fas fa-star"></i> Repository</a>
+                        <div style="margin-top: 28px;">
+                            <a href="https://github.com/az2oo1/wa-bot" target="_blank" style="display: inline-flex; align-items: center; gap: 10px; background: var(--text); color: var(--bg); padding: 12px 28px; border-radius: 30px; font-weight: 700; font-size: 15px; text-decoration: none; transition: transform 0.2s ease;">
+                                <i class="fab fa-github" style="font-size: 18px;"></i> ${t('المستودع على GitHub', 'View on GitHub')}
+                            </a>
                         </div>
                     </div>
                 </div>
@@ -1223,15 +1225,17 @@ module.exports = function renderDashboard(req, db, config) {
                             </div>
                         </div>
 
-                        <div class="info-card" style="display: flex; gap: 16px; align-items: center; padding: 16px 20px;">
-                            <div class="dev-avatar" style="width: 50px; height: 50px; flex-shrink: 0; font-size: 24px; color: var(--accent); border-width: 1.5px;">
-                                <i class="fas fa-brain"></i>
+                        <div class="info-card" style="display: flex; gap: 16px; align-items: flex-start; padding: 16px 20px;">
+                            <div class="dev-avatar" style="width: 50px; height: 50px; flex-shrink: 0; border-width: 1.5px; overflow: hidden;">
+                                <img src="https://github.com/Fahad-Alshalawi1.png" alt="Fahad-Alshalawi" style="width: 100%; height: 100%; object-fit: cover;">
                             </div>
                             <div class="dev-info">
-                                <h3 class="dev-name" style="font-size: 16px; margin: 0 0 4px 0;">${t('مساهم الذكاء الاصطناعي', 'AI Contributor')}</h3>
-                                <p class="dev-bio" style="font-size: 13px; margin: 0;">
+                                <h3 class="dev-name" style="font-size: 18px; margin: 0 0 2px 0;">Fahad-Alshalawi</h3>
+                                <p class="dev-handle" style="font-size: 13px; margin: 0 0 8px 0; color: var(--blue);"><i class="fas fa-brain"></i> ${t('مساهم الذكاء الاصطناعي', 'AI Contributor')}</p>
+                                <p class="dev-bio" style="font-size: 13px; margin: 0 0 12px 0; line-height: 1.5;">
                                     ${t('مساعدة قيمة في تطوير خوارزميات الذكاء الاصطناعي وتجهيزها للعمل داخل النظام.', 'Valuable assistance in developing and integrating AI capabilities into the system.')}
                                 </p>
+                                <a href="https://github.com/Fahad-Alshalawi1" target="_blank" class="social-btn" style="padding: 6px 12px; font-size: 12px; border-radius: 6px;"><i class="fab fa-github"></i> GitHub</a>
                             </div>
                         </div>
                     </section>
