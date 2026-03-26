@@ -1,6 +1,6 @@
 {
   "name": "wa-moderator-bot",
-  "version": "1.0.0",
+  "version": "6.5.0",
   "description": "نظام الإشراف الآلي مع لوحة تحكم",
   "main": "index.js",
   "scripts": {
