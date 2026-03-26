@@ -899,138 +899,477 @@ module.exports = function renderDashboard(req, db, config) {
             </div>
 
             <div class="page" id="page-about">
-                <div class="page-header">
-                    <h2><i class="fas fa-shield-alt"></i> ${t('المشرف الآلي - واتساب', 'WhatsApp Auto Mod')}</h2>
-                    <p>${t('نظام إدارة مجموعات متقدم مع الذكاء الاصطناعي المحلي', 'Advanced group management system with local AI')}</p>
-                </div>
-
                 <style>
-                    #page-about .about-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
-                    #page-about .about-card { margin-bottom: 0; }
-                    #page-about .about-grid ul { font-size: 13px; line-height: 1.75; }
-                    #page-about .about-grid p { font-size: 13px; line-height: 1.55; }
-                    #page-about .about-license-card { grid-column: 2 / 3; }
-                    @media (max-width: 1200px) {
-                        #page-about .about-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-                        #page-about .about-license-card { grid-column: auto; }
+                    #page-about { padding: 0 !important; }
+                    
+                    #page-about .hero-section {
+                        background: linear-gradient(135deg, rgba(0,200,83,0.12) 0%, rgba(64,196,255,0.08) 100%);
+                        border-bottom: 2px solid var(--card-border);
+                        padding: 60px 40px;
+                        margin: 0 0 40px 0;
+                        text-align: center;
                     }
-                    @media (max-width: 760px) {
-                        #page-about .about-grid { grid-template-columns: 1fr; }
+                    
+                    #page-about .hero-icon {
+                        font-size: 64px;
+                        color: var(--accent);
+                        margin-bottom: 20px;
+                        display: inline-block;
+                        filter: drop-shadow(0 4px 16px rgba(0,200,83,0.2));
+                    }
+                    
+                    #page-about .hero-title {
+                        font-size: 42px;
+                        font-weight: 700;
+                        color: var(--text);
+                        margin-bottom: 12px;
+                        letter-spacing: -0.5px;
+                    }
+                    
+                    #page-about .hero-subtitle {
+                        font-size: 18px;
+                        color: var(--text-muted);
+                        margin-bottom: 24px;
+                        max-width: 600px;
+                        margin-left: auto;
+                        margin-right: auto;
+                    }
+                    
+                    #page-about .hero-badges {
+                        display: flex;
+                        gap: 10px;
+                        justify-content: center;
+                        flex-wrap: wrap;
+                        margin-top: 20px;
+                    }
+                    
+                    #page-about .hero-badge {
+                        background: var(--accent-dim);
+                        color: var(--accent);
+                        padding: 6px 16px;
+                        border-radius: 20px;
+                        font-size: 13px;
+                        font-weight: 600;
+                        border: 1px solid rgba(0,200,83,0.3);
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                    }
+                    
+                    #page-about .hero-badge.version {
+                        background: var(--blue-dim);
+                        color: var(--blue);
+                        border-color: rgba(64,196,255,0.3);
+                    }
+                    
+                    #page-about .content-wrapper {
+                        padding: 0 40px 32px 40px;
+                        max-width: 1400px;
+                        margin: 0 auto;
+                    }
+                    
+                    #page-about .about-section,
+                    #page-about .features-section,
+                    #page-about .tech-section,
+                    #page-about .requirements-section,
+                    #page-about .developer-links-section {
+                        margin-bottom: 36px;
+                    }
+                    
+                    #page-about .section-title {
+                        font-size: 24px;
+                        font-weight: 700;
+                        color: var(--text);
+                        margin-bottom: 16px;
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                    }
+                    
+                    #page-about .section-title i {
+                        color: var(--accent);
+                    }
+                    
+                    #page-about .about-text {
+                        background: var(--card-bg);
+                        border: 1px solid var(--card-border);
+                        border-radius: 12px;
+                        padding: 24px;
+                        font-size: 15px;
+                        line-height: 1.7;
+                        color: var(--text-muted);
+                    }
+                    
+                    #page-about .features-grid {
+                        display: grid;
+                        grid-template-columns: repeat(2, 1fr);
+                        gap: 16px;
+                    }
+                    
+                    #page-about .feature-item {
+                        background: var(--card-bg);
+                        border: 1.5px solid var(--card-border);
+                        border-radius: 12px;
+                        padding: 20px;
+                        display: flex;
+                        align-items: flex-start;
+                        gap: 14px;
+                        transition: all 0.3s ease;
+                    }
+                    
+                    #page-about .feature-item:hover {
+                        border-color: var(--accent);
+                        background: linear-gradient(180deg, rgba(0,200,83,0.04) 0%, var(--card-bg) 100%);
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 24px rgba(0,200,83,0.1);
+                    }
+                    
+                    #page-about .feature-icon {
+                        width: 44px;
+                        height: 44px;
+                        background: var(--accent-dim);
+                        border-radius: 10px;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        color: var(--accent);
+                        font-size: 20px;
+                        flex-shrink: 0;
+                    }
+                    
+                    #page-about .feature-content {
+                        flex: 1;
+                    }
+                    
+                    #page-about .feature-name {
+                        font-size: 14px;
+                        font-weight: 700;
+                        color: var(--text);
+                        margin-bottom: 4px;
+                    }
+                    
+                    #page-about .feature-desc {
+                        font-size: 12px;
+                        color: var(--text-muted);
+                        line-height: 1.5;
+                    }
+                    
+                    #page-about .tech-grid {
+                        display: grid;
+                        grid-template-columns: repeat(3, 1fr);
+                        gap: 12px;
+                    }
+                    
+                    #page-about .tech-item {
+                        background: var(--card-bg);
+                        border: 1px solid var(--card-border);
+                        border-radius: 10px;
+                        padding: 14px;
+                        text-align: center;
+                        font-size: 13px;
+                        color: var(--text);
+                        font-weight: 500;
+                        transition: all 0.2s ease;
+                    }
+                    
+                    #page-about .tech-item:hover {
+                        border-color: var(--blue);
+                        background: var(--blue-dim);
+                        color: var(--blue);
+                    }
+                    
+                    #page-about .requirements-grid {
+                        display: grid;
+                        grid-template-columns: repeat(2, 1fr);
+                        gap: 14px;
+                    }
+                    
+                    #page-about .requirement-item {
+                        background: var(--card-bg);
+                        border: 1px solid var(--card-border);
+                        border-radius: 10px;
+                        padding: 18px;
+                    }
+                    
+                    #page-about .requirement-label {
+                        font-size: 12px;
+                        color: var(--text-muted);
+                        font-weight: 600;
+                        text-transform: uppercase;
+                        letter-spacing: 0.5px;
+                        margin-bottom: 6px;
+                    }
+                    
+                    #page-about .requirement-value {
+                        font-size: 15px;
+                        color: var(--text);
+                        font-weight: 600;
+                    }
+                    
+                    #page-about .developer-links-grid {
+                        display: grid;
+                        grid-template-columns: repeat(2, 1fr);
+                        gap: 20px;
+                    }
+                    
+                    #page-about .dev-card {
+                        background: var(--card-bg);
+                        border: 1.5px solid var(--card-border);
+                        border-radius: 12px;
+                        padding: 28px;
+                    }
+                    
+                    #page-about .dev-card.highlight {
+                        border-color: rgba(0,200,83,0.35);
+                        background: linear-gradient(180deg, rgba(0,200,83,0.04) 0%, var(--card-bg) 100%);
+                    }
+                    
+                    #page-about .dev-icon {
+                        font-size: 32px;
+                        margin-bottom: 12px;
+                        color: var(--accent);
+                    }
+                    
+                    #page-about .dev-card.highlight .dev-icon {
+                        color: var(--accent);
+                    }
+                    
+                    #page-about .dev-name {
+                        font-size: 18px;
+                        font-weight: 700;
+                        color: var(--text);
+                        margin-bottom: 4px;
+                    }
+                    
+                    #page-about .dev-subtitle {
+                        font-size: 12px;
+                        color: var(--text-muted);
+                        margin-bottom: 14px;
+                    }
+                    
+                    #page-about .dev-links {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 6px;
+                    }
+                    
+                    #page-about .dev-link {
+                        background: transparent;
+                        border: 1.5px solid var(--card-border);
+                        color: var(--text-muted);
+                        padding: 8px 12px;
+                        border-radius: 8px;
+                        text-decoration: none;
+                        font-size: 13px;
+                        font-weight: 600;
+                        display: flex;
+                        align-items: center;
+                        gap: 8px;
+                        transition: all 0.2s ease;
+                        cursor: pointer;
+                    }
+                    
+                    #page-about .dev-link:hover {
+                        border-color: var(--accent);
+                        color: var(--accent);
+                        background: var(--accent-dim);
+                    }
+                    
+                    #page-about .links-section {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 8px;
+                    }
+                    
+                    #page-about .link-btn {
+                        background: transparent;
+                        border: 1.5px solid var(--card-border);
+                        color: var(--text-muted);
+                        padding: 12px 16px;
+                        border-radius: 10px;
+                        text-decoration: none;
+                        font-size: 14px;
+                        font-weight: 600;
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                        transition: all 0.2s ease;
+                        cursor: pointer;
+                    }
+                    
+                    #page-about .link-btn:hover {
+                        border-color: var(--blue);
+                        color: var(--blue);
+                        background: var(--blue-dim);
+                    }
+                    
+                    #page-about .license-badge {
+                        background: var(--accent-dim);
+                        color: var(--accent);
+                        display: inline-flex;
+                        align-items: center;
+                        gap: 6px;
+                        padding: 6px 12px;
+                        border-radius: 20px;
+                        font-size: 12px;
+                        font-weight: 600;
+                        margin-top: 12px;
+                    }
+
+                    @media (max-width: 768px) {
+                        #page-about .hero-section { padding: 40px 18px; }
+                        #page-about .content-wrapper { padding: 0 18px 24px 18px; }
+                        #page-about .hero-title { font-size: 32px; }
+                        #page-about .hero-subtitle { font-size: 16px; }
+                        #page-about .features-grid { grid-template-columns: 1fr; }
+                        #page-about .tech-grid { grid-template-columns: repeat(2, 1fr); }
+                        #page-about .requirements-grid { grid-template-columns: 1fr; }
+                        #page-about .developer-links-grid { grid-template-columns: 1fr; }
                     }
                 </style>
 
-                <div class="card-grid about-grid">
-                    <div class="card info about-card">
-                        <div class="card-header">
-                            <h3 style="font-size:16px;"><i class="fas fa-user-circle"></i> ${t('المطور', 'Developer')}</h3>
-                        </div>
-                        <p style="font-size:15px; font-weight:700; color:var(--accent); margin:8px 0 0 0;">Abdulaziz Algassem</p>
-                        <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"><i class="fas fa-code-branch"></i> INTERSTELLAR</p>
-                        <p style="font-size:12px; color:var(--text); margin-bottom:10px; line-height:1.4;">
-                            ${t('طالب تقنية المعلومات', 'IT student')}
-                        </p>
-                        <div style="display:flex; flex-direction:column; gap:4px;">
-                            <a href="https://github.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
-                                <i class="fab fa-github"></i> GitHub
-                            </a>
-                            <a href="https://instagram.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
-                                <i class="fab fa-instagram"></i> Instagram
-                            </a>
-                            <a href="https://github.com/az2oo1?tab=repositories" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
-                                <i class="fas fa-star"></i> ${t('المشاريع', 'Projects')}
-                            </a>
+                <div class="hero-section">
+                    <div class="hero-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <h1 class="hero-title">${t('المشرف الآلي', 'WhatsApp Auto Mod')}</h1>
+                    <p class="hero-subtitle">${t('نظام إدارة مجموعات واتساب متقدم مع الذكاء الاصطناعي المحلي', 'Advanced WhatsApp group management with local AI intelligence')}</p>
+                    <div class="hero-badges">
+                        <span class="hero-badge"><i class="fas fa-rocket"></i> ${t('نشط', 'Active')}</span>
+                        <span class="hero-badge version"><i class="fas fa-code"></i> v6.4.0</span>
+                        <span class="hero-badge"><i class="fas fa-star"></i> ${t('مفتوح المصدر', 'Open Source')}</span>
+                    </div>
+                </div>
+
+                <div class="content-wrapper">
+                    <div class="about-section">
+                        <h2 class="section-title"><i class="fas fa-info-circle"></i> ${t('عن البرنامج', 'About')}</h2>
+                        <div class="about-text">
+                            ${t('هو نظام آلي ذكي لإدارة مجموعات واتساب يوفر حماية متقدمة من الرسائل غير المرغوبة والمحتوى المخالف. يتضمن تصفية كلمات مستخدمة، حجب الملحقات الخطرة، وإدارة قوائم حظر/سماح. يعمل البرنامج بذكاء اصطناعي محلي وواجهة تحكم متقدمة.', 'An intelligent automated system for managing WhatsApp groups that provides advanced protection against spam and inappropriate content. Features custom word filtering, malicious extension blocking, and blacklist/whitelist management. Powered by local AI with an advanced control dashboard.')}</div>
+                    </div>
+
+                    <div class="features-section">
+                        <h2 class="section-title"><i class="fas fa-star"></i> ${t('الميزات الرئيسية', 'Key Features')}</h2>
+                        <div class="features-grid">
+                            <div class="feature-item">
+                                <div class="feature-icon"><i class="fas fa-brain"></i></div>
+                                <div class="feature-content">
+                                    <div class="feature-name">🧠 ${t('التصفية بالذكاء الاصطناعي', 'AI Moderation')}</div>
+                                    <div class="feature-desc">${t('كشف ومنع الرسائل غير المناسبة بذكاء محلي', 'Detect and block inappropriate messages with local AI')}</div>
+                                </div>
+                            </div>
+                            <div class="feature-item">
+                                <div class="feature-icon"><i class="fas fa-ban"></i></div>
+                                <div class="feature-content">
+                                    <div class="feature-name">⚡ ${t('منع البريد المزعج', 'Anti-Spam')}</div>
+                                    <div class="feature-desc">${t('حماية من الرسائل الملحة والفيضانات', 'Protection against repetitive and flood messages')}</div>
+                                </div>
+                            </div>
+                            <div class="feature-item">
+                                <div class="feature-icon"><i class="fas fa-list"></i></div>
+                                <div class="feature-content">
+                                    <div class="feature-name">🚫 ${t('قوائم الحظر والسماح', 'Blacklist/Whitelist')}</div>
+                                    <div class="feature-desc">${t('إدارة مرنة للأرقام المحظورة والمسموحة', 'Flexible management of blocked and allowed numbers')}</div>
+                                </div>
+                            </div>
+                            <div class="feature-item">
+                                <div class="feature-icon"><i class="fas fa-image"></i></div>
+                                <div class="feature-content">
+                                    <div class="feature-name">📂 ${t('تصفية الملفات', 'Media Filter')}</div>
+                                    <div class="feature-desc">${t('حظر أنواع معينة من الملفات بمرونة', 'Block specific file types with flexibility')}</div>
+                                </div>
+                            </div>
+                            <div class="feature-item">
+                                <div class="feature-icon"><i class="fas fa-globe"></i></div>
+                                <div class="feature-content">
+                                    <div class="feature-name">🛠️ ${t('واجهة متعددة اللغات', 'Multi-Language Dashboard')}</div>
+                                    <div class="feature-desc">${t('دعم كامل للعربية والإنجليزية', 'Full support for Arabic and English')}</div>
+                                </div>
+                            </div>
+                            <div class="feature-item">
+                                <div class="feature-icon"><i class="fas fa-database"></i></div>
+                                <div class="feature-content">
+                                    <div class="feature-name">💾 ${t('إدارة متقدمة', 'Advanced Management')}</div>
+                                    <div class="feature-desc">${t('تحكم كامل في إعدادات كل مجموعة', 'Complete control over each group settings')}</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="card success about-card">
-                        <div class="card-header">
-                            <h3 style="font-size:16px;"><i class="fas fa-rocket"></i> ${t('الميزات', 'Features')}</h3>
-                        </div>
-                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
-                            <li>🧠 AI Moderation</li>
-                            <li>⚡ Anti-Spam</li>
-                            <li>🚫 Blacklist/Whitelist</li>
-                            <li>📂 Media Filter</li>
-                            <li>🛠️ Dashboard AR/EN</li>
-                            <li><i class="fas fa-check-circle"></i> v6.4.0</li>
-                        </ul>
-                    </div>
-
-                    <div class="card warning about-card">
-                        <div class="card-header">
-                            <h3 style="font-size:16px;"><i class="fas fa-microchip"></i> ${t('المكونات', 'Tech')}</h3>
-                        </div>
-                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
-                            <li>whatsapp-web.js</li>
-                            <li>better-sqlite3</li>
-                            <li>Ollama AI</li>
-                            <li>Express.js</li>
-                            <li>Node.js 16+</li>
-                            <li><i class="fas fa-check-circle" style="color:var(--accent);"></i> Active</li>
-                        </ul>
-                    </div>
-
-                    <div class="card about-card">
-                        <div class="card-header">
-                            <h3 style="font-size:16px;"><i class="fas fa-cube"></i> ${t('المتطلبات', 'Requirements')}</h3>
-                        </div>
-                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
-                            <li><strong>Min:</strong> 2GB RAM</li>
-                            <li><strong>Storage:</strong> 5GB+</li>
-                            <li><strong>AI:</strong> 8GB+ RAM</li>
-                            <li><strong>AI Storage:</strong> 10-20GB</li>
-                            <li><strong>OS:</strong> Linux/macOS/Windows</li>
-                        </ul>
-                    </div>
-
-                    <div class="card danger about-card">
-                        <div class="card-header">
-                            <h3 style="font-size:16px;"><i class="fas fa-link"></i> ${t('الروابط', 'Links')}</h3>
-                        </div>
-                        <div style="display:flex; flex-direction:column; gap:4px;">
-                            <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
-                                <i class="fab fa-github"></i> GitHub Repo
-                            </a>
-                            <a href="https://github.com/az2oo1/wa-bot/issues" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
-                                <i class="fas fa-bug"></i> Report Issues
-                            </a>
-                            <a href="https://github.com/az2oo1/wa-bot/discussions" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
-                                <i class="fas fa-comments"></i> Discussions
-                            </a>
-                            <a href="https://github.com/az2oo1/wa-bot/releases" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
-                                <i class="fas fa-tags"></i> Releases
-                            </a>
+                    <div class="tech-section">
+                        <h2 class="section-title"><i class="fas fa-microchip"></i> ${t('المكونات التقنية', 'Technology Stack')}</h2>
+                        <div class="tech-grid">
+                            <div class="tech-item">whatsapp-web.js</div>
+                            <div class="tech-item">better-sqlite3</div>
+                            <div class="tech-item">Ollama AI</div>
+                            <div class="tech-item">Express.js</div>
+                            <div class="tech-item">Node.js 16+</div>
+                            <div class="tech-item">Docker</div>
+                            <div class="tech-item">IBM Plex Sans</div>
+                            <div class="tech-item">Font Awesome 6</div>
+                            <div class="tech-item">SQLite 3</div>
                         </div>
                     </div>
 
-                    <div class="card purple about-card">
-                        <div class="card-header">
-                            <h3 style="font-size:16px;"><i class="fas fa-heart"></i> ${t('التبعيات', 'Dependencies')}</h3>
+                    <div class="requirements-section">
+                        <h2 class="section-title"><i class="fas fa-cube"></i> ${t('متطلبات النظام', 'System Requirements')}</h2>
+                        <div class="requirements-grid">
+                            <div class="requirement-item">
+                                <div class="requirement-label">${t('الحد الأدنى للذاكرة', 'Minimum RAM')}</div>
+                                <div class="requirement-value">2 GB</div>
+                            </div>
+                            <div class="requirement-item">
+                                <div class="requirement-label">${t('التخزين الأساسي', 'Base Storage')}</div>
+                                <div class="requirement-value">5 GB+</div>
+                            </div>
+                            <div class="requirement-item">
+                                <div class="requirement-label">${t('RAM للذكاء الاصطناعي', 'AI RAM')}</div>
+                                <div class="requirement-value">8 GB+</div>
+                            </div>
+                            <div class="requirement-item">
+                                <div class="requirement-label">${t('تخزين AI', 'AI Storage')}</div>
+                                <div class="requirement-value">10-20 GB</div>
+                            </div>
+                            <div class="requirement-item">
+                                <div class="requirement-label">${t('أنظمة التشغيل', 'Operating Systems')}</div>
+                                <div class="requirement-value">Linux / macOS / Windows</div>
+                            </div>
+                            <div class="requirement-item">
+                                <div class="requirement-label">${t('الإصدار الأدنى لـ Node', 'Node.js Version')}</div>
+                                <div class="requirement-value">16.0+</div>
+                            </div>
                         </div>
-                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
-                            <li>whatsapp-web.js</li>
-                            <li>better-sqlite3</li>
-                            <li>Ollama</li>
-                            <li>Express</li>
-                            <li>qrcode</li>
-                            <li>multer</li>
-                        </ul>
                     </div>
 
-                    <div class="card info about-card about-license-card">
-                        <div class="card-header">
-                            <h3 style="font-size:16px;"><i class="fas fa-file-contract"></i> ${t('الترخيص', 'License')}</h3>
-                        </div>
-                        <p style="font-size:12px; margin:8px 0; line-height:1.5;">
-                            ${t('مشروع مفتوح المصدر', 'Open Source Project')}
-                        </p>
-                        <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
-                            <span style="background:var(--accent-dim); color:var(--accent); padding:3px 8px; border-radius:14px; font-size:11px; font-weight:600;">
-                                <i class="fas fa-star"></i> 2 Stars
-                            </span>
-                            <span style="background:var(--blue-dim); color:var(--blue); padding:3px 8px; border-radius:14px; font-size:11px; font-weight:600;">
-                                v6.4.0
-                            </span>
+                    <div class="developer-links-section">
+                        <h2 class="section-title"><i class="fas fa-user-code"></i> ${t('المطور والروابط', 'Developer & Links')}</h2>
+                        <div class="developer-links-grid">
+                            <div class="dev-card highlight">
+                                <div class="dev-icon"><i class="fas fa-user-circle"></i></div>
+                                <div class="dev-name">Abdulaziz Algassem</div>
+                                <div class="dev-subtitle"><i class="fas fa-code-branch"></i> INTERSTELLAR</div>
+                                <p style="font-size: 12px; color: var(--text-muted); margin: 10px 0; line-height: 1.5;">${t('طالب تقنية معلومات متخصص في تطوير الحلول الذكية والتطبيقات المتقدمة.', 'IT student specialized in developing intelligent solutions and advanced applications.')}</p>
+                                <div class="dev-links">
+                                    <a href="https://github.com/az2oo1" target="_blank" class="dev-link"><i class="fab fa-github"></i> GitHub</a>
+                                    <a href="https://instagram.com/az2oo1" target="_blank" class="dev-link"><i class="fab fa-instagram"></i> Instagram</a>
+                                    <a href="https://github.com/az2oo1?tab=repositories" target="_blank" class="dev-link"><i class="fas fa-star"></i> ${t('المشاريع', 'Projects')}</a>
+                                </div>
+                            </div>
+
+                            <div class="dev-card">
+                                <div class="dev-icon"><i class="fas fa-link"></i></div>
+                                <div class="dev-name">${t('الروابط المهمة', 'Important Links')}</div>
+                                <div class="dev-subtitle" style="margin-bottom: 18px;">${t('تواصل وتحديثات', 'Communication & Updates')}</div>
+                                <div class="links-section">
+                                    <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="link-btn"><i class="fab fa-github"></i> ${t('مستودع GitHub', 'GitHub Repository')}</a>
+                                    <a href="https://github.com/az2oo1/wa-bot/issues" target="_blank" class="link-btn"><i class="fas fa-bug"></i> ${t('إبلاغ عن مشكلة', 'Report Issues')}</a>
+                                    <a href="https://github.com/az2oo1/wa-bot/discussions" target="_blank" class="link-btn"><i class="fas fa-comments"></i> ${t('المناقشات', 'Discussions')}</a>
+                                    <a href="https://github.com/az2oo1/wa-bot/releases" target="_blank" class="link-btn"><i class="fas fa-tags"></i> ${t('الإصدارات', 'Releases')}</a>
+                                </div>
+                                <div class="license-badge">
+                                    <i class="fas fa-file-contract"></i> ${t('مفتوح المصدر', 'Open Source')}
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
