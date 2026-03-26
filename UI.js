@@ -123,7 +123,7 @@ module.exports = function renderDashboard(req, db, config) {
 
         <nav class="sidebar" id="sidebar">
                 <div class="sidebar-logo">
-                    <div class="logo-icon"><i class="fas fa-shield-halved"></i></div>
+                    <div class="logo-icon"><img src="/public/logo.png" alt="Logo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" style="width:100%;height:100%;object-fit:cover;border-radius:14px;"><i class="fas fa-shield-halved" style="display:none"></i></div>
                     <div class="logo-text">
                         ${t('المشرف الآلي', 'Auto Moderator')}
                         <small>${t('حماية مجموعات واتساب', 'WhatsApp group safety')}</small>
