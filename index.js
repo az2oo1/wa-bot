@@ -407,6 +407,7 @@ function saveConfigToDB(conf) {
 
 const SESSION_COOKIE_NAME = 'wa_bot_session';
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const REMEMBER_ME_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const sessionStore = new Map();
 
 const DEFAULT_PERMISSION_GROUPS = [
@@ -491,9 +492,10 @@ function parseCookies(req) {
     }, {});
 }
 
-function setSessionCookie(res, token) {
+function setSessionCookie(res, token, ttlMs = SESSION_TTL_MS) {
     const secureFlag = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-    res.setHeader('Set-Cookie', `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${secureFlag}`);
+    const maxAgeSeconds = Math.max(1, Math.floor((ttlMs || SESSION_TTL_MS) / 1000));
+    res.setHeader('Set-Cookie', `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secureFlag}`);
 }
 
 function clearSessionCookie(res) {
@@ -605,9 +607,10 @@ function getAllowedGroupIds(user) {
     return new Set(rows.map(r => r.wa_group_id));
 }
 
-function createSession(userId) {
+function createSession(userId, ttlMs = SESSION_TTL_MS) {
     const token = crypto.randomBytes(32).toString('hex');
-    sessionStore.set(token, { userId, expiresAt: Date.now() + SESSION_TTL_MS });
+    const effectiveTtl = Math.max(1, Number(ttlMs) || SESSION_TTL_MS);
+    sessionStore.set(token, { userId, ttlMs: effectiveTtl, expiresAt: Date.now() + effectiveTtl });
     return token;
 }
 
@@ -637,7 +640,9 @@ function requireAuthApi(req, res, next) {
         return res.status(401).json({ error: 'User inactive or not found' });
     }
 
-    session.expiresAt = Date.now() + SESSION_TTL_MS;
+    const ttlMs = session.ttlMs || SESSION_TTL_MS;
+    session.ttlMs = ttlMs;
+    session.expiresAt = Date.now() + ttlMs;
     req.authUser = user;
     req.authPermissions = getEffectivePermissions(user);
     next();
@@ -662,7 +667,9 @@ function requireAuthPage(req, res, next) {
         return res.redirect('/login');
     }
 
-    session.expiresAt = Date.now() + SESSION_TTL_MS;
+    const ttlMs = session.ttlMs || SESSION_TTL_MS;
+    session.ttlMs = ttlMs;
+    session.expiresAt = Date.now() + ttlMs;
     req.authUser = user;
     req.authPermissions = getEffectivePermissions(user);
     next();
@@ -751,6 +758,19 @@ app.get('/login', (req, res) => {
         .lang-btn:hover{transform:translateY(-1px);filter:none;box-shadow:none}
         .hint{margin-top:12px;color:#ffd68a;font-size:13px}
         .error{margin-top:8px;color:#ff9f9f;min-height:19px}
+        .input-wrap{position:relative}
+        .input-wrap input{padding-inline-end:48px}
+        [dir="rtl"] .input-wrap input{padding-inline-end:14px;padding-inline-start:48px}
+        .peek-btn{position:absolute;top:50%;transform:translateY(-50%);right:12px;background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:4px;line-height:1;border-radius:8px;transition:color .2s}
+        .peek-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+        .peek-btn:hover{color:var(--accent)}
+        [dir="rtl"] .peek-btn{left:12px;right:auto}
+        .form-options{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;flex-wrap:wrap}
+        .remember-toggle{display:inline-flex}
+        .remember-toggle input{display:none}
+        .remember-chip{display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;border:1.5px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);font-size:13px;font-weight:700;cursor:pointer;transition:all .2s}
+        .remember-toggle input:checked + .remember-chip{border-color:rgba(0,200,83,.45);background:var(--accent-dim);color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
+        .remember-note{font-size:12px;color:var(--text-muted)}
     </style>
 </head>
 <body>
@@ -766,7 +786,19 @@ app.get('/login', (req, res) => {
             <label for="username">${t('اسم المستخدم', 'Username')}</label>
             <input id="username" name="username" autocomplete="username" required>
             <label for="password">${t('كلمة المرور', 'Password')}</label>
-            <input id="password" name="password" type="password" autocomplete="current-password" required>
+            <div class="input-wrap">
+                <input id="password" name="password" type="password" autocomplete="current-password" required>
+                <button type="button" class="peek-btn" id="passwordPeek" aria-label="${t('إظهار كلمة المرور', 'Show password')}" aria-pressed="false">
+                    <i class="fas fa-eye"></i>
+                </button>
+            </div>
+            <div class="form-options">
+                <label class="remember-toggle">
+                    <input type="checkbox" id="rememberMe" name="rememberMe">
+                    <span class="remember-chip"><i class="fas fa-lock"></i> ${t('إبقني مسجلاً للدخول', 'Keep me logged in')}</span>
+                </label>
+                <span class="remember-note">${t('تجنب استخدام هذا الخيار على الأجهزة المشتركة.', 'Avoid using this on shared devices.')}</span>
+            </div>
             <button class="btn" type="submit">${t('تسجيل الدخول', 'Sign In')}</button>
             <div class="error" id="error"></div>
             ${showDefaultHint ? `<div class="hint">${t('بيانات الدخول الافتراضية أول مرة: admin / admin123', 'Default first login: admin / admin123')}</div>` : ''}
@@ -778,16 +810,34 @@ app.get('/login', (req, res) => {
     </div>
     <script>
         const dict = {
-            login_failed: '${t('فشل تسجيل الدخول', 'Login failed')}'
+            login_failed: '${t('فشل تسجيل الدخول', 'Login failed')}',
+            show_password: '${t('إظهار كلمة المرور', 'Show password')}',
+            hide_password: '${t('إخفاء كلمة المرور', 'Hide password')}'
         };
         const form = document.getElementById('loginForm');
         const err = document.getElementById('error');
+        const passwordInput = document.getElementById('password');
+        const peekBtn = document.getElementById('passwordPeek');
+        const rememberInput = document.getElementById('rememberMe');
+
+        if (peekBtn && passwordInput) {
+            peekBtn.addEventListener('click', () => {
+                const reveal = passwordInput.type === 'password';
+                passwordInput.type = reveal ? 'text' : 'password';
+                peekBtn.setAttribute('aria-pressed', reveal ? 'true' : 'false');
+                peekBtn.setAttribute('aria-label', reveal ? dict.hide_password : dict.show_password);
+                peekBtn.innerHTML = reveal ? '<i class="fas fa-eye-slash"></i>' : '<i class="fas fa-eye"></i>';
+                passwordInput.focus();
+            });
+        }
+
         form.addEventListener('submit', async (e) => {
             e.preventDefault();
             err.textContent = '';
             const payload = {
                 username: document.getElementById('username').value,
-                password: document.getElementById('password').value
+                password: passwordInput ? passwordInput.value : '',
+                rememberMe: rememberInput ? rememberInput.checked : false
             };
             const res = await fetch('/auth/login', {
                 method: 'POST',
@@ -827,9 +877,11 @@ app.post('/auth/login', (req, res) => {
                 return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        const token = createSession(user.id);
-        setSessionCookie(res, token);
-        return res.json({ success: true, mustChangeCredentials: isDefaultCredentialChangeRequired(user.id) });
+        const rememberMe = req.body && (req.body.rememberMe === true || req.body.rememberMe === 'true');
+        const ttlMs = rememberMe ? REMEMBER_ME_TTL_MS : SESSION_TTL_MS;
+        const token = createSession(user.id, ttlMs);
+        setSessionCookie(res, token, ttlMs);
+        return res.json({ success: true, rememberMe, mustChangeCredentials: isDefaultCredentialChangeRequired(user.id) });
 });
 
 app.post('/auth/logout', requireAuthApi, (req, res) => {
