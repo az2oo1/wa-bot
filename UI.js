@@ -1,7 +1,39 @@
 module.exports = function renderDashboard(req, db, config) {
+    const fs = require('fs');
+    const path = require('path');
+    let appVersion = 'v1.0.0';
+    try {
+        const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8'));
+        if (pkg.version) appVersion = 'v' + pkg.version;
+    } catch(e) {}
+
+    const upS = process.uptime();
+    const upD = Math.floor(upS / 86400);
+    const upH = Math.floor((upS % 86400) / 3600);
+    const upM = Math.floor((upS % 3600) / 60);
+    let uptimeDisplay = [];
+    if (upD > 0) uptimeDisplay.push(`${upD}d`);
+    if (upH > 0) uptimeDisplay.push(`${upH}h`);
+    uptimeDisplay.push(`${upM}m`);
+    const uptimeStr = uptimeDisplay.join(' ');
+
+    let blockCount = 0;
+    try {
+        blockCount = db.prepare('SELECT COUNT(*) as c FROM blacklist').get().c;
+    } catch(e) {}
+
+    const now = new Date();
+    const isAr = req.query.lang === 'en' ? false : (req.query.lang === 'ar' ? true : true); // simple guess
+    // but lang is evaluated below. We can just wait to evaluate it.
+
     let lang = 'ar';
     if (req.headers.cookie && req.headers.cookie.includes('bot_lang=en')) lang = 'en';
     const t = (ar, en) => lang === 'en' ? en : ar;
+
+    const lastUpdateStr = now.toLocaleDateString(lang === 'en' ? 'en-US' : 'ar-EG', { month: 'long', year: 'numeric' });
+    const currentQ = Math.floor((now.getMonth() + 3) / 3);
+    const releaseQStr = `${now.getFullYear()} · Q${currentQ}`;
+
     const dir = lang === 'en' ? 'ltr' : 'rtl';
     const mediaTypesMeta = [
         { id: 'text', icon: '<i class="fas fa-file-alt"></i>', name: t('نصوص', 'Text') },
@@ -761,7 +793,6 @@ module.exports = function renderDashboard(req, db, config) {
 
                 <div class="about-hero card">
                     <div class="about-hero-main">
-                        <span class="about-pill"><i class="fas fa-signal"></i> ${t('يشغِّل أكثر من 120 مجموعة يومياً', 'Powering 120+ communities daily')}</span>
                         <h3>${t('منصة أمان فورية لمجموعات واتساب', 'Instant safety platform for WhatsApp groups')}</h3>
                         <p>${t('نمزج التحليلات الفورية مع الذكاء الاصطناعي المحلي لفرض القواعد في أقل من ثانيتين، حتى عندما يكون الاتصال محدوداً.', 'We pair live analytics with on-device AI to enforce policies in under two seconds, even on limited connections.')}</p>
                         <div class="about-hero-actions">
@@ -772,10 +803,10 @@ module.exports = function renderDashboard(req, db, config) {
                     <div class="about-hero-meta">
                         <h4 style="margin:0; font-size:15px; color:var(--text); display:flex; align-items:center; gap:8px;"><i class="fas fa-chart-pie"></i> ${t('نبض النظام', 'System pulse')}</h4>
                         <ul>
-                            <li><span>${t('الإصدار النشط', 'Active release')}</span><strong>v6.4.0</strong></li>
+                            <li><span>${t('الإصدار النشط', 'Active release')}</span><strong>${appVersion}</strong></li>
                             <li><span>${t('وقت الاستجابة المتوسط', 'Median reaction')}</span><strong>1.2s</strong></li>
                             <li><span>${t('جلسات مراقبة متزامنة', 'Concurrent monitors')}</span><strong>24</strong></li>
-                            <li><span>${t('آخر تحديث', 'Last update')}</span><strong>${t('مارس 2026', 'Mar 2026')}</strong></li>
+                            <li><span>${t('آخر تحديث', 'Last update')}</span><strong>${lastUpdateStr}</strong></li>
                         </ul>
                     </div>
                 </div>
@@ -788,7 +819,7 @@ module.exports = function renderDashboard(req, db, config) {
                     </div>
                     <div class="about-highlight card warning">
                         <span>${t('محظورات يومية', 'Daily blocks')}</span>
-                        <strong>3.4K</strong>
+                        <strong>${blockCount}</strong>
                         <small>${t('رسائل وروابط مرفوضة تلقائياً.', 'Messages and links auto-rejected.')}</small>
                     </div>
                     <div class="about-highlight card info">
@@ -798,8 +829,8 @@ module.exports = function renderDashboard(req, db, config) {
                     </div>
                     <div class="about-highlight card purple">
                         <span>${t('زمن تشغيل السيرفر', 'Server uptime')}</span>
-                        <strong>99.2%</strong>
-                        <small>${t('متوسط آخر 30 يوماً.', 'Trailing 30-day average.')}</small>
+                        <strong dir="ltr">${uptimeStr}</strong>
+                        <small>${t('منذ أخر إعادة تشغيل للنظام.', 'Since last system restart.')}</small>
                     </div>
                 </div>
 
@@ -808,10 +839,10 @@ module.exports = function renderDashboard(req, db, config) {
                         <h3><i class="fas fa-route"></i> ${t('خط سير الإصدارات', 'Release trail')}</h3>
                         <ul class="about-timeline">
                             <li>
-                                <time>2026 · Q1</time>
+                                <time>${releaseQStr}</time>
                                 <div>
-                                    <strong>${t('مساعد الإعداد الذكي', 'Adaptive setup companion')}</strong>
-                                    <p>${t('يرشد المدراء خلال اختيار السياسات بناءً على بصمة المجموعة.', 'Guides operators through policy presets derived from group fingerprints.')}</p>
+                                    <strong>${appVersion}</strong>
+                                    <p>${t('أحدث إصدار مع تحسينات الاستقرار والأداء.', 'Latest release with stability and performance enhancements.')}</p>
                                 </div>
                             </li>
                             <li>
@@ -1169,53 +1200,25 @@ module.exports = function renderDashboard(req, db, config) {
 
             async function loadKnownGroups() {
                 try {
-                    const res = await fetch('/api/groups');
-                    fetchedGroups = await res.json();
-
-                    const defAdminContainer = document.getElementById('defaultAdminGroupContainer');
-                    if (defAdminContainer) {
-                        let defHTML = \`
-                            <label class="field-label" style="display:flex; justify-content:space-between; align-items:center;">
-                                <span>\${dict.admin_group_label}</span>
-                                <span style="cursor:pointer; color:var(--accent); font-size:14px;" onclick="loadKnownGroups()" title="Refresh Groups"><i class="fas fa-sync"></i></span>
-                            </label>
-                            <select id="defaultAdminGroup" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">
-                        \`;
-                        defHTML += \`<option value="">-- \${dict.select_group} --</option>\`;
-                        
-                        let defFound = false;
-                        fetchedGroups.forEach(g => {
-                            const sel = g.id === '${config.defaultAdminGroup}' ? 'selected' : '';
-                            if(sel) defFound = true;
-                            defHTML += \`<option value="\${g.id}" \${sel}>\${g.name}</option>\`;
-                        });
-
-                        if ('${config.defaultAdminGroup}' && !defFound) {
-                            defHTML += \`<option value="${config.defaultAdminGroup}" selected>${config.defaultAdminGroup} (Unknown)</option>\`;
+                    const res = await fetch('/api/groups', { credentials: 'same-origin' });
+                    if (res.ok) {
+                        const groups = await res.json();
+                        if (Array.isArray(groups)) {
+                            fetchedGroups = groups;
                         }
-                        defHTML += \`</select>\`;
-                        defHTML += \`
-                            <div class="field-group" style="margin-top:12px; margin-bottom:0;">
-                                <label class="field-label">\${dict.admin_msg_lang}</label>
-                                <select id="defaultAdminLanguage" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">
-                                    <option value="ar" ${config.defaultAdminLanguage === 'en' ? '' : 'selected'}>\${dict.lang_ar}</option>
-                                    <option value="en" ${config.defaultAdminLanguage === 'en' ? 'selected' : ''}>\${dict.lang_en}</option>
-                                </select>
-                            </div>
-                        \`;
-                        defAdminContainer.innerHTML = defHTML;
                     }
-                    
-                    renderGroups();
-
                 } catch(e) {}
+                
+                renderDefaultAdminGroupSelect();
+                renderGroups();
             }
 
             function createGroupSelectHTML(selectedValue, onchangeCode, allowEmpty = false) {
+                const availableGroups = getSelectableGroups();
                 let html = \`<select onchange="\${onchangeCode}" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">\`;
                 html += \`<option value="">\${allowEmpty ? '-- ' + dict.default_setting + ' --' : '-- ' + dict.select_group + ' --'}</option>\`;
                 let found = false;
-                fetchedGroups.forEach(g => {
+                availableGroups.forEach(g => {
                     let sel = g.id === selectedValue ? 'selected' : '';
                     if(sel) found = true;
                     html += \`<option value="\${g.id}" \${sel}>\${g.name}</option>\`;
@@ -2056,6 +2059,68 @@ module.exports = function renderDashboard(req, db, config) {
             }));
 
             let currentDetailIndex = null;
+
+            function getSelectableGroups() {
+                const map = new Map();
+                if (Array.isArray(fetchedGroups)) {
+                    fetchedGroups.forEach(group => {
+                        if (group && group.id && !map.has(group.id)) {
+                            map.set(group.id, { id: group.id, name: group.name || group.id });
+                        }
+                    });
+                }
+                groupsArr.forEach(group => {
+                    if (group && group.id && !map.has(group.id)) {
+                        map.set(group.id, { id: group.id, name: group.id });
+                    }
+                });
+                return Array.from(map.values());
+            }
+
+            function renderDefaultAdminGroupSelect() {
+                const defAdminContainer = document.getElementById('defaultAdminGroupContainer');
+                if (!defAdminContainer) return;
+                const availableGroups = getSelectableGroups();
+                const existingSelect = document.getElementById('defaultAdminGroup');
+                const existingLangSelect = document.getElementById('defaultAdminLanguage');
+                
+                // Keep visually what was selected if present, else fallback
+                const selectedValue = existingSelect ? existingSelect.value : '${config.defaultAdminGroup}';
+                const selectedLang = existingLangSelect ? existingLangSelect.value : '${config.defaultAdminLanguage}';
+
+                let defHTML = \`
+                    <label class="field-label" style="display:flex; justify-content:space-between; align-items:center;">
+                        <span>
+                            \${dict.admin_group_label}
+                        </span>
+                        <span style="cursor:pointer; color:var(--accent); font-size:14px;" onclick="loadKnownGroups()" title="Refresh Groups"><i class="fas fa-sync"></i></span>
+                    </label>
+                    <select id="defaultAdminGroup" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">
+                \`;
+                defHTML += \`<option value="">-- \${dict.select_group} --</option>\`;
+
+                let defFound = false;
+                availableGroups.forEach(group => {
+                    const sel = group.id === selectedValue ? 'selected' : '';
+                    if (sel) defFound = true;
+                    defHTML += \`<option value="\${group.id}" \${sel}>\${group.name || group.id}</option>\`;
+                });
+
+                if (selectedValue && !defFound) {
+                    defHTML += \`<option value="\${selectedValue}" selected>\${selectedValue} (Unknown)</option>\`;
+                }
+                defHTML += \`</select>\`;
+                defHTML += \`
+                    <div class="field-group" style="margin-top:12px; margin-bottom:0;">
+                        <label class="field-label">\${dict.admin_msg_lang}</label>
+                        <select id="defaultAdminLanguage" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">
+                            <option value="ar" \${selectedLang === 'ar' ? 'selected' : (selectedLang === 'en' ? '' : 'selected')}>\${dict.lang_ar}</option>
+                            <option value="en" \${selectedLang === 'en' ? 'selected' : ''}>\${dict.lang_en}</option>
+                        </select>
+                    </div>
+                \`;
+                defAdminContainer.innerHTML = defHTML;
+            }
 
             function switchGroupTab(groupIndex, tabName, btn) {
                 document.querySelectorAll('#gtabs_' + groupIndex + ' .group-tab').forEach(t => t.classList.remove('active'));
