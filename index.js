@@ -760,7 +760,7 @@ app.get('/login', (req, res) => {
         .error{margin-top:8px;color:#ff9f9f;min-height:19px}
         .input-wrap{position:relative}
         .input-wrap input{padding-inline-end:48px}
-        [dir="rtl"] .input-wrap input{padding-inline-end:14px;padding-inline-start:48px}
+        [dir="rtl"] .input-wrap input{padding-inline-start:14px;padding-inline-end:48px}
         .peek-btn{position:absolute;top:50%;transform:translateY(-50%);right:12px;background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:4px;line-height:1;border-radius:8px;transition:color .2s}
         .peek-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
         .peek-btn:hover{color:var(--accent)}

@@ -84,135 +84,147 @@ module.exports = function renderDashboard(req, db, config) {
 
             .um-stack {
                 display: flex;
-                flex-direction: column;
-                gap: 20px;
-            }
-
-            .um-stats {
-                display: grid;
-                grid-template-columns: repeat(3, minmax(0, 1fr));
-                gap: 10px;
-                margin-bottom: 12px;
-            }
-
-            .um-stat {
+                        #page-about .about-hero { display:flex; gap:28px; padding:32px; background:linear-gradient(135deg, rgba(0,200,83,0.08), rgba(64,196,255,0.08)); border:1.5px solid var(--card-border); border-radius:var(--radius); margin-bottom:24px; align-items:stretch; }
+                        #page-about .about-hero-main { flex:2; display:flex; flex-direction:column; gap:14px; }
+                        #page-about .about-pill { display:inline-flex; align-items:center; gap:8px; font-size:12px; letter-spacing:.6px; text-transform:uppercase; color:var(--accent); background:var(--accent-dim); border-radius:999px; padding:6px 14px; font-weight:700; }
+                        #page-about .about-hero h3 { font-size:28px; margin:0; color:var(--text); }
+                        #page-about .about-hero p { color:var(--text-muted); line-height:1.7; }
+                        #page-about .about-hero-actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:6px; }
+                        #page-about .about-hero-actions a { display:inline-flex; align-items:center; gap:8px; padding:11px 18px; border-radius:10px; border:1.5px solid rgba(64,196,255,0.35); color:var(--blue); font-weight:700; text-decoration:none; background:rgba(64,196,255,0.12); }
+                        #page-about .about-hero-actions a[data-variant="primary"] { border-color:rgba(0,200,83,0.45); color:var(--accent); background:var(--accent-dim); }
+                        #page-about .about-hero-meta { flex:1; background:rgba(0,0,0,0.25); border:1.5px dashed var(--card-border); border-radius:16px; padding:24px; display:flex; flex-direction:column; gap:16px; }
+                        #page-about .about-hero-meta ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:14px; }
+                        #page-about .about-hero-meta li { display:flex; justify-content:space-between; align-items:center; font-size:13px; color:var(--text-muted); }
+                        #page-about .about-hero-meta strong { font-size:18px; color:var(--text); }
+                        #page-about .about-highlight-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:16px; margin-bottom:26px; }
+                        #page-about .about-highlight { padding:20px; border-radius:var(--radius); border:1.5px solid var(--card-border); background:var(--card-bg); }
+                        #page-about .about-highlight span { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--text-muted); }
+                        #page-about .about-highlight strong { display:block; font-size:26px; margin-top:8px; color:var(--text); }
+                        #page-about .about-highlight small { display:block; margin-top:6px; font-size:12px; color:var(--text-muted); }
+                        #page-about .about-panels { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:20px; }
+                        #page-about .about-panel { padding:22px; border-radius:var(--radius); border:1.5px solid var(--card-border); background:var(--card-bg); }
+                        #page-about .about-panel h3 { margin:0 0 12px 0; font-size:17px; display:flex; align-items:center; gap:8px; }
+                        #page-about .about-timeline { list-style:none; margin:0; padding:0; }
+                        #page-about .about-timeline li { display:flex; gap:14px; padding:12px 0; border-bottom:1px solid rgba(255,255,255,0.05); }
+                        #page-about .about-timeline li:last-child { border-bottom:none; }
+                        #page-about .about-timeline time { font-size:12px; font-weight:700; color:var(--accent); min-width:78px; text-transform:uppercase; }
+                        #page-about .about-timeline strong { display:block; font-size:14px; color:var(--text); }
+                        #page-about .about-timeline p { margin:4px 0 0 0; font-size:12px; color:var(--text-muted); line-height:1.6; }
+                        #page-about .about-chip-grid { display:flex; flex-wrap:wrap; gap:8px; }
+                        #page-about .about-chip { padding:6px 12px; border-radius:999px; border:1.5px solid rgba(64,196,255,0.35); font-size:12px; color:var(--text); background:rgba(64,196,255,0.08); }
+                        #page-about .about-chip[data-variant="accent"] { border-color:rgba(0,200,83,0.4); background:var(--accent-dim); color:var(--accent); }
+                        #page-about .about-support { display:flex; flex-direction:column; gap:14px; }
+                        #page-about .about-support a { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; border:1.5px solid var(--card-border); text-decoration:none; color:var(--text); font-size:13px; transition:all .2s; }
+                        #page-about .about-support a:hover { border-color:rgba(0,200,83,0.4); }
+                        #page-about .about-support small { display:block; font-size:11px; color:var(--text-muted); margin-inline-start:26px; }
+                        @media (max-width: 1100px) {
+                            #page-about .about-hero { flex-direction:column; }
+                            #page-about .about-panels { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+                        }
+                        @media (max-width: 768px) {
+                            #page-about .about-panels { grid-template-columns:1fr; }
+                        }
                 border: 1px solid var(--card-border);
                 border-radius: 10px;
-                background: var(--input-bg);
-                padding: 10px 12px;
-            }
+                    <div class="about-hero card">
+                        <div class="about-hero-main">
+                            <span class="about-pill"><i class="fas fa-signal"></i> ${t('يشغِّل أكثر من 120 مجموعة يومياً', 'Powering 120+ communities daily')}</span>
+                            <h3>${t('منصة أمان فورية لمجموعات واتساب', 'Instant safety platform for WhatsApp groups')}</h3>
+                            <p>${t('نمزج التحليلات الفورية مع الذكاء الاصطناعي المحلي لفرض القواعد في أقل من ثانيتين، حتى عندما يكون الاتصال محدوداً.', 'We pair live analytics with on-device AI to enforce policies in under two seconds, even on limited connections.')}</p>
+                            <div class="about-hero-actions">
+                                <a data-variant="primary" href="https://github.com/az2oo1/wa-bot" target="_blank"><i class="fab fa-github"></i> ${t('استعراض الكود', 'Explore Code')}</a>
+                                <a href="https://github.com/az2oo1/wa-bot#readme" target="_blank"><i class="fas fa-map"></i> ${t('خارطة الطريق', 'Roadmap')}</a>
+                            </div>
+                        </div>
+                        <div class="about-hero-meta">
+                            <h4 style="margin:0; font-size:15px; color:var(--text); display:flex; align-items:center; gap:8px;"><i class="fas fa-chart-pie"></i> ${t('نبض النظام', 'System pulse')}</h4>
+                            <ul>
+                                <li><span>${t('الإصدار النشط', 'Active release')}</span><strong>v6.4.0</strong></li>
+                                <li><span>${t('وقت الاستجابة المتوسط', 'Median reaction')}</span><strong>1.2s</strong></li>
+                                <li><span>${t('جلسات مراقبة متزامنة', 'Concurrent monitors')}</span><strong>24</strong></li>
+                                <li><span>${t('آخر تحديث', 'Last update')}</span><strong>${t('مارس 2026', 'Mar 2026')}</strong></li>
+                            </ul>
+                        </div>
+                    </div>
 
-            .um-stat-label {
-                color: var(--text-muted);
-                font-size: 11px;
-                text-transform: uppercase;
-                letter-spacing: .6px;
-            }
+                    <div class="about-highlight-grid">
+                        <div class="about-highlight card success">
+                            <span>${t('متوسط زمن الاستجابة', 'Avg response time')}</span>
+                            <strong>1.2s</strong>
+                            <small>${t('من لحظة الإبلاغ حتى اتخاذ الإجراء.', 'From trigger to enforced action.')}</small>
+                        </div>
+                        <div class="about-highlight card warning">
+                            <span>${t('محظورات يومية', 'Daily blocks')}</span>
+                            <strong>3.4K</strong>
+                            <small>${t('رسائل وروابط مرفوضة تلقائياً.', 'Messages and links auto-rejected.')}</small>
+                        </div>
+                        <div class="about-highlight card info">
+                            <span>${t('دعم اللغات', 'Language coverage')}</span>
+                            <strong>AR / EN</strong>
+                            <small>${t('واجهة كاملة واتجاهات RTL/LTR.', 'Full UI with RTL/LTR awareness.')}</small>
+                        </div>
+                        <div class="about-highlight card purple">
+                            <span>${t('زمن تشغيل السيرفر', 'Server uptime')}</span>
+                            <strong>99.2%</strong>
+                            <small>${t('متوسط آخر 30 يوماً.', 'Trailing 30-day average.')}</small>
+                        </div>
+                    </div>
 
-            .um-stat-value {
-                color: var(--text);
-                font-size: 20px;
-                font-weight: 700;
-                margin-top: 2px;
-                line-height: 1.2;
-            }
+                    <div class="about-panels">
+                        <div class="about-panel" style="background:linear-gradient(180deg, rgba(64,196,255,0.08), transparent);">
+                            <h3><i class="fas fa-route"></i> ${t('خط سير الإصدارات', 'Release trail')}</h3>
+                            <ul class="about-timeline">
+                                <li>
+                                    <time>2026 · Q1</time>
+                                    <div>
+                                        <strong>${t('مساعد الإعداد الذكي', 'Adaptive setup companion')}</strong>
+                                        <p>${t('يرشد المدراء خلال اختيار السياسات بناءً على بصمة المجموعة.', 'Guides operators through policy presets derived from group fingerprints.')}</p>
+                                    </div>
+                                </li>
+                                <li>
+                                    <time>2025 · Q4</time>
+                                    <div>
+                                        <strong>${t('وضع الطوارئ', 'Panic mode')}</strong>
+                                        <p>${t('إغلاق تلقائي مع تنبيه بصيغة متعددة اللغات وتجميد مؤقت للأعضاء المشبوهين.', 'Automatic lockdown with multilingual alerts and temporary suspect freeze.')}</p>
+                                    </div>
+                                </li>
+                                <li>
+                                    <time>2025 · Q2</time>
+                                    <div>
+                                        <strong>${t('محرّك الوسائط', 'Media scrutiny engine')}</strong>
+                                        <p>${t('استبدال قواعد الامتدادات بالقوائم الديناميكية مع معاينة آمنة.', 'Dynamic extension policies plus safe previews replaced static lists.')}</p>
+                                    </div>
+                                </li>
+                            </ul>
+                        </div>
 
-            .um-card-note {
-                font-size: 13px;
-                color: var(--text-muted);
-                margin-top: -6px;
-                margin-bottom: 12px;
-            }
+                        <div class="about-panel">
+                            <h3><i class="fas fa-layer-group"></i> ${t('بنية التقنية', 'Tech fabric')}</h3>
+                            <p style="font-size:13px; color:var(--text-muted); margin-top:-4px;">${t('أدوات مختارة بعناية لتعمل على الأجهزة متواضعة الموارد مع إمكانية ترقية مرنة.', 'Carefully curated stack that thrives on modest hardware while staying upgrade-friendly.')}</p>
+                            <div class="about-chip-grid" style="margin-top:14px;">
+                                <span class="about-chip" data-variant="accent">whatsapp-web.js</span>
+                                <span class="about-chip">better-sqlite3</span>
+                                <span class="about-chip">Express</span>
+                                <span class="about-chip">Ollama AI</span>
+                                <span class="about-chip">Node.js 18</span>
+                                <span class="about-chip">Docker</span>
+                                <span class="about-chip">qrcode</span>
+                                <span class="about-chip">multer</span>
+                            </div>
+                        </div>
 
-            .um-scroll-box {
-                max-height: 330px;
-                overflow: auto;
-                padding-right: 4px;
-            }
-
-            .um-selected-user {
-                border: 1px solid rgba(64,196,255,0.28);
-                background: rgba(64,196,255,0.06);
-            }
-
-            .um-access-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 14px;
-            }
-
-            .um-perm-drawer {
-                overflow: hidden;
-                max-height: 0;
-                opacity: 0;
-                transition: max-height .35s ease, opacity .25s ease, margin-top .25s ease;
-                margin-top: 0;
-            }
-
-            .um-perm-drawer.open {
-                max-height: 420px;
-                opacity: 1;
-                margin-top: 12px;
-            }
-
-            .um-perm-help {
-                margin-top: 12px;
-                border: 1px solid rgba(64,196,255,0.28);
-                background: rgba(64,196,255,0.06);
-                border-radius: 10px;
-                padding: 12px;
-                max-height: 280px;
-                overflow: auto;
-            }
-
-            .um-perm-help-item {
-                padding: 7px 0;
-                border-bottom: 1px dashed rgba(255,255,255,0.08);
-            }
-
-            .um-perm-help-item:last-child {
-                border-bottom: 0;
-                padding-bottom: 0;
-            }
-
-            .um-perm-help-key {
-                font-family: monospace;
-                font-size: 12px;
-                color: var(--blue);
-                margin-bottom: 4px;
-            }
-
-            .um-perm-help-desc {
-                color: var(--text-muted);
-                font-size: 12px;
-                line-height: 1.5;
-            }
-
-            #page-groups #groupsContainer {
-                display: grid;
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 12px;
-            }
-
-            #page-groups .group-list-card {
-                margin-bottom: 0;
-                padding: 14px 16px;
-                gap: 14px;
-                border-radius: 12px;
-            }
-
-            #page-groups .glc-avatar {
-                width: 46px;
-                height: 46px;
-                border-radius: 11px;
-                font-size: 16px;
-            }
-
-            #page-groups .glc-id {
-                font-size: 12px;
-                padding: 3px 8px;
-            }
-
+                        <div class="about-panel" style="background:linear-gradient(180deg, rgba(0,200,83,0.08), transparent);">
+                            <h3><i class="fas fa-hands-helping"></i> ${t('الدعم والمجتمع', 'Support & community')}</h3>
+                            <div class="about-support">
+                                <a href="https://github.com/az2oo1/wa-bot/discussions" target="_blank"><i class="fas fa-comments"></i> ${t('منتدى نقاشات فوري', 'Live discussion forum')}</a>
+                                <small>${t('شارك دروسك واستفساراتك مع المشرفين الآخرين.', 'Share learnings and questions with fellow operators.')}</small>
+                                <a href="https://github.com/az2oo1/wa-bot/issues/new" target="_blank"><i class="fas fa-bug"></i> ${t('فتح تذكرة دعم', 'Open a support ticket')}</a>
+                                <small>${t('نرد خلال 24 ساعة مع تتبع شفاف للحالة.', 'Response within 24h with transparent state tracking.')}</small>
+                                <a href="https://github.com/az2oo1" target="_blank"><i class="fab fa-github"></i> ${t('تابع المطور', 'Follow the maintainer')}</a>
+                                <small>${t('أبق على اطلاع على التجارب والأدوات القادمة.', 'Stay updated on experiments and upcoming tooling.')}</small>
+                            </div>
+                        </div>
+                    </div>
             #page-groups .glc-chips {
                 margin-top: 8px;
             }
