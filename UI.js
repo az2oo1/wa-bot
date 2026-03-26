@@ -278,7 +278,7 @@ module.exports = function renderDashboard(req, db, config) {
         <nav class="sidebar" id="sidebar">
             <div class="sidebar-logo">
                 <div class="logo-icon"><img src="/public/logo.png?v=2" alt="${t('شعار البوت', 'Bot Logo')}" style="width:100%;height:100%;object-fit:cover;border-radius:14px;display:block;" onerror="if(!this.dataset.retry){this.dataset.retry='1';this.src='public/logo.png?v=2';return;}this.style.display='none';this.nextElementSibling.style.display='flex';"><i class="fas fa-robot" style="display:none;align-items:center;justify-content:center;width:100%;height:100%;font-size:22px;color:#fff;"></i></div>
-                <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V6.4', 'Dashboard V6.4')}</small></div>
+                <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V6.5', 'Dashboard V6.4')}</small></div>
             </div>
 
             <div class="sidebar-nav-scroll">
@@ -1103,8 +1103,11 @@ module.exports = function renderDashboard(req, db, config) {
                         <p class="hero-description">${t('نظام إدارة مجموعات واتساب متقدم مع الذكاء الاصطناعي المحلي.', 'Advanced WhatsApp group management with local AI intelligence.')}</p>
                         <div class="badge-container">
                             <span class="status-badge accent"><i class="fas fa-check-circle"></i> ${t('نشط', 'Active')}</span>
-                            <span class="status-badge blue"><i class="fas fa-code-branch"></i> v6.4.0</span>
+                            <span class="status-badge blue"><i class="fas fa-code-branch"></i> v6.5.0</span>
                             <span class="status-badge"><i class="fab fa-osi"></i> ${t('مفتوح المصدر', 'Open Source')}</span>
+                        </div>
+                        <div style="margin-top: 20px;">
+                            <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="social-btn" style="border-color: var(--accent); color: var(--accent); background: var(--accent-dim);"><i class="fas fa-star"></i> Repository</a>
                         </div>
                     </div>
                 </div>
@@ -1200,9 +1203,9 @@ module.exports = function renderDashboard(req, db, config) {
 
                     <section>
                         <div class="section-header">
-                            <h2><i class="fas fa-laptop-code"></i> ${t('المطور', 'Developer')}</h2>
+                            <h2><i class="fas fa-laptop-code"></i> ${t('المطور والمساهمون', 'Developer & Contributors')}</h2>
                         </div>
-                        <div class="dev-profile">
+                        <div class="dev-profile" style="margin-bottom: 20px;">
                             <div class="dev-avatar">
                                 <img src="https://github.com/az2oo1.png" alt="Abdulaziz Algassem" style="width: 100%; height: 100%; object-fit: cover;">
                             </div>
@@ -1214,9 +1217,21 @@ module.exports = function renderDashboard(req, db, config) {
                                 </p>
                                 <div class="dev-links">
                                     <a href="https://github.com/az2oo1" target="_blank" class="social-btn"><i class="fab fa-github"></i> GitHub</a>
+                                    <a href="https://www.linkedin.com/in/agssa/" target="_blank" class="social-btn"><i class="fab fa-linkedin"></i> LinkedIn</a>
                                     <a href="https://instagram.com/az2oo1" target="_blank" class="social-btn"><i class="fab fa-instagram"></i> Instagram</a>
-                                    <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="social-btn" style="border-color: var(--accent); color: var(--accent);"><i class="fas fa-star"></i> Repository</a>
                                 </div>
+                            </div>
+                        </div>
+
+                        <div class="info-card" style="display: flex; gap: 16px; align-items: center; padding: 16px 20px;">
+                            <div class="dev-avatar" style="width: 50px; height: 50px; flex-shrink: 0; font-size: 24px; color: var(--accent); border-width: 1.5px;">
+                                <i class="fas fa-brain"></i>
+                            </div>
+                            <div class="dev-info">
+                                <h3 class="dev-name" style="font-size: 16px; margin: 0 0 4px 0;">${t('مساهم الذكاء الاصطناعي', 'AI Contributor')}</h3>
+                                <p class="dev-bio" style="font-size: 13px; margin: 0;">
+                                    ${t('مساعدة قيمة في تطوير خوارزميات الذكاء الاصطناعي وتجهيزها للعمل داخل النظام.', 'Valuable assistance in developing and integrating AI capabilities into the system.')}
+                                </p>
                             </div>
                         </div>
                     </section>
