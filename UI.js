@@ -908,21 +908,11 @@ module.exports = function renderDashboard(req, db, config) {
                     }
                     #page-about .about-hero {
                         position: relative;
-                        padding: 80px 40px;
+                        padding: 40px 20px;
                         background: linear-gradient(135deg, var(--card-bg) 0%, var(--bg) 100%);
                         border-bottom: 1px solid var(--card-border);
                         text-align: center;
                         overflow: hidden;
-                    }
-                    #page-about .about-hero::before {
-                        content: '';
-                        position: absolute;
-                        top: -50%;
-                        left: -50%;
-                        width: 200%;
-                        height: 200%;
-                        background: radial-gradient(circle at center, rgba(0,200,83,0.05) 0%, transparent 50%);
-                        z-index: 0;
                     }
                     #page-about .about-hero-content {
                         position: relative;
@@ -931,220 +921,178 @@ module.exports = function renderDashboard(req, db, config) {
                         margin: 0 auto;
                     }
                     #page-about .hero-logo {
-                        font-size: 72px;
+                        font-size: 56px;
                         color: var(--accent);
-                        margin-bottom: 24px;
-                        text-shadow: 0 0 30px rgba(0,200,83,0.4);
-                        animation: float 6s ease-in-out infinite;
-                    }
-                    @keyframes float {
-                        0% { transform: translateY(0px); }
-                        50% { transform: translateY(-10px); }
-                        100% { transform: translateY(0px); }
+                        margin-bottom: 16px;
                     }
                     #page-about .hero-title {
-                        font-size: 48px;
+                        font-size: 36px;
                         font-weight: 800;
-                        margin: 0 0 16px 0;
+                        margin: 0 0 12px 0;
                         background: linear-gradient(90deg, var(--text) 0%, var(--text-muted) 100%);
                         -webkit-background-clip: text;
                         -webkit-text-fill-color: transparent;
-                        letter-spacing: -1px;
+                        letter-spacing: -0.5px;
                     }
                     #page-about .hero-description {
-                        font-size: 20px;
+                        font-size: 16px;
                         color: var(--text-muted);
-                        margin: 0 0 32px 0;
-                        line-height: 1.6;
+                        margin: 0 0 24px 0;
+                        line-height: 1.5;
                     }
                     #page-about .badge-container {
                         display: flex;
-                        gap: 12px;
+                        gap: 10px;
                         justify-content: center;
                         flex-wrap: wrap;
                     }
                     #page-about .status-badge {
-                        padding: 8px 16px;
+                        padding: 6px 14px;
                         border-radius: 30px;
-                        font-size: 14px;
+                        font-size: 13px;
                         font-weight: 600;
                         display: flex;
                         align-items: center;
-                        gap: 8px;
+                        gap: 6px;
                         background: var(--card-bg);
                         border: 1px solid var(--card-border);
-                        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-                        transition: transform 0.2s ease;
-                    }
-                    #page-about .status-badge:hover {
-                        transform: translateY(-2px);
                     }
                     #page-about .status-badge.accent { border-color: rgba(0,200,83,0.3); color: var(--accent); background: var(--accent-dim); }
                     #page-about .status-badge.blue { border-color: rgba(64,196,255,0.3); color: var(--blue); background: rgba(64,196,255,0.1); }
                     
                     #page-about .about-container {
-                        max-width: 1200px;
+                        max-width: 1000px;
                         margin: 0 auto;
-                        padding: 60px 40px;
+                        padding: 30px 20px;
                         display: flex;
                         flex-direction: column;
-                        gap: 60px;
+                        gap: 40px;
                     }
                     
                     #page-about .section-header {
-                        margin-bottom: 30px;
-                        border-bottom: 2px solid var(--card-border);
-                        padding-bottom: 12px;
+                        margin-bottom: 20px;
+                        border-bottom: 1px solid var(--card-border);
+                        padding-bottom: 10px;
                     }
                     #page-about .section-header h2 {
-                        font-size: 28px;
+                        font-size: 22px;
                         color: var(--text);
                         margin: 0;
                         display: flex;
                         align-items: center;
-                        gap: 12px;
+                        gap: 10px;
                     }
                     #page-about .section-header h2 i { color: var(--accent); }
                     
-                    #page-about .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
-                    #page-about .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+                    #page-about .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+                    #page-about .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
                     
                     #page-about .info-card {
                         background: var(--card-bg);
                         border: 1px solid var(--card-border);
-                        border-radius: 16px;
-                        padding: 30px;
-                        transition: all 0.3s ease;
-                        position: relative;
-                        overflow: hidden;
+                        border-radius: 12px;
+                        padding: 20px;
                     }
                     #page-about .info-card:hover {
                         border-color: var(--accent);
-                        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-                        transform: translateY(-4px);
                     }
-                    #page-about .info-card::before {
-                        content: '';
-                        position: absolute;
-                        top: 0;
-                        left: 0;
-                        width: 4px;
-                        height: 100%;
-                        background: var(--accent);
-                        opacity: 0;
-                        transition: opacity 0.3s ease;
-                    }
-                    #page-about .info-card:hover::before { opacity: 1; }
                     
                     #page-about .feat-icon {
-                        width: 50px;
-                        height: 50px;
-                        border-radius: 12px;
+                        width: 40px;
+                        height: 40px;
+                        border-radius: 10px;
                         background: var(--accent-dim);
                         color: var(--accent);
                         display: flex;
                         align-items: center;
                         justify-content: center;
-                        font-size: 24px;
-                        margin-bottom: 20px;
+                        font-size: 20px;
+                        margin-bottom: 12px;
                     }
                     #page-about .feat-title {
-                        font-size: 18px;
+                        font-size: 16px;
                         font-weight: 700;
                         color: var(--text);
-                        margin-bottom: 10px;
+                        margin-bottom: 6px;
                     }
                     #page-about .feat-desc {
-                        font-size: 14px;
+                        font-size: 13px;
                         color: var(--text-muted);
-                        line-height: 1.6;
+                        line-height: 1.5;
                     }
                     
                     #page-about .tech-pill {
                         background: var(--card-bg);
                         border: 1px solid var(--card-border);
-                        padding: 12px 20px;
-                        border-radius: 8px;
+                        padding: 8px 14px;
+                        border-radius: 6px;
                         text-align: center;
                         font-weight: 600;
+                        font-size: 13px;
                         color: var(--text-muted);
-                        transition: all 0.2s;
-                    }
-                    #page-about .tech-pill:hover {
-                        background: var(--accent-dim);
-                        color: var(--accent);
-                        border-color: var(--accent);
                     }
                     
                     #page-about .req-box {
                         display: flex;
                         justify-content: space-between;
-                        padding: 16px 20px;
+                        padding: 12px 16px;
                         background: var(--card-bg);
                         border: 1px solid var(--card-border);
-                        border-radius: 8px;
+                        border-radius: 6px;
                     }
-                    #page-about .req-label { color: var(--text-muted); font-size: 14px; }
-                    #page-about .req-val { color: var(--text); font-weight: 700; font-size: 14px; }
+                    #page-about .req-label { color: var(--text-muted); font-size: 13px; }
+                    #page-about .req-val { color: var(--text); font-weight: 700; font-size: 13px; }
                     
                     #page-about .dev-profile {
                         display: flex;
-                        gap: 24px;
+                        gap: 20px;
                         align-items: flex-start;
-                        background: linear-gradient(to right, rgba(0,200,83,0.05), transparent);
+                        background: var(--card-bg);
                         border: 1px solid var(--card-border);
-                        border-radius: 16px;
-                        padding: 30px;
+                        border-radius: 12px;
+                        padding: 20px;
                     }
                     #page-about .dev-avatar {
-                        width: 80px;
-                        height: 80px;
+                        width: 70px;
+                        height: 70px;
                         border-radius: 50%;
-                        background: var(--card-bg);
+                        background: var(--bg);
                         border: 2px solid var(--accent);
                         display: flex;
                         align-items: center;
                         justify-content: center;
-                        font-size: 40px;
-                        color: var(--accent);
-                        box-shadow: 0 0 20px var(--accent-dim);
+                        overflow: hidden;
                     }
                     #page-about .dev-info { flex: 1; }
-                    #page-about .dev-name { font-size: 24px; font-weight: 700; color: var(--text); margin: 0 0 4px 0; }
-                    #page-about .dev-handle { font-size: 14px; color: var(--accent); margin: 0 0 12px 0; font-family: monospace; }
-                    #page-about .dev-bio { font-size: 15px; color: var(--text-muted); line-height: 1.6; margin: 0 0 20px 0; max-width: 600px; }
-                    #page-about .dev-links { display: flex; gap: 12px; flex-wrap: wrap; }
+                    #page-about .dev-name { font-size: 20px; font-weight: 700; color: var(--text); margin: 0 0 2px 0; }
+                    #page-about .dev-handle { font-size: 13px; color: var(--accent); margin: 0 0 10px 0; font-family: monospace; }
+                    #page-about .dev-bio { font-size: 14px; color: var(--text-muted); line-height: 1.5; margin: 0 0 16px 0; max-width: 500px; }
+                    #page-about .dev-links { display: flex; gap: 10px; flex-wrap: wrap; }
                     #page-about .social-btn {
-                        padding: 10px 20px;
-                        border-radius: 8px;
-                        background: var(--card-bg);
+                        padding: 8px 16px;
+                        border-radius: 6px;
+                        background: var(--bg);
                         border: 1px solid var(--card-border);
                         color: var(--text);
                         text-decoration: none;
-                        font-size: 14px;
+                        font-size: 13px;
                         font-weight: 600;
                         display: inline-flex;
                         align-items: center;
-                        gap: 8px;
-                        transition: all 0.2s;
+                        gap: 6px;
                     }
                     #page-about .social-btn:hover {
                         border-color: var(--text);
-                        background: var(--text);
-                        color: var(--bg);
                     }
                     
                     @media (max-width: 900px) {
                         #page-about .grid-3 { grid-template-columns: repeat(2, 1fr); }
                         #page-about .grid-2 { grid-template-columns: 1fr; }
-                        #page-about .dev-profile { flex-direction: column; align-items: center; text-align: center; }
-                        #page-about .dev-links { justify-content: center; }
                     }
                     @media (max-width: 600px) {
-                        #page-about .about-hero { padding: 60px 20px; }
-                        #page-about .hero-title { font-size: 36px; }
                         #page-about .grid-3 { grid-template-columns: 1fr; }
-                        #page-about .about-container { padding: 40px 20px; gap: 40px; }
+                        #page-about .dev-profile { flex-direction: column; align-items: center; text-align: center; }
+                        #page-about .dev-links { justify-content: center; }
                     }
                 </style>
 
@@ -1164,9 +1112,9 @@ module.exports = function renderDashboard(req, db, config) {
                 <div class="about-container">
                     
                     <section class="overview-section">
-                        <div class="info-card" style="text-align: center; padding: 40px;">
-                            <h3 style="font-size: 22px; color: var(--text); margin-top: 0;">${t('عن النظام', 'About the System')}</h3>
-                            <p style="font-size: 16px; color: var(--text-muted); line-height: 1.8; max-width: 800px; margin: 0 auto;">
+                        <div class="info-card" style="text-align: center;">
+                            <h3 style="font-size: 18px; color: var(--text); margin-top: 0; margin-bottom: 10px;">${t('عن النظام', 'About the System')}</h3>
+                            <p style="font-size: 14px; color: var(--text-muted); line-height: 1.6; max-width: 700px; margin: 0 auto;">
                                 ${t('هو نظام آلي ذكي لإدارة مجموعات واتساب يوفر حماية متقدمة من الرسائل غير المرغوبة والمحتوى المخالف. يتضمن تصفية كلمات مستخدمة، حجب الملحقات الخطرة، وإدارة قوائم حظر/سماح. يعمل بذكاء اصطناعي محلي ويوفر واجهة تحكم متقدمة.', 'An intelligent automated system for managing WhatsApp groups that provides advanced protection against spam and inappropriate content. Features custom word filtering, malicious extension blocking, and blacklist/whitelist management. Powered by local AI with an advanced dashboard.')}
                             </p>
                         </div>
@@ -1215,7 +1163,7 @@ module.exports = function renderDashboard(req, db, config) {
                             <div class="section-header">
                                 <h2><i class="fas fa-layer-group"></i> ${t('التقنيات المستخدمة', 'Tech Stack')}</h2>
                             </div>
-                            <div class="grid-2" style="gap: 12px;">
+                            <div class="grid-2" style="gap: 10px;">
                                 <div class="tech-pill">whatsapp-web.js</div>
                                 <div class="tech-pill">Node.js / Express</div>
                                 <div class="tech-pill">better-sqlite3</div>
@@ -1229,7 +1177,7 @@ module.exports = function renderDashboard(req, db, config) {
                             <div class="section-header">
                                 <h2><i class="fas fa-server"></i> ${t('متطلبات التشغيل', 'System Requirements')}</h2>
                             </div>
-                            <div style="display: flex; flex-direction: column; gap: 12px;">
+                            <div style="display: flex; flex-direction: column; gap: 8px;">
                                 <div class="req-box">
                                     <span class="req-label">${t('الذاكرة (بدون AI)', 'RAM (Base)')}</span>
                                     <span class="req-val">2 GB</span>
@@ -1256,7 +1204,7 @@ module.exports = function renderDashboard(req, db, config) {
                         </div>
                         <div class="dev-profile">
                             <div class="dev-avatar">
-                                <i class="fas fa-user-astronaut"></i>
+                                <img src="https://github.com/az2oo1.png" alt="Abdulaziz Algassem" style="width: 100%; height: 100%; object-fit: cover;">
                             </div>
                             <div class="dev-info">
                                 <h3 class="dev-name">Abdulaziz Algassem</h3>
