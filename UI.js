@@ -84,125 +84,64 @@ module.exports = function renderDashboard(req, db, config) {
 
             .um-stack {
                 display: flex;
-                        #page-about .about-hero { display:flex; gap:28px; padding:32px; background:linear-gradient(135deg, rgba(0,200,83,0.08), rgba(64,196,255,0.08)); border:1.5px solid var(--card-border); border-radius:var(--radius); margin-bottom:24px; align-items:stretch; }
-                        #page-about .about-hero-main { flex:2; display:flex; flex-direction:column; gap:14px; }
-                        #page-about .about-pill { display:inline-flex; align-items:center; gap:8px; font-size:12px; letter-spacing:.6px; text-transform:uppercase; color:var(--accent); background:var(--accent-dim); border-radius:999px; padding:6px 14px; font-weight:700; }
-                        #page-about .about-hero h3 { font-size:28px; margin:0; color:var(--text); }
-                        #page-about .about-hero p { color:var(--text-muted); line-height:1.7; }
-                        #page-about .about-hero-actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:6px; }
-                        #page-about .about-hero-actions a { display:inline-flex; align-items:center; gap:8px; padding:11px 18px; border-radius:10px; border:1.5px solid rgba(64,196,255,0.35); color:var(--blue); font-weight:700; text-decoration:none; background:rgba(64,196,255,0.12); }
-                        #page-about .about-hero-actions a[data-variant="primary"] { border-color:rgba(0,200,83,0.45); color:var(--accent); background:var(--accent-dim); }
-                        #page-about .about-hero-meta { flex:1; background:rgba(0,0,0,0.25); border:1.5px dashed var(--card-border); border-radius:16px; padding:24px; display:flex; flex-direction:column; gap:16px; }
-                        #page-about .about-hero-meta ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:14px; }
-                        #page-about .about-hero-meta li { display:flex; justify-content:space-between; align-items:center; font-size:13px; color:var(--text-muted); }
-                        #page-about .about-hero-meta strong { font-size:18px; color:var(--text); }
-                        #page-about .about-highlight-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:16px; margin-bottom:26px; }
-                        #page-about .about-highlight { padding:20px; border-radius:var(--radius); border:1.5px solid var(--card-border); background:var(--card-bg); }
-                        #page-about .about-highlight span { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--text-muted); }
-                        #page-about .about-highlight strong { display:block; font-size:26px; margin-top:8px; color:var(--text); }
-                        #page-about .about-highlight small { display:block; margin-top:6px; font-size:12px; color:var(--text-muted); }
-                        #page-about .about-panels { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:20px; }
-                        #page-about .about-panel { padding:22px; border-radius:var(--radius); border:1.5px solid var(--card-border); background:var(--card-bg); }
-                        #page-about .about-panel h3 { margin:0 0 12px 0; font-size:17px; display:flex; align-items:center; gap:8px; }
-                        #page-about .about-timeline { list-style:none; margin:0; padding:0; }
-                        #page-about .about-timeline li { display:flex; gap:14px; padding:12px 0; border-bottom:1px solid rgba(255,255,255,0.05); }
-                        #page-about .about-timeline li:last-child { border-bottom:none; }
-                        #page-about .about-timeline time { font-size:12px; font-weight:700; color:var(--accent); min-width:78px; text-transform:uppercase; }
-                        #page-about .about-timeline strong { display:block; font-size:14px; color:var(--text); }
-                        #page-about .about-timeline p { margin:4px 0 0 0; font-size:12px; color:var(--text-muted); line-height:1.6; }
-                        #page-about .about-chip-grid { display:flex; flex-wrap:wrap; gap:8px; }
-                        #page-about .about-chip { padding:6px 12px; border-radius:999px; border:1.5px solid rgba(64,196,255,0.35); font-size:12px; color:var(--text); background:rgba(64,196,255,0.08); }
-                        #page-about .about-chip[data-variant="accent"] { border-color:rgba(0,200,83,0.4); background:var(--accent-dim); color:var(--accent); }
-                        #page-about .about-support { display:flex; flex-direction:column; gap:14px; }
-                        #page-about .about-support a { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; border:1.5px solid var(--card-border); text-decoration:none; color:var(--text); font-size:13px; transition:all .2s; }
-                        #page-about .about-support a:hover { border-color:rgba(0,200,83,0.4); }
-                        #page-about .about-support small { display:block; font-size:11px; color:var(--text-muted); margin-inline-start:26px; }
-                        @media (max-width: 1100px) {
-                            #page-about .about-hero { flex-direction:column; }
-                            #page-about .about-panels { grid-template-columns:repeat(2, minmax(0, 1fr)); }
-                        }
-                        @media (max-width: 768px) {
-                            #page-about .about-panels { grid-template-columns:1fr; }
-                        }
-                border: 1px solid var(--card-border);
-                border-radius: 10px;
-                    <div class="about-hero card">
-                        <div class="about-hero-main">
-                            <span class="about-pill"><i class="fas fa-signal"></i> ${t('يشغِّل أكثر من 120 مجموعة يومياً', 'Powering 120+ communities daily')}</span>
-                            <h3>${t('منصة أمان فورية لمجموعات واتساب', 'Instant safety platform for WhatsApp groups')}</h3>
-                            <p>${t('نمزج التحليلات الفورية مع الذكاء الاصطناعي المحلي لفرض القواعد في أقل من ثانيتين، حتى عندما يكون الاتصال محدوداً.', 'We pair live analytics with on-device AI to enforce policies in under two seconds, even on limited connections.')}</p>
-                            <div class="about-hero-actions">
-                                <a data-variant="primary" href="https://github.com/az2oo1/wa-bot" target="_blank"><i class="fab fa-github"></i> ${t('استعراض الكود', 'Explore Code')}</a>
-                                <a href="https://github.com/az2oo1/wa-bot#readme" target="_blank"><i class="fas fa-map"></i> ${t('خارطة الطريق', 'Roadmap')}</a>
-                            </div>
-                        </div>
-                        <div class="about-hero-meta">
-                            <h4 style="margin:0; font-size:15px; color:var(--text); display:flex; align-items:center; gap:8px;"><i class="fas fa-chart-pie"></i> ${t('نبض النظام', 'System pulse')}</h4>
-                            <ul>
-                                <li><span>${t('الإصدار النشط', 'Active release')}</span><strong>v6.4.0</strong></li>
-                                <li><span>${t('وقت الاستجابة المتوسط', 'Median reaction')}</span><strong>1.2s</strong></li>
-                                <li><span>${t('جلسات مراقبة متزامنة', 'Concurrent monitors')}</span><strong>24</strong></li>
-                                <li><span>${t('آخر تحديث', 'Last update')}</span><strong>${t('مارس 2026', 'Mar 2026')}</strong></li>
-                            </ul>
-                        </div>
+                flex-direction: column;
+                gap: 20px;
+            }
+        </style>
+
+        <nav class="sidebar" id="sidebar">
+                <div class="sidebar-logo">
+                    <div class="logo-icon"><i class="fas fa-shield-halved"></i></div>
+                    <div class="logo-text">
+                        ${t('المشرف الآلي', 'Auto Moderator')}
+                        <small>${t('حماية مجموعات واتساب', 'WhatsApp group safety')}</small>
                     </div>
+                </div>
+                <div class="sidebar-nav-scroll">
+                    <div class="nav-section">${t('الرئيسية', 'Overview')}</div>
+                    <button class="nav-item active" type="button" onclick="showPage('page-status', this)">
+                        <span class="nav-icon"><i class="fas fa-satellite-dish"></i></span> ${t('حالة الاتصال', 'Connection Status')}
+                    </button>
+                    <button class="nav-item" type="button" onclick="showPage('page-blacklist', this)">
+                        <span class="nav-icon"><i class="fas fa-user-slash"></i></span> ${t('إدارة الأرقام', 'Number Management')}
+                    </button>
+                    <button class="nav-item" type="button" onclick="showPage('page-general', this)">
+                        <span class="nav-icon"><i class="fas fa-cog"></i></span> ${t('الإعدادات العامة', 'General Settings')}
+                    </button>
+                    <button class="nav-item" type="button" onclick="showPage('page-spam', this)">
+                        <span class="nav-icon"><i class="fas fa-shield-alt"></i></span> ${t('مكافحة الإزعاج', 'Anti-Spam')}
+                    </button>
+                    <button class="nav-item" type="button" onclick="showPage('page-media', this)">
+                        <span class="nav-icon"><i class="fas fa-filter"></i></span> ${t('فلتر الوسائط', 'Media Filter')}
+                    </button>
+                    <button class="nav-item" type="button" onclick="showPage('page-ai', this)">
+                        <span class="nav-icon"><i class="fas fa-brain"></i></span> ${t('الذكاء الاصطناعي', 'AI Moderator')}
+                    </button>
+                    <button class="nav-item" type="button" onclick="showPage('page-groups', this)">
+                        <span class="nav-icon"><i class="fas fa-users-cog"></i></span> ${t('المجموعات المخصصة', 'Custom Groups')}
+                    </button>
 
-                    <div class="about-highlight-grid">
-                        <div class="about-highlight card success">
-                            <span>${t('متوسط زمن الاستجابة', 'Avg response time')}</span>
-                            <strong>1.2s</strong>
-                            <small>${t('من لحظة الإبلاغ حتى اتخاذ الإجراء.', 'From trigger to enforced action.')}</small>
-                        </div>
-                        <div class="about-highlight card warning">
-                            <span>${t('محظورات يومية', 'Daily blocks')}</span>
-                            <strong>3.4K</strong>
-                            <small>${t('رسائل وروابط مرفوضة تلقائياً.', 'Messages and links auto-rejected.')}</small>
-                        </div>
-                        <div class="about-highlight card info">
-                            .um-stack {
-                                display: flex;
-                                flex-direction: column;
-                                gap: 20px;
-                            }
+                    <div class="nav-section">${t('أدوات', 'Tools')}</div>
+                    <button class="nav-item" type="button" onclick="openDebuggerModal()">
+                        <span class="nav-icon"><i class="fas fa-bug"></i></span> ${t('سجل الأحداث', 'Event Logs')}
+                    </button>
+                    <button class="nav-item" type="button" onclick="showPage('page-import-export', this)">
+                        <span class="nav-icon"><i class="fas fa-exchange-alt"></i></span> ${t('استيراد/تصدير', 'Import/Export')}
+                    </button>
+                    <button class="nav-item" type="button" onclick="showPage('page-users', this)">
+                        <span class="nav-icon"><i class="fas fa-user-shield"></i></span> ${t('إدارة المستخدمين', 'User Management')}
+                    </button>
+                    <button class="nav-item" type="button" onclick="showPage('page-about', this)">
+                        <span class="nav-icon"><i class="fas fa-info-circle"></i></span> ${t('حول', 'About')}
+                    </button>
+                </div>
+                <div class="sidebar-footer">
+                    <button id="signOutBtn" data-variant="danger" onclick="signOutSession()"><i class="fas fa-right-from-bracket"></i> ${t('تسجيل الخروج', 'Sign Out')}</button>
+                    <button data-variant="primary" onclick="saveConfig()"><i class="fas fa-save"></i> ${t('حفظ', 'Save')}</button>
+                </div>
+            </nav>
 
-                            <div class="page" id="page-about">
-                    <span class="nav-icon"><i class="fas fa-cog"></i></span> ${t('الإعدادات العامة', 'General Settings')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-spam', this)">
-                    <span class="nav-icon"><i class="fas fa-shield-alt"></i></span> ${t('مكافحة الإزعاج', 'Anti-Spam')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-media', this)">
-                    <span class="nav-icon"><i class="fas fa-filter"></i></span> ${t('فلتر الوسائط', 'Media Filter')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-ai', this)">
-                    <span class="nav-icon"><i class="fas fa-brain"></i></span> ${t('الذكاء الاصطناعي', 'AI Moderator')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-groups', this)">
-                    <span class="nav-icon"><i class="fas fa-users-cog"></i></span> ${t('المجموعات المخصصة', 'Custom Groups')}
-                </button>
-
-                <div class="nav-section">${t('أدوات', 'Tools')}</div>
-                <button class="nav-item" onclick="openDebuggerModal()">
-                    <span class="nav-icon"><i class="fas fa-bug"></i></span> ${t('سجل الأحداث', 'Event Logs')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-import-export', this)">
-                    <span class="nav-icon"><i class="fas fa-exchange-alt"></i></span> ${t('استيراد/تصدير', 'Import/Export')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-users', this)">
-                    <span class="nav-icon"><i class="fas fa-user-shield"></i></span> ${t('إدارة المستخدمين', 'User Management')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-about', this)">
-                    <span class="nav-icon"><i class="fas fa-info-circle"></i></span> ${t('حول', 'About')}
-                </button>
-            </div>
-
-            <div class="sidebar-footer">
-                <button id="signOutBtn" data-variant="danger" onclick="signOutSession()"><i class="fas fa-right-from-bracket"></i> ${t('تسجيل الخروج', 'Sign Out')}</button>
-                <button data-variant="primary" onclick="saveConfig()"><i class="fas fa-save"></i> ${t('حفظ', 'Save')}</button>
-            </div>
-        </nav>
-
-        <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+                <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
         <div class="main">
             <div class="topbar">
