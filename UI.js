@@ -1,39 +1,7 @@
 module.exports = function renderDashboard(req, db, config) {
-    const fs = require('fs');
-    const path = require('path');
-    let appVersion = 'v1.0.0';
-    try {
-        const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf-8'));
-        if (pkg.version) appVersion = 'v' + pkg.version;
-    } catch(e) {}
-
-    const upS = process.uptime();
-    const upD = Math.floor(upS / 86400);
-    const upH = Math.floor((upS % 86400) / 3600);
-    const upM = Math.floor((upS % 3600) / 60);
-    let uptimeDisplay = [];
-    if (upD > 0) uptimeDisplay.push(`${upD}d`);
-    if (upH > 0) uptimeDisplay.push(`${upH}h`);
-    uptimeDisplay.push(`${upM}m`);
-    const uptimeStr = uptimeDisplay.join(' ');
-
-    let blockCount = 0;
-    try {
-        blockCount = db.prepare('SELECT COUNT(*) as c FROM blacklist').get().c;
-    } catch(e) {}
-
-    const now = new Date();
-    const isAr = req.query.lang === 'en' ? false : (req.query.lang === 'ar' ? true : true); // simple guess
-    // but lang is evaluated below. We can just wait to evaluate it.
-
     let lang = 'ar';
     if (req.headers.cookie && req.headers.cookie.includes('bot_lang=en')) lang = 'en';
     const t = (ar, en) => lang === 'en' ? en : ar;
-
-    const lastUpdateStr = now.toLocaleDateString(lang === 'en' ? 'en-US' : 'ar-EG', { month: 'long', year: 'numeric' });
-    const currentQ = Math.floor((now.getMonth() + 3) / 3);
-    const releaseQStr = `${now.getFullYear()} · Q${currentQ}`;
-
     const dir = lang === 'en' ? 'ltr' : 'rtl';
     const mediaTypesMeta = [
         { id: 'text', icon: '<i class="fas fa-file-alt"></i>', name: t('نصوص', 'Text') },
@@ -47,7 +15,7 @@ module.exports = function renderDashboard(req, db, config) {
     const blockedExtensionsArr = db.prepare('SELECT ext FROM blocked_extensions').all().map(r => r.ext);
     const whitelistArr = db.prepare('SELECT number FROM whitelist').all().map(r => r.number);
 
-    return `<!DOCTYPE html><html dir="${dir}" lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${t('لوحة تحكم المشرف الآلي', 'Auto Mod Dashboard')}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><style>*{box-sizing:border-box;margin:0;padding:0}:root{--bg:#080c10;--sidebar-bg:#0e1318;--card-bg:#131920;--card-border:#1e2830;--input-bg:#0a0f14;--input-border:#1e2830;--text:#dce8f5;--text-muted:#6b8099;--accent:#00c853;--accent-dim:rgba(0,200,83,0.1);--accent-hover:#00a846;--red:#ff5252;--red-dim:rgba(255,82,82,0.1);--orange:#ffab40;--orange-dim:rgba(255,171,64,0.1);--blue:#40c4ff;--blue-dim:rgba(64,196,255,0.1);--purple:#d18cff;--purple-dim:rgba(209,140,255,0.1);--modal-bg:rgba(0,0,0,0.8);--topbar-bg:rgba(8,12,16,0.92);--radius:12px;--font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px}html[lang="ar"]{--font:'IBM Plex Sans Arabic',sans-serif}html.light{--bg:#f0f4f8;--sidebar-bg:#fff;--card-bg:#fff;--card-border:#dde3eb;--input-bg:#f5f8fb;--input-border:#dde3eb;--text:#0f1923;--text-muted:#5a7289;--accent:#00a846;--accent-dim:rgba(0,168,70,0.1);--accent-hover:#008c3a;--red:#e53935;--red-dim:rgba(229,57,53,0.1);--orange:#f57c00;--orange-dim:rgba(245,124,0,0.1);--blue:#0288d1;--blue-dim:rgba(2,136,209,0.1);--purple:#7b1fa2;--purple-dim:rgba(123,31,162,0.1);--modal-bg:rgba(0,0,0,0.55);--topbar-bg:rgba(240,244,248,0.94)}html.light .nav-item:hover{background:rgba(0,0,0,0.05);color:var(--text)}html.light .toggle-row{background:rgba(0,0,0,0.03)}html.light .toggle-row.danger{background:rgba(229,57,53,0.06)}html.light .toggle-row.warning{background:rgba(245,124,0,0.06)}html.light .toggle-row.blue{background:rgba(2,136,209,0.06)}html.light .toggle-row.purple{background:rgba(123,31,162,0.06)}html.light .toggle-row.pink{background:rgba(194,24,91,0.06)}html.light .toggle-row.green{background:rgba(0,150,80,0.06)}html.light .slider{background:#d0dae4;border-color:#b8c8d8}html.light .slider:before{background:#8fa8bf}html.light input:checked+.slider{background:rgba(0,168,70,0.18);border-color:var(--accent)}html.light input:checked+.slider:before{background:var(--accent)}html.light .sub-panel{background:rgba(0,0,0,0.03)}html.light #terminalOutput{background:#1a1a2e}html.light .card.danger,html.light .card.info,html.light .card.purple,html.light .card.success,html.light .card.warning{background:linear-gradient(180deg,var(--accent-dim) 0,var(--card-bg) 60%)}html.light .card.danger{background:linear-gradient(180deg,rgba(229,57,53,0.04) 0,var(--card-bg) 60%)}html.light .card.warning{background:linear-gradient(180deg,rgba(245,124,0,0.04) 0,var(--card-bg) 60%)}html.light .card.info{background:linear-gradient(180deg,rgba(2,136,209,0.04) 0,var(--card-bg) 60%)}html.light .card.success{background:linear-gradient(180deg,rgba(0,168,70,0.04) 0,var(--card-bg) 60%)}html.light .card.purple{background:linear-gradient(180deg,rgba(123,31,162,0.04) 0,var(--card-bg) 60%)}html.light .btn-primary{box-shadow:none}html.light .qr-wrap{background:#e8edf3}html.light ::-webkit-scrollbar-track{background:var(--bg)}html.light ::-webkit-scrollbar-thumb{background:#c5d0db}html.light .group-list-card:hover{border-color:rgba(2,136,209,0.4)}.icon-btn{width:38px;height:38px;border-radius:10px;border:1.5px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:17px;transition:all .2s;flex-shrink:0}.icon-btn:hover{filter:brightness(1.14)}body,.card,.cb-label,.chip,.chip-container,.group-card,.group-list-card,.limit-item,.main,.modal-content,.nav-item,.qr-wrap,.sidebar,.sidebar-footer button,.status-pill,.sub-panel,.toggle-row,.topbar,input,select,textarea{transition:background .25s ease,border-color .25s ease,color .15s ease,box-shadow .25s ease}html{font-size:16px}body{font-family:var(--font);font-size:1rem;background:var(--bg);color:var(--text);min-height:100vh;display:flex;line-height:1.6}.sidebar{width:260px;height:100vh;background:var(--sidebar-bg);border-inline-end:1px solid var(--card-border);display:flex;flex-direction:column;position:fixed;inset-inline-start:0;top:0;z-index:100;transition:transform .3s}.sidebar-logo{padding:28px 22px 20px;border-bottom:1px solid var(--card-border);display:flex;align-items:center;gap:14px}.sidebar-nav-scroll{flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;min-height:0}.sidebar-nav-scroll{scrollbar-width:thin;scrollbar-color:var(--card-border) transparent}.sidebar-nav-scroll::-webkit-scrollbar{width:5px}.sidebar-nav-scroll::-webkit-scrollbar-track{background:transparent}.sidebar-nav-scroll::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:4px}.sidebar-nav-scroll::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}.logo-icon{width:60px;height:60px;border-radius:14px;background:transparent;display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;box-shadow:none;color:#fff}.logo-text{font-size:15px;font-weight:700;color:var(--text);line-height:1.3}.logo-text small{display:block;font-weight:400;color:var(--text-muted);font-size:12px;margin-top:2px}.nav-section{padding:18px 16px 8px;font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase}.nav-item{display:flex;align-items:center;gap:12px;padding:12px 18px;margin:2px 10px;border-radius:10px;cursor:pointer;color:var(--text-muted);font-size:15px;transition:all .2s;border:none;background:0 0;width:calc(100% - 20px);text-align:start;font-family:var(--font)}.nav-item:hover{background:rgba(255,255,255,0.06);color:var(--text)}.nav-item.active{background:var(--accent-dim);color:var(--accent);font-weight:600;border:1px solid rgba(0,230,118,0.2)}.nav-item .nav-icon{font-size:18px;width:24px;text-align:center;flex-shrink:0}.nav-item .nav-badge{margin-inline-start:auto;background:var(--red);color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;min-width:22px;text-align:center}.sidebar-footer{flex-shrink:0;padding:18px;border-top:1px solid var(--card-border);display:flex;gap:10px}.sidebar-footer button{flex:1;padding:11px 8px;border-radius:10px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;font-size:14px;transition:all .2s;font-family:var(--font);font-weight:600}.sidebar-footer button:hover{border-color:var(--input-border);color:var(--text);background:var(--card-bg)}.sidebar-footer button[data-variant=danger]{border-color:rgba(229,57,53,0.45);color:var(--red);background:var(--red-dim)}.sidebar-footer button[data-variant=danger]:hover{filter:brightness(1.14)}.sidebar-footer button[data-variant=primary]{border-color:rgba(0,230,118,0.35);color:var(--accent);background:var(--accent-dim)}.sidebar-footer button[data-variant=primary]:hover{filter:brightness(1.14)}.main{margin-inline-start:260px;flex:1;display:flex;flex-direction:column;min-height:100vh;min-width:0}.topbar{position:sticky;top:0;z-index:50;background:var(--topbar-bg);backdrop-filter:blur(16px);border-bottom:1px solid var(--card-border);padding:0 40px;height:66px;display:flex;align-items:center;justify-content:space-between}.topbar-title{font-size:18px;font-weight:700;color:var(--text)}.topbar-right{display:flex;align-items:center;gap:14px}.status-pill{display:flex;align-items:center;gap:10px;background:var(--card-bg);border:1px solid var(--card-border);padding:8px 18px;border-radius:24px;font-size:14px;color:var(--text-muted)}.status-dot{width:9px;height:9px;border-radius:50%;background:var(--text-muted);flex-shrink:0}.status-dot.online{background:var(--accent);box-shadow:0 0 10px var(--accent);animation:pulse 2s infinite}.status-dot.waiting{background:var(--orange);box-shadow:0 0 8px var(--orange)}@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 10px var(--accent)}50%{opacity:.6;box-shadow:0 0 4px var(--accent)}}.page{display:none;padding:32px 40px;width:100%;max-width:1400px}.page.active{display:block}.page-header{margin-bottom:28px}.page-header h2{font-size:26px;font-weight:700;color:var(--text);letter-spacing:-.3px;display:flex;align-items:center;gap:10px}.page-header p{color:var(--text-muted);font-size:15px;margin-top:5px}.card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius);padding:24px;margin-bottom:20px}.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--card-border)}.card-header h3{font-size:17px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.card.danger{border-color:rgba(255,82,82,0.35);background:linear-gradient(180deg,rgba(255,82,82,0.04) 0,var(--card-bg) 60%)}.card.warning{border-color:rgba(255,171,64,0.35);background:linear-gradient(180deg,rgba(255,171,64,0.04) 0,var(--card-bg) 60%)}.card.info{border-color:rgba(64,196,255,0.35);background:linear-gradient(180deg,rgba(64,196,255,0.04) 0,var(--card-bg) 60%)}.card.purple{border-color:rgba(209,140,255,0.35);background:linear-gradient(180deg,rgba(209,140,255,0.04) 0,var(--card-bg) 60%)}.card.success{border-color:rgba(0,230,118,0.35);background:linear-gradient(180deg,rgba(0,230,118,0.04) 0,var(--card-bg) 60%)}label.field-label{display:block;font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.8px}input[type=number],input[type=text],input[type=password],select,textarea{width:100%;padding:12px 16px;background:var(--input-bg);border:1.5px solid var(--input-border);border-radius:10px;color:var(--text);font-size:15px;font-family:var(--font);transition:border-color .2s,box-shadow .2s;outline:0}input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,230,118,0.12)}textarea{resize:vertical}select option{background:var(--card-bg);color:var(--text)}.field-group{margin-bottom:20px}.field-row{display:flex;gap:14px}.field-row>*{flex:1}.input-with-btn{display:flex;gap:10px}.input-with-btn input{margin:0}.btn{padding:11px 22px;border-radius:10px;border:1.5px solid transparent;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font);transition:all .2s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;letter-spacing:.2px}.btn:hover,.sidebar-footer button:hover,.icon-btn:hover{filter:brightness(1.14)}.btn-primary{background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700}.btn-primary:hover{filter:brightness(1.14)}.btn-danger{background:var(--red-dim);color:var(--red);border-color:rgba(229,57,53,0.45)}.btn-danger:hover{filter:brightness(1.14)}.btn-warning{background:var(--orange);color:#000;border-color:transparent}.btn-warning:hover{filter:brightness(1.14)}.btn-ghost{background:0 0;border:1.5px solid var(--card-border);color:var(--text-muted)}.btn-ghost:hover{filter:brightness(1.14)}.btn-blue{background:var(--blue);color:#000;border-color:transparent}.btn-blue:hover{filter:brightness(1.14)}.btn-sm{padding:7px 14px;font-size:13px}.btn-full{width:100%;justify-content:center;padding:15px;font-size:16px}.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-radius:10px;background:rgba(255,255,255,0.03);border:1.5px solid var(--card-border);margin-bottom:12px;gap:14px}.toggle-row.danger{border-color:rgba(255,82,82,0.3);background:rgba(255,82,82,0.05)}.toggle-row.warning{border-color:rgba(255,171,64,0.3);background:rgba(255,171,64,0.05)}.toggle-row.blue{border-color:rgba(64,196,255,0.3);background:rgba(64,196,255,0.05)}.toggle-row.purple{border-color:rgba(209,140,255,0.3);background:rgba(209,140,255,0.05)}.toggle-row.pink{border-color:rgba(240,100,170,0.3);background:rgba(240,100,170,0.05)}.toggle-row.green{border-color:rgba(100,200,120,0.3);background:rgba(100,200,120,0.05)}.toggle-left{display:flex;align-items:center;gap:16px}.toggle-label{font-size:15px;font-weight:600;color:var(--text)}.toggle-label small{display:block;font-size:12px;color:var(--text-muted);font-weight:400;margin-top:2px}.toggle-label.danger{color:var(--red)}.toggle-label.warning{color:var(--orange)}.toggle-label.blue{color:var(--blue)}.toggle-label.purple{color:var(--purple)}.toggle-label.pink{color:#ff80ab}.toggle-label.green{color:#69f0ae}.switch{position:relative;display:inline-block;width:50px;height:28px;flex-shrink:0}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;cursor:pointer;inset:0;background:#1e2830;border:1.5px solid #2a3a4a;transition:.3s;border-radius:28px}.slider:before{position:absolute;content:"";height:20px;width:20px;bottom:2px;inset-inline-start:2px;background:#4a5a6a;transition:.3s;border-radius:50%}input:checked+.slider{background:rgba(0,230,118,0.2);border-color:var(--accent)}input:checked+.slider:before{background:var(--accent);box-shadow:0 0 8px rgba(0,230,118,0.6)}[dir=ltr] input:checked+.slider:before{transform:translateX(22px)}[dir=rtl] input:checked+.slider:before{transform:translateX(-22px)}.lang-slider:before{height:14px;width:14px;bottom:1.5px;inset-inline-start:1.5px}[dir=ltr] input:checked+.lang-slider:before{transform:translateX(20px)}[dir=rtl] input:checked+.lang-slider:before{transform:translateX(-20px)}.chip-container{display:flex;flex-wrap:wrap;gap:10px;padding:14px;background:var(--input-bg);border-radius:10px;min-height:52px;max-height:220px;overflow-y:auto;border:1.5px dashed var(--card-border);margin-top:10px}.chip{background:var(--accent-dim);color:var(--accent);padding:6px 14px;border-radius:20px;font-size:14px;display:flex;align-items:center;gap:8px;border:1px solid rgba(0,230,118,0.3);font-weight:500}.chip.red-chip{background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3)}.chip-remove{cursor:pointer;font-size:16px;font-weight:700;opacity:.6;line-height:1}.chip-remove:hover{opacity:1}.sub-panel{background:rgba(0,0,0,0.2);border:1.5px solid var(--card-border);border-radius:10px;padding:18px;margin-top:12px}.sub-panel.orange{border-color:rgba(255,171,64,0.3)}.sub-panel.red{border-color:rgba(255,82,82,0.3)}.sub-panel h4{font-size:14px;font-weight:700;color:var(--text-muted);margin-bottom:14px;display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.5px}.cb-group{display:flex;gap:10px;flex-wrap:wrap}.cb-label{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:8px;cursor:pointer;font-size:14px;color:var(--text-muted);transition:all .2s;user-select:none}.cb-label:hover{border-color:var(--accent);color:var(--text)}.cb-label input{accent-color:var(--accent);width:16px;height:16px;cursor:pointer}.limit-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}.limit-item{display:flex;align-items:center;gap:10px;background:var(--card-bg);padding:10px 14px;border-radius:9px;border:1.5px solid var(--card-border)}.limit-item input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:pointer;flex-shrink:0}.limit-item span{font-size:14px;flex:1;color:var(--text)}.limit-item input[type=number]{width:60px;padding:6px 8px;font-size:14px;margin:0;text-align:center}.group-list-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:0;display:flex;align-items:center;gap:18px;padding:18px 22px;cursor:pointer;transition:border-color .2s,transform .2s}.group-list-card:hover{border-color:rgba(64,196,255,0.35);filter:brightness(1.08)}.group-list-card:hover .glc-arrow{opacity:1}.glc-avatar{width:52px;height:52px;border-radius:13px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:18px;font-weight:700;color:var(--accent)}.glc-avatar img{width:100%;height:100%;object-fit:cover;border-radius:11px}.glc-info{flex:1;min-width:0}.glc-name{font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.glc-id{font-family:monospace;font-size:11px;color:var(--text-muted);background:var(--input-bg);padding:2px 8px;border-radius:5px;border:1px solid var(--card-border);margin-top:4px;display:inline-block}.glc-chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.glc-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}.glc-chip.green{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,83,0.25)}.glc-chip.orange{background:var(--orange-dim);color:var(--orange);border:1px solid rgba(255,171,64,0.25)}.glc-chip.blue{background:var(--blue-dim);color:var(--blue);border:1px solid rgba(64,196,255,0.25)}.glc-chip.red{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.25)}.glc-chip.purple{background:var(--purple-dim);color:var(--purple);border:1px solid rgba(209,140,255,0.25)}.glc-arrow{font-size:16px;color:var(--blue);opacity:0;transition:opacity .2s;flex-shrink:0;margin-inline-start:4px}.group-detail-bar{display:flex;align-items:center;gap:16px;margin-bottom:28px;flex-wrap:wrap}.group-detail-identity{display:flex;align-items:center;gap:14px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:12px 20px;flex:1}.group-detail-avatar{width:46px;height:46px;border-radius:12px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:17px;font-weight:700;color:var(--accent)}.group-detail-avatar img{width:100%;height:100%;object-fit:cover;border-radius:10px}.group-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:16px;overflow:hidden;transition:border-color .2s}.group-card-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--card-border)}.group-card-title{font-size:16px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.group-card-body{padding:20px}.group-id-badge{font-family:monospace;font-size:12px;color:var(--text-muted);background:var(--input-bg);padding:3px 10px;border-radius:6px;border:1px solid var(--card-border)}.qr-wrap{display:flex;flex-direction:column;align-items:center;gap:20px;padding:36px;background:var(--input-bg);border-radius:12px;border:1.5px dashed var(--card-border)}#qr-image{max-width:230px;border-radius:12px;border:10px solid #fff;box-shadow:0 8px 30px rgba(0,0,0,0.5);display:none}.toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(24px);background:var(--accent);color:#000;padding:13px 28px;border-radius:40px;font-weight:700;font-size:15px;z-index:9999;opacity:0;transition:all .35s;pointer-events:none;box-shadow:0 4px 20px rgba(0,230,118,0.5)}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.modal{display:none;position:fixed;z-index:1000;inset:0;background:var(--modal-bg);backdrop-filter:blur(8px);align-items:center;justify-content:center}.modal.open{display:flex}.modal-content{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:16px;padding:32px;width:90%;max-width:640px;box-shadow:0 24px 80px rgba(0,0,0,0.7);animation:slideIn .25s ease;max-height:90vh;overflow-y:auto}.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.modal-header h3{font-size:20px;font-weight:700}.close-modal{background:0 0;border:none;color:var(--text-muted);font-size:26px;cursor:pointer;padding:4px;line-height:1}.close-modal:hover{color:var(--red)}@keyframes slideIn{from{transform:translateY(-24px);opacity:0}to{transform:translateY(0);opacity:1}}#terminalOutput{background:#000;color:#00ff88;font-family:'Courier New',monospace;height:400px;overflow-y:auto;padding:16px;border-radius:10px;font-size:13px;direction:ltr;text-align:start;border:1px solid #0a1a0a}#terminalOutput div{margin-bottom:5px;border-bottom:1px solid #0a1a0a;padding-bottom:5px;word-wrap:break-word;line-height:1.6}.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}.card-grid .card{margin-bottom:0}.card-grid-full{grid-column:1/-1}@media (max-width:1100px){.card-grid{grid-template-columns:1fr}}.section-sep{height:1px;background:var(--card-border);margin:20px 0}::-webkit-scrollbar{width:7px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:4px}.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99}.hamburger{display:none;background:0 0;border:none;color:var(--text);font-size:24px;cursor:pointer;padding:4px}.group-tabs{display:flex;gap:4px;border-bottom:1.5px solid var(--card-border);margin-bottom:20px}.group-tab{padding:10px 18px;border:none;background:0 0;color:var(--text-muted);font-size:14px;font-weight:600;font-family:var(--font);cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px;transition:all .2s;display:flex;align-items:center;gap:7px;border-radius:8px 8px 0 0}.group-tab:hover{color:var(--text);background:rgba(255,255,255,0.04)}.group-tab.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-dim)}.group-tab-panel{display:none}.group-tab-panel.active{display:block}.step-badge{display:inline-block;background:var(--blue-dim);color:var(--blue);padding:2px 9px;border-radius:12px;margin-inline-end:6px;font-weight:700;font-size:13px}@media (max-width:768px){.sidebar{transform:translateX(100%)}[dir=ltr] .sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.sidebar-overlay.open{display:block}.main{margin-inline-start:0}.hamburger{display:block}.page{padding:18px}.topbar{padding:0 18px}.limit-grid{grid-template-columns:1fr}.card-grid{grid-template-columns:1fr}.field-row{flex-direction:column}}</style>
+    return `<!DOCTYPE html><html dir="${dir}" lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${t('لوحة تحكم المشرف الآلي', 'Auto Mod Dashboard')}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><style>*{box-sizing:border-box;margin:0;padding:0}:root{--bg:#080c10;--sidebar-bg:#0e1318;--card-bg:#131920;--card-border:#1e2830;--input-bg:#0a0f14;--input-border:#1e2830;--text:#dce8f5;--text-muted:#6b8099;--accent:#00c853;--accent-dim:rgba(0,200,83,0.1);--accent-hover:#00a846;--red:#ff5252;--red-dim:rgba(255,82,82,0.1);--orange:#ffab40;--orange-dim:rgba(255,171,64,0.1);--blue:#40c4ff;--blue-dim:rgba(64,196,255,0.1);--purple:#d18cff;--purple-dim:rgba(209,140,255,0.1);--modal-bg:rgba(0,0,0,0.8);--topbar-bg:rgba(8,12,16,0.92);--radius:12px;--font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px}html[lang="ar"]{--font:'IBM Plex Sans Arabic',sans-serif}html.light{--bg:#f0f4f8;--sidebar-bg:#fff;--card-bg:#fff;--card-border:#dde3eb;--input-bg:#f5f8fb;--input-border:#dde3eb;--text:#0f1923;--text-muted:#5a7289;--accent:#00a846;--accent-dim:rgba(0,168,70,0.1);--accent-hover:#008c3a;--red:#e53935;--red-dim:rgba(229,57,53,0.1);--orange:#f57c00;--orange-dim:rgba(245,124,0,0.1);--blue:#0288d1;--blue-dim:rgba(2,136,209,0.1);--purple:#7b1fa2;--purple-dim:rgba(123,31,162,0.1);--modal-bg:rgba(0,0,0,0.55);--topbar-bg:rgba(240,244,248,0.94)}html.light .nav-item:hover{background:rgba(0,0,0,0.05);color:var(--text)}html.light .toggle-row{background:rgba(0,0,0,0.03)}html.light .toggle-row.danger{background:rgba(229,57,53,0.06)}html.light .toggle-row.warning{background:rgba(245,124,0,0.06)}html.light .toggle-row.blue{background:rgba(2,136,209,0.06)}html.light .toggle-row.purple{background:rgba(123,31,162,0.06)}html.light .toggle-row.pink{background:rgba(194,24,91,0.06)}html.light .toggle-row.green{background:rgba(0,150,80,0.06)}html.light .slider{background:#d0dae4;border-color:#b8c8d8}html.light .slider:before{background:#8fa8bf}html.light input:checked+.slider{background:rgba(0,168,70,0.18);border-color:var(--accent)}html.light input:checked+.slider:before{background:var(--accent)}html.light .sub-panel{background:rgba(0,0,0,0.03)}html.light #terminalOutput{background:#1a1a2e}html.light .card.danger,html.light .card.info,html.light .card.purple,html.light .card.success,html.light .card.warning{background:linear-gradient(180deg,var(--accent-dim) 0,var(--card-bg) 60%)}html.light .card.danger{background:linear-gradient(180deg,rgba(229,57,53,0.04) 0,var(--card-bg) 60%)}html.light .card.warning{background:linear-gradient(180deg,rgba(245,124,0,0.04) 0,var(--card-bg) 60%)}html.light .card.info{background:linear-gradient(180deg,rgba(2,136,209,0.04) 0,var(--card-bg) 60%)}html.light .card.success{background:linear-gradient(180deg,rgba(0,168,70,0.04) 0,var(--card-bg) 60%)}html.light .card.purple{background:linear-gradient(180deg,rgba(123,31,162,0.04) 0,var(--card-bg) 60%)}html.light .btn-primary{box-shadow:none}html.light .qr-wrap{background:#e8edf3}html.light ::-webkit-scrollbar-track{background:var(--bg)}html.light ::-webkit-scrollbar-thumb{background:#c5d0db}html.light .group-list-card:hover{border-color:rgba(2,136,209,0.4)}.icon-btn{width:38px;height:38px;border-radius:10px;border:1.5px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:17px;transition:all .2s;flex-shrink:0}.icon-btn:hover{filter:brightness(1.14)}body,.card,.cb-label,.chip,.chip-container,.group-card,.group-list-card,.limit-item,.main,.modal-content,.nav-item,.qr-wrap,.sidebar,.sidebar-footer button,.status-pill,.sub-panel,.toggle-row,.topbar,input,select,textarea{transition:background .25s ease,border-color .25s ease,color .15s ease,box-shadow .25s ease}html{font-size:16px}body{font-family:var(--font);font-size:1rem;background:var(--bg);color:var(--text);min-height:100vh;display:flex;line-height:1.6}.sidebar{width:260px;height:100vh;background:var(--sidebar-bg);border-inline-end:1px solid var(--card-border);display:flex;flex-direction:column;position:fixed;inset-inline-start:0;top:0;z-index:100;transition:transform .3s}.sidebar-logo{padding:28px 22px 20px;border-bottom:1px solid var(--card-border);display:flex;align-items:center;gap:14px}.sidebar-nav-scroll{flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;min-height:0}.sidebar-nav-scroll{scrollbar-width:thin;scrollbar-color:var(--card-border) transparent}.sidebar-nav-scroll::-webkit-scrollbar{width:5px}.sidebar-nav-scroll::-webkit-scrollbar-track{background:transparent}.sidebar-nav-scroll::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:4px}.sidebar-nav-scroll::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}.logo-icon{width:60px;height:60px;border-radius:14px;background:transparent;display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;box-shadow:none;color:#fff}.logo-text{font-size:15px;font-weight:700;color:var(--text);line-height:1.3}.logo-text small{display:block;font-weight:400;color:var(--text-muted);font-size:12px;margin-top:2px}.nav-section{padding:18px 16px 8px;font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase}.nav-item{display:flex;align-items:center;gap:12px;padding:12px 18px;margin:2px 10px;border-radius:10px;cursor:pointer;color:var(--text-muted);font-size:15px;transition:all .2s;border:none;background:0 0;width:calc(100% - 20px);text-align:start;font-family:var(--font)}.nav-item:hover{background:rgba(255,255,255,0.06);color:var(--text)}.nav-item.active{background:var(--accent-dim);color:var(--accent);font-weight:600;border:1px solid rgba(0,230,118,0.2)}.nav-item .nav-icon{font-size:18px;width:24px;text-align:center;flex-shrink:0}.nav-item .nav-badge{margin-inline-start:auto;background:var(--red);color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;min-width:22px;text-align:center}.sidebar-footer{flex-shrink:0;padding:18px;border-top:1px solid var(--card-border);display:flex;gap:10px}.sidebar-footer button{flex:1;padding:11px 8px;border-radius:10px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;font-size:14px;transition:all .2s;font-family:var(--font);font-weight:600}.sidebar-footer button:hover{border-color:var(--input-border);color:var(--text);background:var(--card-bg)}.sidebar-footer button[data-variant=danger]{border-color:rgba(229,57,53,0.45);color:var(--red);background:var(--red-dim)}.sidebar-footer button[data-variant=danger]:hover{filter:brightness(1.14)}.sidebar-footer button[data-variant=primary]{border-color:rgba(0,230,118,0.35);color:var(--accent);background:var(--accent-dim)}.sidebar-footer button[data-variant=primary]:hover{filter:brightness(1.14)}.main{margin-inline-start:260px;flex:1;display:flex;flex-direction:column;min-height:100vh;min-width:0}.topbar{position:sticky;top:0;z-index:50;background:var(--topbar-bg);backdrop-filter:blur(16px);border-bottom:1px solid var(--card-border);padding:0 40px;height:66px;display:flex;align-items:center;justify-content:space-between}.topbar-title{font-size:18px;font-weight:700;color:var(--text)}.topbar-right{display:flex;align-items:center;gap:14px}.status-pill{display:flex;align-items:center;gap:10px;background:var(--card-bg);border:1px solid var(--card-border);padding:8px 18px;border-radius:24px;font-size:14px;color:var(--text-muted)}.status-dot{width:9px;height:9px;border-radius:50%;background:var(--text-muted);flex-shrink:0}.status-dot.online{background:var(--accent);box-shadow:0 0 10px var(--accent);animation:pulse 2s infinite}.status-dot.waiting{background:var(--orange);box-shadow:0 0 8px var(--orange)}@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 10px var(--accent)}50%{opacity:.6;box-shadow:0 0 4px var(--accent)}}.page{display:none;padding:32px 40px;width:100%;max-width:1400px}.page.active{display:block}.page-header{margin-bottom:28px}.page-header h2{font-size:26px;font-weight:700;color:var(--text);letter-spacing:-.3px;display:flex;align-items:center;gap:10px}.page-header p{color:var(--text-muted);font-size:15px;margin-top:5px}.card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius);padding:24px;margin-bottom:20px}.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--card-border)}.card-header h3{font-size:17px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.card.danger{border-color:rgba(255,82,82,0.35);background:linear-gradient(180deg,rgba(255,82,82,0.04) 0,var(--card-bg) 60%)}.card.warning{border-color:rgba(255,171,64,0.35);background:linear-gradient(180deg,rgba(255,171,64,0.04) 0,var(--card-bg) 60%)}.card.info{border-color:rgba(64,196,255,0.35);background:linear-gradient(180deg,rgba(64,196,255,0.04) 0,var(--card-bg) 60%)}.card.purple{border-color:rgba(209,140,255,0.35);background:linear-gradient(180deg,rgba(209,140,255,0.04) 0,var(--card-bg) 60%)}.card.success{border-color:rgba(0,230,118,0.35);background:linear-gradient(180deg,rgba(0,230,118,0.04) 0,var(--card-bg) 60%)}label.field-label{display:block;font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.8px}input[type=number],input[type=text],input[type=password],select,textarea{width:100%;padding:12px 16px;background:var(--input-bg);border:1.5px solid var(--input-border);border-radius:10px;color:var(--text);font-size:15px;font-family:var(--font);transition:border-color .2s,box-shadow .2s;outline:0}input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,230,118,0.12)}textarea{resize:vertical}select option{background:var(--card-bg);color:var(--text)}.field-group{margin-bottom:20px}.field-row{display:flex;gap:14px}.field-row>*{flex:1}.input-with-btn{display:flex;gap:10px}.input-with-btn input{margin:0}.btn{padding:11px 22px;border-radius:10px;border:1.5px solid transparent;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font);transition:all .2s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;letter-spacing:.2px}.btn:hover,.sidebar-footer button:hover,.icon-btn:hover{filter:brightness(1.14)}.btn-primary{background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700}.btn-primary:hover{filter:brightness(1.14)}.btn-danger{background:var(--red-dim);color:var(--red);border-color:rgba(229,57,53,0.45)}.btn-danger:hover{filter:brightness(1.14)}.btn-warning{background:var(--orange);color:#000;border-color:transparent}.btn-warning:hover{filter:brightness(1.14)}.btn-ghost{background:0 0;border:1.5px solid var(--card-border);color:var(--text-muted)}.btn-ghost:hover{filter:brightness(1.14)}.btn-blue{background:var(--blue);color:#000;border-color:transparent}.btn-blue:hover{filter:brightness(1.14)}.btn-sm{padding:7px 14px;font-size:13px}.btn-full{width:100%;justify-content:center;padding:15px;font-size:16px}.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-radius:10px;background:rgba(255,255,255,0.03);border:1.5px solid var(--card-border);margin-bottom:12px;gap:14px}.toggle-row.danger{border-color:rgba(255,82,82,0.3);background:rgba(255,82,82,0.05)}.toggle-row.warning{border-color:rgba(255,171,64,0.3);background:rgba(255,171,64,0.05)}.toggle-row.blue{border-color:rgba(64,196,255,0.3);background:rgba(64,196,255,0.05)}.toggle-row.purple{border-color:rgba(209,140,255,0.3);background:rgba(209,140,255,0.05)}.toggle-row.pink{border-color:rgba(240,100,170,0.3);background:rgba(240,100,170,0.05)}.toggle-row.green{border-color:rgba(100,200,120,0.3);background:rgba(100,200,120,0.05)}.toggle-left{display:flex;align-items:center;gap:16px}.toggle-label{font-size:15px;font-weight:600;color:var(--text)}.toggle-label small{display:block;font-size:12px;color:var(--text-muted);font-weight:400;margin-top:2px}.toggle-label.danger{color:var(--red)}.toggle-label.warning{color:var(--orange)}.toggle-label.blue{color:var(--blue)}.toggle-label.purple{color:var(--purple)}.toggle-label.pink{color:#ff80ab}.toggle-label.green{color:#69f0ae}.switch{position:relative;display:inline-block;width:50px;height:28px;flex-shrink:0}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;cursor:pointer;inset:0;background:#1e2830;border:1.5px solid #2a3a4a;transition:.3s;border-radius:28px}.slider:before{position:absolute;content:"";height:20px;width:20px;bottom:2px;inset-inline-start:2px;background:#4a5a6a;transition:.3s;border-radius:50%}input:checked+.slider{background:rgba(0,230,118,0.2);border-color:var(--accent)}input:checked+.slider:before{background:var(--accent);box-shadow:0 0 8px rgba(0,230,118,0.6)}[dir=ltr] input:checked+.slider:before{transform:translateX(22px)}[dir=rtl] input:checked+.slider:before{transform:translateX(-22px)}.lang-slider:before{height:14px;width:14px;bottom:1.5px;inset-inline-start:1.5px}[dir=ltr] input:checked+.lang-slider:before{transform:translateX(20px)}[dir=rtl] input:checked+.lang-slider:before{transform:translateX(-20px)}.chip-container{display:flex;flex-wrap:wrap;gap:10px;padding:14px;background:var(--input-bg);border-radius:10px;min-height:52px;max-height:220px;overflow-y:auto;border:1.5px dashed var(--card-border);margin-top:10px}.chip{background:var(--accent-dim);color:var(--accent);padding:6px 14px;border-radius:20px;font-size:14px;display:flex;align-items:center;gap:8px;border:1px solid rgba(0,230,118,0.3);font-weight:500}.chip.red-chip{background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3)}.chip-remove{cursor:pointer;font-size:16px;font-weight:700;opacity:.6;line-height:1}.chip-remove:hover{opacity:1}.sub-panel{background:rgba(0,0,0,0.2);border:1.5px solid var(--card-border);border-radius:10px;padding:18px;margin-top:12px}.sub-panel.orange{border-color:rgba(255,171,64,0.3)}.sub-panel.red{border-color:rgba(255,82,82,0.3)}.sub-panel h4{font-size:14px;font-weight:700;color:var(--text-muted);margin-bottom:14px;display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.5px}.cb-group{display:flex;gap:10px;flex-wrap:wrap}.cb-label{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:8px;cursor:pointer;font-size:14px;color:var(--text-muted);transition:all .2s;user-select:none}.cb-label:hover{border-color:var(--accent);color:var(--text)}.cb-label input{accent-color:var(--accent);width:16px;height:16px;cursor:pointer}.limit-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}.limit-item{display:flex;align-items:center;gap:10px;background:var(--card-bg);padding:10px 14px;border-radius:9px;border:1.5px solid var(--card-border)}.limit-item input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:pointer;flex-shrink:0}.limit-item span{font-size:14px;flex:1;color:var(--text)}.limit-item input[type=number]{width:60px;padding:6px 8px;font-size:14px;margin:0;text-align:center}.group-list-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:14px;display:flex;align-items:center;gap:18px;padding:18px 22px;cursor:pointer;transition:border-color .2s,transform .2s}.group-list-card:hover{border-color:rgba(64,196,255,0.35);filter:brightness(1.08)}.group-list-card:hover .glc-arrow{opacity:1}.glc-avatar{width:52px;height:52px;border-radius:13px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:18px;font-weight:700;color:var(--accent)}.glc-avatar img{width:100%;height:100%;object-fit:cover;border-radius:11px}.glc-info{flex:1;min-width:0}.glc-name{font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.glc-id{font-family:monospace;font-size:11px;color:var(--text-muted);background:var(--input-bg);padding:2px 8px;border-radius:5px;border:1px solid var(--card-border);margin-top:4px;display:inline-block}.glc-chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.glc-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}.glc-chip.green{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,83,0.25)}.glc-chip.orange{background:var(--orange-dim);color:var(--orange);border:1px solid rgba(255,171,64,0.25)}.glc-chip.blue{background:var(--blue-dim);color:var(--blue);border:1px solid rgba(64,196,255,0.25)}.glc-chip.red{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.25)}.glc-chip.purple{background:var(--purple-dim);color:var(--purple);border:1px solid rgba(209,140,255,0.25)}.glc-arrow{font-size:16px;color:var(--blue);opacity:0;transition:opacity .2s;flex-shrink:0;margin-inline-start:4px}.group-detail-bar{display:flex;align-items:center;gap:16px;margin-bottom:28px;flex-wrap:wrap}.group-detail-identity{display:flex;align-items:center;gap:14px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:12px 20px;flex:1}.group-detail-avatar{width:46px;height:46px;border-radius:12px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:17px;font-weight:700;color:var(--accent)}.group-detail-avatar img{width:100%;height:100%;object-fit:cover;border-radius:10px}.group-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:16px;overflow:hidden;transition:border-color .2s}.group-card-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--card-border)}.group-card-title{font-size:16px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.group-card-body{padding:20px}.group-id-badge{font-family:monospace;font-size:12px;color:var(--text-muted);background:var(--input-bg);padding:3px 10px;border-radius:6px;border:1px solid var(--card-border)}.qr-wrap{display:flex;flex-direction:column;align-items:center;gap:20px;padding:36px;background:var(--input-bg);border-radius:12px;border:1.5px dashed var(--card-border)}#qr-image{max-width:230px;border-radius:12px;border:10px solid #fff;box-shadow:0 8px 30px rgba(0,0,0,0.5);display:none}.toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(24px);background:var(--accent);color:#000;padding:13px 28px;border-radius:40px;font-weight:700;font-size:15px;z-index:9999;opacity:0;transition:all .35s;pointer-events:none;box-shadow:0 4px 20px rgba(0,230,118,0.5)}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.modal{display:none;position:fixed;z-index:1000;inset:0;background:var(--modal-bg);backdrop-filter:blur(8px);align-items:center;justify-content:center}.modal.open{display:flex}.modal-content{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:16px;padding:32px;width:90%;max-width:640px;box-shadow:0 24px 80px rgba(0,0,0,0.7);animation:slideIn .25s ease;max-height:90vh;overflow-y:auto}.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.modal-header h3{font-size:20px;font-weight:700}.close-modal{background:0 0;border:none;color:var(--text-muted);font-size:26px;cursor:pointer;padding:4px;line-height:1}.close-modal:hover{color:var(--red)}@keyframes slideIn{from{transform:translateY(-24px);opacity:0}to{transform:translateY(0);opacity:1}}#terminalOutput{background:#000;color:#00ff88;font-family:'Courier New',monospace;height:400px;overflow-y:auto;padding:16px;border-radius:10px;font-size:13px;direction:ltr;text-align:start;border:1px solid #0a1a0a}#terminalOutput div{margin-bottom:5px;border-bottom:1px solid #0a1a0a;padding-bottom:5px;word-wrap:break-word;line-height:1.6}.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}.card-grid .card{margin-bottom:0}.card-grid-full{grid-column:1/-1}@media (max-width:1100px){.card-grid{grid-template-columns:1fr}}.section-sep{height:1px;background:var(--card-border);margin:20px 0}::-webkit-scrollbar{width:7px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:4px}.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99}.hamburger{display:none;background:0 0;border:none;color:var(--text);font-size:24px;cursor:pointer;padding:4px}.group-tabs{display:flex;gap:4px;border-bottom:1.5px solid var(--card-border);margin-bottom:20px}.group-tab{padding:10px 18px;border:none;background:0 0;color:var(--text-muted);font-size:14px;font-weight:600;font-family:var(--font);cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px;transition:all .2s;display:flex;align-items:center;gap:7px;border-radius:8px 8px 0 0}.group-tab:hover{color:var(--text);background:rgba(255,255,255,0.04)}.group-tab.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-dim)}.group-tab-panel{display:none}.group-tab-panel.active{display:block}.step-badge{display:inline-block;background:var(--blue-dim);color:var(--blue);padding:2px 9px;border-radius:12px;margin-inline-end:6px;font-weight:700;font-size:13px}@media (max-width:768px){.sidebar{transform:translateX(100%)}[dir=ltr] .sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.sidebar-overlay.open{display:block}.main{margin-inline-start:0}.hamburger{display:block}.page{padding:18px}.topbar{padding:0 18px}.limit-grid{grid-template-columns:1fr}.card-grid{grid-template-columns:1fr}.field-row{flex-direction:column}}</style>
     </head>
     <body>
         <style>
@@ -119,61 +87,249 @@ module.exports = function renderDashboard(req, db, config) {
                 flex-direction: column;
                 gap: 20px;
             }
+
+            .um-stats {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 10px;
+                margin-bottom: 12px;
+            }
+
+            .um-stat {
+                border: 1px solid var(--card-border);
+                border-radius: 10px;
+                background: var(--input-bg);
+                padding: 10px 12px;
+            }
+
+            .um-stat-label {
+                color: var(--text-muted);
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: .6px;
+            }
+
+            .um-stat-value {
+                color: var(--text);
+                font-size: 20px;
+                font-weight: 700;
+                margin-top: 2px;
+                line-height: 1.2;
+            }
+
+            .um-card-note {
+                font-size: 13px;
+                color: var(--text-muted);
+                margin-top: -6px;
+                margin-bottom: 12px;
+            }
+
+            .um-scroll-box {
+                max-height: 330px;
+                overflow: auto;
+                padding-right: 4px;
+            }
+
+            .um-selected-user {
+                border: 1px solid rgba(64,196,255,0.28);
+                background: rgba(64,196,255,0.06);
+            }
+
+            .um-access-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 14px;
+            }
+
+            .um-perm-drawer {
+                overflow: hidden;
+                max-height: 0;
+                opacity: 0;
+                transition: max-height .35s ease, opacity .25s ease, margin-top .25s ease;
+                margin-top: 0;
+            }
+
+            .um-perm-drawer.open {
+                max-height: 420px;
+                opacity: 1;
+                margin-top: 12px;
+            }
+
+            .um-perm-help {
+                margin-top: 12px;
+                border: 1px solid rgba(64,196,255,0.28);
+                background: rgba(64,196,255,0.06);
+                border-radius: 10px;
+                padding: 12px;
+                max-height: 280px;
+                overflow: auto;
+            }
+
+            .um-perm-help-item {
+                padding: 7px 0;
+                border-bottom: 1px dashed rgba(255,255,255,0.08);
+            }
+
+            .um-perm-help-item:last-child {
+                border-bottom: 0;
+                padding-bottom: 0;
+            }
+
+            .um-perm-help-key {
+                font-family: monospace;
+                font-size: 12px;
+                color: var(--blue);
+                margin-bottom: 4px;
+            }
+
+            .um-perm-help-desc {
+                color: var(--text-muted);
+                font-size: 12px;
+                line-height: 1.5;
+            }
+
+            #page-groups #groupsContainer {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 12px;
+            }
+
+            #page-groups .group-list-card {
+                margin-bottom: 0;
+                padding: 14px 16px;
+                gap: 14px;
+                border-radius: 12px;
+            }
+
+            #page-groups .glc-avatar {
+                width: 46px;
+                height: 46px;
+                border-radius: 11px;
+                font-size: 16px;
+            }
+
+            #page-groups .glc-id {
+                font-size: 12px;
+                padding: 3px 8px;
+            }
+
+            #page-groups .glc-chips {
+                margin-top: 8px;
+            }
+
+            #page-groups .glc-side {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                flex-shrink: 0;
+            }
+
+            #page-groups .glc-stats {
+                text-align: end;
+                min-width: 68px;
+            }
+
+            #page-groups .glc-stats strong {
+                display: block;
+                color: var(--text);
+                font-size: 16px;
+                line-height: 1.1;
+            }
+
+            #page-groups .glc-stats span {
+                font-size: 11px;
+                color: var(--text-muted);
+                text-transform: uppercase;
+                letter-spacing: .5px;
+            }
+
+            #page-groups .glc-arrow {
+                opacity: .58;
+                margin-inline-start: 0;
+                font-size: 14px;
+            }
+
+            #page-groups .group-list-card:hover .glc-arrow {
+                opacity: 1;
+            }
+
+            @media (max-width: 1100px) {
+                .um-layout,
+                .um-access-grid,
+                .um-stats {
+                    grid-template-columns: 1fr;
+                }
+
+                .um-actions-row .btn {
+                    flex: 1 1 auto;
+                }
+            }
+
+            @media (max-width: 900px) {
+                #page-groups #groupsContainer {
+                    grid-template-columns: 1fr;
+                }
+
+                #page-groups .glc-stats {
+                    display: none;
+                }
+            }
         </style>
-
         <nav class="sidebar" id="sidebar">
-                <div class="sidebar-logo">
-                    <div class="logo-icon"><img src="/public/logo.png" alt="Logo" onerror="this.style.display='none';this.nextElementSibling.style.display='flex';" style="width:100%;height:100%;object-fit:cover;border-radius:14px;"><i class="fas fa-shield-halved" style="display:none"></i></div>
-                    <div class="logo-text">
-                        ${t('المشرف الآلي', 'Auto Moderator')}
-                        <small>${t('حماية مجموعات واتساب', 'WhatsApp group safety')}</small>
-                    </div>
-                </div>
-                <div class="sidebar-nav-scroll">
-                    <div class="nav-section">${t('الرئيسية', 'Overview')}</div>
-                    <button class="nav-item active" type="button" onclick="showPage('page-status', this)">
-                        <span class="nav-icon"><i class="fas fa-satellite-dish"></i></span> ${t('حالة الاتصال', 'Connection Status')}
-                    </button>
-                    <button class="nav-item" type="button" onclick="showPage('page-blacklist', this)">
-                        <span class="nav-icon"><i class="fas fa-user-slash"></i></span> ${t('إدارة الأرقام', 'Number Management')}
-                    </button>
-                    <button class="nav-item" type="button" onclick="showPage('page-general', this)">
-                        <span class="nav-icon"><i class="fas fa-cog"></i></span> ${t('الإعدادات العامة', 'General Settings')}
-                    </button>
-                    <button class="nav-item" type="button" onclick="showPage('page-spam', this)">
-                        <span class="nav-icon"><i class="fas fa-shield-alt"></i></span> ${t('مكافحة الإزعاج', 'Anti-Spam')}
-                    </button>
-                    <button class="nav-item" type="button" onclick="showPage('page-media', this)">
-                        <span class="nav-icon"><i class="fas fa-filter"></i></span> ${t('فلتر الوسائط', 'Media Filter')}
-                    </button>
-                    <button class="nav-item" type="button" onclick="showPage('page-ai', this)">
-                        <span class="nav-icon"><i class="fas fa-brain"></i></span> ${t('الذكاء الاصطناعي', 'AI Moderator')}
-                    </button>
-                    <button class="nav-item" type="button" onclick="showPage('page-groups', this)">
-                        <span class="nav-icon"><i class="fas fa-users-cog"></i></span> ${t('المجموعات المخصصة', 'Custom Groups')}
-                    </button>
+            <div class="sidebar-logo">
+                <div class="logo-icon"><img src="/public/logo.png?v=2" alt="${t('شعار البوت', 'Bot Logo')}" style="width:100%;height:100%;object-fit:cover;border-radius:14px;display:block;" onerror="if(!this.dataset.retry){this.dataset.retry='1';this.src='public/logo.png?v=2';return;}this.style.display='none';this.nextElementSibling.style.display='flex';"><i class="fas fa-robot" style="display:none;align-items:center;justify-content:center;width:100%;height:100%;font-size:22px;color:#fff;"></i></div>
+                <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V6.4', 'Dashboard V6.4')}</small></div>
+            </div>
 
-                    <div class="nav-section">${t('أدوات', 'Tools')}</div>
-                    <button class="nav-item" type="button" onclick="openDebuggerModal()">
-                        <span class="nav-icon"><i class="fas fa-bug"></i></span> ${t('سجل الأحداث', 'Event Logs')}
-                    </button>
-                    <button class="nav-item" type="button" onclick="showPage('page-import-export', this)">
-                        <span class="nav-icon"><i class="fas fa-exchange-alt"></i></span> ${t('استيراد/تصدير', 'Import/Export')}
-                    </button>
-                    <button class="nav-item" type="button" onclick="showPage('page-users', this)">
-                        <span class="nav-icon"><i class="fas fa-user-shield"></i></span> ${t('إدارة المستخدمين', 'User Management')}
-                    </button>
-                    <button class="nav-item" type="button" onclick="showPage('page-about', this)">
-                        <span class="nav-icon"><i class="fas fa-info-circle"></i></span> ${t('حول', 'About')}
-                    </button>
-                </div>
-                <div class="sidebar-footer">
-                    <button id="signOutBtn" data-variant="danger" onclick="signOutSession()"><i class="fas fa-right-from-bracket"></i> ${t('تسجيل الخروج', 'Sign Out')}</button>
-                    <button data-variant="primary" onclick="saveConfig()"><i class="fas fa-save"></i> ${t('حفظ', 'Save')}</button>
-                </div>
-            </nav>
+            <div class="sidebar-nav-scroll">
+                <div class="nav-section">${t('الرئيسية', 'Main')}</div>
+                <button class="nav-item active" onclick="showPage('page-status', this)">
+                    <span class="nav-icon"><i class="fas fa-satellite-dish"></i></span> ${t('حالة الاتصال', 'Connection Status')}
+                </button>
+                <button class="nav-item" onclick="showPage('page-blacklist', this)">
+                    <span class="nav-icon"><i class="fas fa-users-slash"></i></span> ${t('إدارة الأرقام', 'Manage Numbers')}
+                    <span class="nav-badge" id="blacklist-count">0</span>
+                </button>
 
-                <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
+                <div class="nav-section">${t('الإعدادات', 'Settings')}</div>
+                <button class="nav-item" onclick="showPage('page-general', this)">
+                    <span class="nav-icon"><i class="fas fa-cog"></i></span> ${t('الإعدادات العامة', 'General Settings')}
+                </button>
+                <button class="nav-item" onclick="showPage('page-spam', this)">
+                    <span class="nav-icon"><i class="fas fa-shield-alt"></i></span> ${t('مكافحة الإزعاج', 'Anti-Spam')}
+                </button>
+                <button class="nav-item" onclick="showPage('page-media', this)">
+                    <span class="nav-icon"><i class="fas fa-filter"></i></span> ${t('فلتر الوسائط', 'Media Filter')}
+                </button>
+                <button class="nav-item" onclick="showPage('page-ai', this)">
+                    <span class="nav-icon"><i class="fas fa-brain"></i></span> ${t('الذكاء الاصطناعي', 'AI Moderator')}
+                </button>
+                <button class="nav-item" onclick="showPage('page-groups', this)">
+                    <span class="nav-icon"><i class="fas fa-users-cog"></i></span> ${t('المجموعات المخصصة', 'Custom Groups')}
+                </button>
+
+                <div class="nav-section">${t('أدوات', 'Tools')}</div>
+                <button class="nav-item" onclick="openDebuggerModal()">
+                    <span class="nav-icon"><i class="fas fa-bug"></i></span> ${t('سجل الأحداث', 'Event Logs')}
+                </button>
+                <button class="nav-item" onclick="showPage('page-import-export', this)">
+                    <span class="nav-icon"><i class="fas fa-exchange-alt"></i></span> ${t('استيراد/تصدير', 'Import/Export')}
+                </button>
+                <button class="nav-item" onclick="showPage('page-users', this)">
+                    <span class="nav-icon"><i class="fas fa-user-shield"></i></span> ${t('إدارة المستخدمين', 'User Management')}
+                </button>
+                <button class="nav-item" onclick="showPage('page-about', this)">
+                    <span class="nav-icon"><i class="fas fa-info-circle"></i></span> ${t('حول', 'About')}
+                </button>
+            </div>
+
+            <div class="sidebar-footer">
+                <button id="signOutBtn" data-variant="danger" onclick="signOutSession()"><i class="fas fa-right-from-bracket"></i> ${t('تسجيل الخروج', 'Sign Out')}</button>
+                <button data-variant="primary" onclick="saveConfig()"><i class="fas fa-save"></i> ${t('حفظ', 'Save')}</button>
+            </div>
+        </nav>
+
+        <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
 
         <div class="main">
             <div class="topbar">
@@ -362,7 +518,9 @@ module.exports = function renderDashboard(req, db, config) {
                 <div class="card-grid general-top-grid">
                     <div class="card general-top-card" style="margin-bottom:0;">
                         <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
-                        <div class="field-group" id="defaultAdminGroupContainer" style="min-height:50px;"></div>
+                        <div class="field-group" id="defaultAdminGroupContainer">
+                            <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
+                        </div>
                     </div>
 
                     <div class="card general-top-card" style="margin-bottom:0; border-color:rgba(100,220,150,0.35); background:linear-gradient(160deg,rgba(100,220,150,0.05) 0,var(--card-bg) 58%); position:relative; overflow:hidden;">
@@ -747,147 +905,132 @@ module.exports = function renderDashboard(req, db, config) {
                 </div>
 
                 <style>
-                    #page-about .about-hero { display:flex; gap:28px; padding:32px; background:linear-gradient(135deg, rgba(0,200,83,0.08), rgba(64,196,255,0.08)); border:1.5px solid var(--card-border); border-radius:var(--radius); margin-bottom:24px; align-items:stretch; }
-                    #page-about .about-hero-main { flex:2; display:flex; flex-direction:column; gap:14px; }
-                    #page-about .about-pill { display:inline-flex; align-items:center; gap:8px; font-size:12px; letter-spacing:.6px; text-transform:uppercase; color:var(--accent); background:var(--accent-dim); border-radius:999px; padding:6px 14px; font-weight:700; }
-                    #page-about .about-hero h3 { font-size:28px; margin:0; color:var(--text); }
-                    #page-about .about-hero p { color:var(--text-muted); line-height:1.7; }
-                    #page-about .about-hero-actions { display:flex; flex-wrap:wrap; gap:12px; margin-top:6px; }
-                    #page-about .about-hero-actions a { display:inline-flex; align-items:center; gap:8px; padding:11px 18px; border-radius:10px; border:1.5px solid rgba(64,196,255,0.35); color:var(--blue); font-weight:700; text-decoration:none; background:rgba(64,196,255,0.12); }
-                    #page-about .about-hero-actions a[data-variant="primary"] { border-color:rgba(0,200,83,0.45); color:var(--accent); background:var(--accent-dim); }
-                    #page-about .about-hero-meta { flex:1; background:rgba(0,0,0,0.25); border:1.5px dashed var(--card-border); border-radius:16px; padding:24px; display:flex; flex-direction:column; gap:16px; }
-                    #page-about .about-hero-meta ul { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:14px; }
-                    #page-about .about-hero-meta li { display:flex; justify-content:space-between; align-items:center; font-size:13px; color:var(--text-muted); }
-                    #page-about .about-hero-meta strong { font-size:18px; color:var(--text); }
-                    #page-about .about-highlight-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(190px, 1fr)); gap:16px; margin-bottom:26px; }
-                    #page-about .about-highlight { padding:20px; border-radius:var(--radius); border:1.5px solid var(--card-border); background:var(--card-bg); }
-                    #page-about .about-highlight span { display:block; font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--text-muted); }
-                    #page-about .about-highlight strong { display:block; font-size:26px; margin-top:8px; color:var(--text); }
-                    #page-about .about-highlight small { display:block; margin-top:6px; font-size:12px; color:var(--text-muted); }
-                    #page-about .about-panels { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:20px; }
-                    #page-about .about-panel { padding:22px; border-radius:var(--radius); border:1.5px solid var(--card-border); background:var(--card-bg); }
-                    #page-about .about-panel h3 { margin:0 0 12px 0; font-size:17px; display:flex; align-items:center; gap:8px; }
-                    #page-about .about-timeline { list-style:none; margin:0; padding:0; }
-                    #page-about .about-timeline li { display:flex; gap:14px; padding:12px 0; border-bottom:1px solid rgba(255,255,255,0.05); }
-                    #page-about .about-timeline li:last-child { border-bottom:none; }
-                    #page-about .about-timeline time { font-size:12px; font-weight:700; color:var(--accent); min-width:78px; text-transform:uppercase; }
-                    #page-about .about-timeline strong { display:block; font-size:14px; color:var(--text); }
-                    #page-about .about-timeline p { margin:4px 0 0 0; font-size:12px; color:var(--text-muted); line-height:1.6; }
-                    #page-about .about-chip-grid { display:flex; flex-wrap:wrap; gap:8px; }
-                    #page-about .about-chip { padding:6px 12px; border-radius:999px; border:1.5px solid rgba(64,196,255,0.35); font-size:12px; color:var(--text); background:rgba(64,196,255,0.08); }
-                    #page-about .about-chip[data-variant="accent"] { border-color:rgba(0,200,83,0.4); background:var(--accent-dim); color:var(--accent); }
-                    #page-about .about-support { display:flex; flex-direction:column; gap:14px; }
-                    #page-about .about-support a { display:flex; align-items:center; gap:10px; padding:10px 12px; border-radius:10px; border:1.5px solid var(--card-border); text-decoration:none; color:var(--text); font-size:13px; transition:all .2s; }
-                    #page-about .about-support a:hover { border-color:rgba(0,200,83,0.4); }
-                    #page-about .about-support small { display:block; font-size:11px; color:var(--text-muted); margin-inline-start:26px; }
-                    @media (max-width: 1100px) {
-                        #page-about .about-hero { flex-direction:column; }
-                        #page-about .about-panels { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+                    #page-about .about-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; }
+                    #page-about .about-card { margin-bottom: 0; }
+                    #page-about .about-grid ul { font-size: 13px; line-height: 1.75; }
+                    #page-about .about-grid p { font-size: 13px; line-height: 1.55; }
+                    #page-about .about-license-card { grid-column: 2 / 3; }
+                    @media (max-width: 1200px) {
+                        #page-about .about-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+                        #page-about .about-license-card { grid-column: auto; }
                     }
-                    @media (max-width: 768px) {
-                        #page-about .about-panels { grid-template-columns:1fr; }
+                    @media (max-width: 760px) {
+                        #page-about .about-grid { grid-template-columns: 1fr; }
                     }
                 </style>
 
-                <div class="about-hero card">
-                    <div class="about-hero-main">
-                        <div style="display:flex; align-items:center; gap:16px; margin-bottom:8px;">
-                            <img src="/public/logo.png" alt="Logo" style="width:64px; height:64px; border-radius:14px; object-fit:cover;">
-                            <span class="about-pill"><i class="fas fa-bolt"></i> ${t('يعمل الآن', 'System Active')}</span>
+                <div class="card-grid about-grid">
+                    <div class="card info about-card">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-user-circle"></i> ${t('المطور', 'Developer')}</h3>
                         </div>
-                        <h3>${t('منصة أمان فورية لمجموعات واتساب', 'Instant safety platform for WhatsApp groups')}</h3>
-                        <p>${t('نمزج التحليلات الفورية مع الذكاء الاصطناعي المحلي لفرض القواعد في أقل من ثانيتين، حتى عندما يكون الاتصال محدوداً.', 'We pair live analytics with on-device AI to enforce policies in under two seconds, even on limited connections.')}</p>
-                        <div class="about-hero-actions">
-                            <a data-variant="primary" href="https://github.com/az2oo1/wa-bot" target="_blank"><i class="fab fa-github"></i> ${t('استعراض الكود', 'Explore Code')}</a>
-                            <a href="https://github.com/az2oo1/wa-bot#readme" target="_blank"><i class="fas fa-map"></i> ${t('خارطة الطريق', 'Roadmap')}</a>
+                        <p style="font-size:15px; font-weight:700; color:var(--accent); margin:8px 0 0 0;">Abdulaziz Algassem</p>
+                        <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;"><i class="fas fa-code-branch"></i> INTERSTELLAR</p>
+                        <p style="font-size:12px; color:var(--text); margin-bottom:10px; line-height:1.4;">
+                            ${t('طالب تقنية المعلومات', 'IT student')}
+                        </p>
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                            <a href="https://github.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fab fa-github"></i> GitHub
+                            </a>
+                            <a href="https://instagram.com/az2oo1" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fab fa-instagram"></i> Instagram
+                            </a>
+                            <a href="https://github.com/az2oo1?tab=repositories" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fas fa-star"></i> ${t('المشاريع', 'Projects')}
+                            </a>
                         </div>
                     </div>
-                    <div class="about-hero-meta">
-                        <h4 style="margin:0; font-size:15px; color:var(--text); display:flex; align-items:center; gap:8px;"><i class="fas fa-chart-pie"></i> ${t('نبض النظام', 'System pulse')}</h4>
-                        <ul>
-                            <li><span>${t('الإصدار النشط', 'Active release')}</span><strong>${appVersion}</strong></li>
-                            <li><span>${t('وقت الاستجابة المتوسط', 'Median reaction')}</span><strong>1.2s</strong></li>
-                            <li><span>${t('جلسات مراقبة متزامنة', 'Concurrent monitors')}</span><strong>24</strong></li>
-                            <li><span>${t('آخر تحديث', 'Last update')}</span><strong>${lastUpdateStr}</strong></li>
-                        </ul>
-                    </div>
-                </div>
 
-                <div class="about-highlight-grid">
-                    <div class="about-highlight card success">
-                        <span>${t('متوسط زمن الاستجابة', 'Avg response time')}</span>
-                        <strong>1.2s</strong>
-                        <small>${t('من لحظة الإبلاغ حتى اتخاذ الإجراء.', 'From trigger to enforced action.')}</small>
-                    </div>
-                    <div class="about-highlight card warning">
-                        <span>${t('محظورات يومية', 'Daily blocks')}</span>
-                        <strong>${blockCount}</strong>
-                        <small>${t('رسائل وروابط مرفوضة تلقائياً.', 'Messages and links auto-rejected.')}</small>
-                    </div>
-                    <div class="about-highlight card info">
-                        <span>${t('دعم اللغات', 'Language coverage')}</span>
-                        <strong>AR / EN</strong>
-                        <small>${t('واجهة كاملة واتجاهات RTL/LTR.', 'Full UI with RTL/LTR awareness.')}</small>
-                    </div>
-                    <div class="about-highlight card purple">
-                        <span>${t('زمن تشغيل السيرفر', 'Server uptime')}</span>
-                        <strong dir="ltr">${uptimeStr}</strong>
-                        <small>${t('منذ أخر إعادة تشغيل للنظام.', 'Since last system restart.')}</small>
-                    </div>
-                </div>
-
-                <div class="about-panels">
-                    <div class="about-panel" style="background:linear-gradient(180deg, rgba(64,196,255,0.08), transparent);">
-                        <h3><i class="fas fa-route"></i> ${t('خط سير الإصدارات', 'Release trail')}</h3>
-                        <ul class="about-timeline">
-                            <li>
-                                <time>${releaseQStr}</time>
-                                <div>
-                                    <strong>${appVersion}</strong>
-                                    <p>${t('أحدث إصدار مع تحسينات الاستقرار والأداء.', 'Latest release with stability and performance enhancements.')}</p>
-                                </div>
-                            </li>
-                            <li>
-                                <time>2025 · Q4</time>
-                                <div>
-                                    <strong>${t('وضع الطوارئ', 'Panic mode')}</strong>
-                                    <p>${t('إغلاق تلقائي مع تنبيه بصيغة متعددة اللغات وتجميد مؤقت للأعضاء المشبوهين.', 'Automatic lockdown with multilingual alerts and temporary suspect freeze.')}</p>
-                                </div>
-                            </li>
-                            <li>
-                                <time>2025 · Q2</time>
-                                <div>
-                                    <strong>${t('محرّك الوسائط', 'Media scrutiny engine')}</strong>
-                                    <p>${t('استبدال قواعد الامتدادات بالقوائم الديناميكية مع معاينة آمنة.', 'Dynamic extension policies plus safe previews replaced static lists.')}</p>
-                                </div>
-                            </li>
+                    <div class="card success about-card">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-rocket"></i> ${t('الميزات', 'Features')}</h3>
+                        </div>
+                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
+                            <li>🧠 AI Moderation</li>
+                            <li>⚡ Anti-Spam</li>
+                            <li>🚫 Blacklist/Whitelist</li>
+                            <li>📂 Media Filter</li>
+                            <li>🛠️ Dashboard AR/EN</li>
+                            <li><i class="fas fa-check-circle"></i> v6.4.0</li>
                         </ul>
                     </div>
 
-                    <div class="about-panel">
-                        <h3><i class="fas fa-layer-group"></i> ${t('بنية التقنية', 'Tech fabric')}</h3>
-                        <p style="font-size:13px; color:var(--text-muted); margin-top:-4px;">${t('أدوات مختارة بعناية لتعمل على الأجهزة متواضعة الموارد مع إمكانية ترقية مرنة.', 'Carefully curated stack that thrives on modest hardware while staying upgrade-friendly.')}</p>
-                        <div class="about-chip-grid" style="margin-top:14px;">
-                            <span class="about-chip" data-variant="accent">whatsapp-web.js</span>
-                            <span class="about-chip">better-sqlite3</span>
-                            <span class="about-chip">Express</span>
-                            <span class="about-chip">Ollama AI</span>
-                            <span class="about-chip">Node.js 18</span>
-                            <span class="about-chip">Docker</span>
-                            <span class="about-chip">qrcode</span>
-                            <span class="about-chip">multer</span>
+                    <div class="card warning about-card">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-microchip"></i> ${t('المكونات', 'Tech')}</h3>
+                        </div>
+                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
+                            <li>whatsapp-web.js</li>
+                            <li>better-sqlite3</li>
+                            <li>Ollama AI</li>
+                            <li>Express.js</li>
+                            <li>Node.js 16+</li>
+                            <li><i class="fas fa-check-circle" style="color:var(--accent);"></i> Active</li>
+                        </ul>
+                    </div>
+
+                    <div class="card about-card">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-cube"></i> ${t('المتطلبات', 'Requirements')}</h3>
+                        </div>
+                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
+                            <li><strong>Min:</strong> 2GB RAM</li>
+                            <li><strong>Storage:</strong> 5GB+</li>
+                            <li><strong>AI:</strong> 8GB+ RAM</li>
+                            <li><strong>AI Storage:</strong> 10-20GB</li>
+                            <li><strong>OS:</strong> Linux/macOS/Windows</li>
+                        </ul>
+                    </div>
+
+                    <div class="card danger about-card">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-link"></i> ${t('الروابط', 'Links')}</h3>
+                        </div>
+                        <div style="display:flex; flex-direction:column; gap:4px;">
+                            <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fab fa-github"></i> GitHub Repo
+                            </a>
+                            <a href="https://github.com/az2oo1/wa-bot/issues" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fas fa-bug"></i> Report Issues
+                            </a>
+                            <a href="https://github.com/az2oo1/wa-bot/discussions" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fas fa-comments"></i> Discussions
+                            </a>
+                            <a href="https://github.com/az2oo1/wa-bot/releases" target="_blank" class="btn btn-ghost btn-sm" style="cursor:pointer; text-align:start; padding:5px 8px; font-size:12px;">
+                                <i class="fas fa-tags"></i> Releases
+                            </a>
                         </div>
                     </div>
 
-                    <div class="about-panel" style="background:linear-gradient(180deg, rgba(0,200,83,0.08), transparent);">
-                        <h3><i class="fas fa-hands-helping"></i> ${t('الدعم والمجتمع', 'Support & community')}</h3>
-                        <div class="about-support">
-                            <a href="https://github.com/az2oo1/wa-bot/discussions" target="_blank"><i class="fas fa-comments"></i> ${t('منتدى نقاشات فوري', 'Live discussion forum')}</a>
-                            <small>${t('شارك دروسك واستفساراتك مع المشرفين الآخرين.', 'Share learnings and questions with fellow operators.')}</small>
-                            <a href="https://github.com/az2oo1/wa-bot/issues/new" target="_blank"><i class="fas fa-bug"></i> ${t('فتح تذكرة دعم', 'Open a support ticket')}</a>
-                            <small>${t('نرد خلال 24 ساعة مع تتبع شفاف للحالة.', 'Response within 24h with transparent state tracking.')}</small>
-                            <a href="https://github.com/az2oo1" target="_blank"><i class="fab fa-github"></i> ${t('تابع المطور', 'Follow the maintainer')}</a>
-                            <small>${t('أبق على اطلاع على التجارب والأدوات القادمة.', 'Stay updated on experiments and upcoming tooling.')}</small>
+                    <div class="card purple about-card">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-heart"></i> ${t('التبعيات', 'Dependencies')}</h3>
+                        </div>
+                        <ul style="margin:0; padding-inline-start:16px; font-size:12px; line-height:1.6;">
+                            <li>whatsapp-web.js</li>
+                            <li>better-sqlite3</li>
+                            <li>Ollama</li>
+                            <li>Express</li>
+                            <li>qrcode</li>
+                            <li>multer</li>
+                        </ul>
+                    </div>
+
+                    <div class="card info about-card about-license-card">
+                        <div class="card-header">
+                            <h3 style="font-size:16px;"><i class="fas fa-file-contract"></i> ${t('الترخيص', 'License')}</h3>
+                        </div>
+                        <p style="font-size:12px; margin:8px 0; line-height:1.5;">
+                            ${t('مشروع مفتوح المصدر', 'Open Source Project')}
+                        </p>
+                        <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
+                            <span style="background:var(--accent-dim); color:var(--accent); padding:3px 8px; border-radius:14px; font-size:11px; font-weight:600;">
+                                <i class="fas fa-star"></i> 2 Stars
+                            </span>
+                            <span style="background:var(--blue-dim); color:var(--blue); padding:3px 8px; border-radius:14px; font-size:11px; font-weight:600;">
+                                v6.4.0
+                            </span>
                         </div>
                     </div>
                 </div>
@@ -1202,29 +1345,53 @@ module.exports = function renderDashboard(req, db, config) {
 
             async function loadKnownGroups() {
                 try {
-                    const res = await fetch('/api/groups', { credentials: 'same-origin' });
-                    if (res.ok) {
-                        const groups = await res.json();
-                        if (Array.isArray(groups)) {
-                            fetchedGroups = groups;
+                    const res = await fetch('/api/groups');
+                    fetchedGroups = await res.json();
+
+                    const defAdminContainer = document.getElementById('defaultAdminGroupContainer');
+                    if (defAdminContainer) {
+                        let defHTML = \`
+                            <label class="field-label" style="display:flex; justify-content:space-between; align-items:center;">
+                                <span>\${dict.admin_group_label}</span>
+                                <span style="cursor:pointer; color:var(--accent); font-size:14px;" onclick="loadKnownGroups()" title="Refresh Groups"><i class="fas fa-sync"></i></span>
+                            </label>
+                            <select id="defaultAdminGroup" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">
+                        \`;
+                        defHTML += \`<option value="">-- \${dict.select_group} --</option>\`;
+                        
+                        let defFound = false;
+                        fetchedGroups.forEach(g => {
+                            const sel = g.id === '${config.defaultAdminGroup}' ? 'selected' : '';
+                            if(sel) defFound = true;
+                            defHTML += \`<option value="\${g.id}" \${sel}>\${g.name}</option>\`;
+                        });
+
+                        if ('${config.defaultAdminGroup}' && !defFound) {
+                            defHTML += \`<option value="${config.defaultAdminGroup}" selected>${config.defaultAdminGroup} (Unknown)</option>\`;
                         }
+                        defHTML += \`</select>\`;
+                        defHTML += \`
+                            <div class="field-group" style="margin-top:12px; margin-bottom:0;">
+                                <label class="field-label">\${dict.admin_msg_lang}</label>
+                                <select id="defaultAdminLanguage" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">
+                                    <option value="ar" ${config.defaultAdminLanguage === 'en' ? '' : 'selected'}>\${dict.lang_ar}</option>
+                                    <option value="en" ${config.defaultAdminLanguage === 'en' ? 'selected' : ''}>\${dict.lang_en}</option>
+                                </select>
+                            </div>
+                        \`;
+                        defAdminContainer.innerHTML = defHTML;
                     }
+                    
+                    renderGroups();
+
                 } catch(e) {}
-                
-                renderDefaultAdminGroupSelect();
-                renderGroups();
             }
 
-            // Fallback render on load in case loadKnownGroups fails
-            renderGroups();
-            renderDefaultAdminGroupSelect();
-
             function createGroupSelectHTML(selectedValue, onchangeCode, allowEmpty = false) {
-                const availableGroups = getSelectableGroups();
                 let html = \`<select onchange="\${onchangeCode}" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">\`;
                 html += \`<option value="">\${allowEmpty ? '-- ' + dict.default_setting + ' --' : '-- ' + dict.select_group + ' --'}</option>\`;
                 let found = false;
-                availableGroups.forEach(g => {
+                fetchedGroups.forEach(g => {
                     let sel = g.id === selectedValue ? 'selected' : '';
                     if(sel) found = true;
                     html += \`<option value="\${g.id}" \${sel}>\${g.name}</option>\`;
@@ -2066,76 +2233,6 @@ module.exports = function renderDashboard(req, db, config) {
 
             let currentDetailIndex = null;
 
-            function getSelectableGroups() {
-                const map = new Map();
-                if (Array.isArray(fetchedGroups)) {
-                    fetchedGroups.forEach(group => {
-                        if (group && group.id && !map.has(group.id)) {
-                            map.set(group.id, { id: group.id, name: group.name || group.id });
-                        }
-                    });
-                }
-                groupsArr.forEach(group => {
-                    if (group && group.id && !map.has(group.id)) {
-                        map.set(group.id, { id: group.id, name: group.id });
-                    }
-                });
-                return Array.from(map.values());
-            }
-
-            function renderDefaultAdminGroupSelect() {
-                try {
-                    const defAdminContainer = document.getElementById('defaultAdminGroupContainer');
-                    if (!defAdminContainer) {
-                        console.warn("defaultAdminGroupContainer not found");
-                        return;
-                    }
-                    const availableGroups = getSelectableGroups();
-                    const existingSelect = document.getElementById('defaultAdminGroup');
-                    const existingLangSelect = document.getElementById('defaultAdminLanguage');
-                    
-                    // Keep visually what was selected if present, else fallback
-                    const selectedValue = existingSelect ? existingSelect.value : '${config.defaultAdminGroup || ''}';
-                    const selectedLang = existingLangSelect ? existingLangSelect.value : '${config.defaultAdminLanguage || 'ar'}';
-
-                    let defHTML = \`
-                        <label class="field-label" style="display:flex; justify-content:space-between; align-items:center;">
-                            <span>
-                                \${dict.admin_group_label}
-                            </span>
-                            <span style="cursor:pointer; color:var(--accent); font-size:14px;" onclick="loadKnownGroups()" title="Refresh Groups"><i class="fas fa-sync"></i></span>
-                        </label>
-                        <select id="defaultAdminGroup" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'}; width: 100%; padding: 10px 12px; margin-top: 8px; background: var(--input-bg); border: 1.5px solid var(--card-border); border-radius: 10px; color: var(--text); font-family: inherit; font-size: 14px; cursor: pointer;">
-                    \`;
-                    defHTML += \`<option value="">-- \${dict.select_group} --</option>\`;
-
-                    let defFound = false;
-                    availableGroups.forEach(group => {
-                        const sel = group.id === selectedValue ? 'selected' : '';
-                        if (sel) defFound = true;
-                        defHTML += \`<option value="\${group.id}" \${sel}>\${group.name || group.id}</option>\`;
-                    });
-
-                    if (selectedValue && !defFound) {
-                        defHTML += \`<option value="\${selectedValue}" selected>\${selectedValue} (Unknown)</option>\`;
-                    }
-                    defHTML += \`</select>\`;
-                    defHTML += \`
-                        <div class="field-group" style="margin-top:12px; margin-bottom:0;">
-                            <label class="field-label">\${dict.admin_msg_lang}</label>
-                            <select id="defaultAdminLanguage" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'}; width: 100%; padding: 10px 12px; background: var(--input-bg); border: 1.5px solid var(--card-border); border-radius: 10px; color: var(--text); font-family: inherit; font-size: 14px; cursor: pointer;">
-                                <option value="ar" \${selectedLang === 'ar' ? 'selected' : (selectedLang === 'en' ? '' : 'selected')}>\${dict.lang_ar}</option>
-                                <option value="en" \${selectedLang === 'en' ? 'selected' : ''}>\${dict.lang_en}</option>
-                            </select>
-                        </div>
-                    \`;
-                    defAdminContainer.innerHTML = defHTML;
-                    console.log("Default admin group rendered with " + availableGroups.length + " groups");
-                } catch(e) {
-                    console.error("Error in renderDefaultAdminGroupSelect", e);
-                }
-            }
-
             function switchGroupTab(groupIndex, tabName, btn) {
                 document.querySelectorAll('#gtabs_' + groupIndex + ' .group-tab').forEach(t => t.classList.remove('active'));
                 document.querySelectorAll('[id^="gtab_' + groupIndex + '_"]').forEach(p => p.classList.remove('active'));
@@ -2145,74 +2242,63 @@ module.exports = function renderDashboard(req, db, config) {
             }
 
             function renderGroups() {
-                try {
-                    const container = document.getElementById('groupsContainer');
-                    if (!container) return;
-                    container.innerHTML = '';
+                const container = document.getElementById('groupsContainer');
+                container.innerHTML = '';
 
-                    if (!Array.isArray(groupsArr) || groupsArr.length === 0) {
-                        container.style.display = 'block';
-                        container.innerHTML = \`<div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
-                            <i class="fas fa-users-cog" style="font-size:48px; margin-bottom:16px; display:block; opacity:0.3;"></i>
-                            <div style="font-size:16px; font-weight:600;">\${currentLang === 'en' ? 'No custom groups yet' : 'لا توجد مجموعات مخصصة بعد'}</div>
-                            <div style="font-size:13px; margin-top:6px;">\${currentLang === 'en' ? 'Click "Add Group" to get started' : 'اضغط على "إضافة مجموعة" للبدء'}</div>
-                        </div>\`;
-                        return;
-                    }
-
-                    container.style.display = 'grid';
-                    container.style.gridTemplateColumns = 'repeat(auto-fit, minmax(320px, 1fr))';
-                    container.style.gap = '14px';
-
-                    groupsArr.forEach((group, groupIndex) => {
-                        const knownGroup = fetchedGroups.find(g => g && g.id === group.id);
-                        const groupName = knownGroup ? knownGroup.name : (group.id ? group.id.split('@')[0].slice(-10) + '...' : dict.no_id);
-                        const initials = (groupName || '').replace(/[^\u0600-\u06FFa-zA-Z]/g, '').slice(0, 2) || '؟';
-                        const shortGroupId = group.id ? group.id.split('@')[0] : '';
-
-                        let chips = '';
-                        if (group.enablePanicMode) chips += \`<span class="glc-chip orange"><i class="fas fa-radiation"></i> \${currentLang==='en'?'Panic Mode':'طوارئ'}</span>\`;
-                        if (group.enableAntiSpam)  chips += \`<span class="glc-chip orange"><i class="fas fa-shield-alt"></i> Anti-Spam</span>\`;
-                        if (group.enableAIFilter)  chips += \`<span class="glc-chip blue"><i class="fas fa-brain"></i> AI</span>\`;
-                        if (group.enableWordFilter) chips += \`<span class="glc-chip green"><i class="fas fa-filter"></i> \${currentLang==='en'?'Word Filter':'فلتر كلمات'}</span>\`;
-                        if (group.enableWelcomeMessage) chips += \`<span class="glc-chip green"><i class="fas fa-door-open"></i> \${currentLang==='en'?'Welcome':'ترحيب'}</span>\`;
-                        if (group.blockedTypes && group.blockedTypes.length > 0) chips += \`<span class="glc-chip red"><i class="fas fa-ban"></i> \${group.blockedTypes.length} \${currentLang==='en'?'blocked':'ممنوع'}</span>\`;
-
-                        const enabledCount = [
-                            group.enablePanicMode,
-                            group.enableAntiSpam,
-                            group.enableAIFilter,
-                            group.enableWordFilter,
-                            group.enableWelcomeMessage,
-                            group.enableJoinProfileScreening,
-                            group.enableWhitelist,
-                            group.enableBlacklist
-                        ].filter(Boolean).length;
-
-                        const card = document.createElement('div');
-                        card.className = 'group-list-card';
-                        card.style.margin = '0';
-                        card.onclick = () => openGroupDetail(groupIndex);
-                        card.innerHTML = \`
-                            <div class="glc-avatar">\${initials}</div>
-                            <div class="glc-info">
-                                <div class="glc-name">\${groupName}</div>
-                                \${group.id ? \`<span class="glc-id" title="\${umEscapeHtml(group.id)}">\${shortGroupId}</span>\` : \`<span style="color:var(--orange);font-size:12px;">\${dict.no_id}</span>\`}
-                                \${chips ? \`<div class="glc-chips">\${chips}</div>\` : ''}
-                            </div>
-                            <div class="glc-side">
-                                <div class="glc-stats">
-                                    <strong>\${enabledCount}</strong>
-                                    <span>\${currentLang === 'en' ? 'active' : 'مفعل'}</span>
-                                </div>
-                                <i class="fas fa-chevron-\${currentLang==='en'?'right':'left'} glc-arrow"></i>
-                            </div>
-                        \`;
-                        container.appendChild(card);
-                    });
-                } catch(e) {
-                    console.error("Error rendering groups", e);
+                if (groupsArr.length === 0) {
+                    container.innerHTML = \`<div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
+                        <i class="fas fa-users-cog" style="font-size:48px; margin-bottom:16px; display:block; opacity:0.3;"></i>
+                        <div style="font-size:16px; font-weight:600;">\${currentLang === 'en' ? 'No custom groups yet' : 'لا توجد مجموعات مخصصة بعد'}</div>
+                        <div style="font-size:13px; margin-top:6px;">\${currentLang === 'en' ? 'Click "Add Group" to get started' : 'اضغط على "إضافة مجموعة" للبدء'}</div>
+                    </div>\`;
+                    return;
                 }
+
+                groupsArr.forEach((group, groupIndex) => {
+                    const knownGroup = fetchedGroups.find(g => g.id === group.id);
+                    const groupName = knownGroup ? knownGroup.name : (group.id ? group.id.split('@')[0].slice(-10) + '...' : dict.no_id);
+                    const initials = groupName.replace(/[^\u0600-\u06FFa-zA-Z]/g, '').slice(0, 2) || '؟';
+                    const shortGroupId = group.id ? group.id.split('@')[0] : '';
+
+                    let chips = '';
+                    if (group.enablePanicMode) chips += \`<span class="glc-chip orange"><i class="fas fa-radiation"></i> \${currentLang==='en'?'Panic Mode':'طوارئ'}</span>\`;
+                    if (group.enableAntiSpam)  chips += \`<span class="glc-chip orange"><i class="fas fa-shield-alt"></i> Anti-Spam</span>\`;
+                    if (group.enableAIFilter)  chips += \`<span class="glc-chip blue"><i class="fas fa-brain"></i> AI</span>\`;
+                    if (group.enableWordFilter) chips += \`<span class="glc-chip green"><i class="fas fa-filter"></i> \${currentLang==='en'?'Word Filter':'فلتر كلمات'}</span>\`;
+                    if (group.enableWelcomeMessage) chips += \`<span class="glc-chip green"><i class="fas fa-door-open"></i> \${currentLang==='en'?'Welcome':'ترحيب'}</span>\`;
+                    if (group.blockedTypes && group.blockedTypes.length > 0) chips += \`<span class="glc-chip red"><i class="fas fa-ban"></i> \${group.blockedTypes.length} \${currentLang==='en'?'blocked':'ممنوع'}</span>\`;
+
+                    const enabledCount = [
+                        group.enablePanicMode,
+                        group.enableAntiSpam,
+                        group.enableAIFilter,
+                        group.enableWordFilter,
+                        group.enableWelcomeMessage,
+                        group.enableJoinProfileScreening,
+                        group.enableWhitelist,
+                        group.enableBlacklist
+                    ].filter(Boolean).length;
+
+                    const card = document.createElement('div');
+                    card.className = 'group-list-card';
+                    card.onclick = () => openGroupDetail(groupIndex);
+                    card.innerHTML = \`
+                        <div class="glc-avatar">\${initials}</div>
+                        <div class="glc-info">
+                            <div class="glc-name">\${groupName}</div>
+                            \${group.id ? \`<span class="glc-id" title="\${umEscapeHtml(group.id)}">\${shortGroupId}</span>\` : \`<span style="color:var(--orange);font-size:12px;">\${dict.no_id}</span>\`}
+                            \${chips ? \`<div class="glc-chips">\${chips}</div>\` : ''}
+                        </div>
+                        <div class="glc-side">
+                            <div class="glc-stats">
+                                <strong>\${enabledCount}</strong>
+                                <span>\${currentLang === 'en' ? 'active' : 'مفعل'}</span>
+                            </div>
+                            <i class="fas fa-chevron-\${currentLang==='en'?'right':'left'} glc-arrow"></i>
+                        </div>
+                    \`;
+                    container.appendChild(card);
+                });
             }
 
             function openGroupDetail(groupIndex) {
@@ -3293,10 +3379,6 @@ module.exports = function renderDashboard(req, db, config) {
             renderDefaultWords();
             renderAITriggerWords();
             loadKnownGroups();
-            // Ensure default admin group renders
-            setTimeout(() => {
-                renderDefaultAdminGroupSelect();
-            }, 100);
             enforceFirstLoginChange();
 
             setInterval(async () => {
