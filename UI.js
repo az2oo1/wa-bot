@@ -793,6 +793,10 @@ module.exports = function renderDashboard(req, db, config) {
 
                 <div class="about-hero card">
                     <div class="about-hero-main">
+                        <div style="display:flex; align-items:center; gap:16px; margin-bottom:8px;">
+                            <img src="/public/logo.png" alt="Logo" style="width:64px; height:64px; border-radius:14px; object-fit:cover;">
+                            <span class="about-pill"><i class="fas fa-bolt"></i> ${t('يعمل الآن', 'System Active')}</span>
+                        </div>
                         <h3>${t('منصة أمان فورية لمجموعات واتساب', 'Instant safety platform for WhatsApp groups')}</h3>
                         <p>${t('نمزج التحليلات الفورية مع الذكاء الاصطناعي المحلي لفرض القواعد في أقل من ثانيتين، حتى عندما يكون الاتصال محدوداً.', 'We pair live analytics with on-device AI to enforce policies in under two seconds, even on limited connections.')}</p>
                         <div class="about-hero-actions">
@@ -2155,7 +2159,7 @@ module.exports = function renderDashboard(req, db, config) {
                     }
 
                     container.style.display = 'grid';
-                    container.style.gridTemplateColumns = 'repeat(auto-fit, minmax(340px, 1fr))';
+                    container.style.gridTemplateColumns = 'repeat(auto-fit, minmax(320px, 1fr))';
                     container.style.gap = '14px';
 
                     groupsArr.forEach((group, groupIndex) => {
