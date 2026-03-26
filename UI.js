@@ -900,478 +900,379 @@ module.exports = function renderDashboard(req, db, config) {
 
             <div class="page" id="page-about">
                 <style>
-                    #page-about { padding: 0 !important; }
-                    
-                    #page-about .hero-section {
-                        background: linear-gradient(135deg, rgba(0,200,83,0.12) 0%, rgba(64,196,255,0.08) 100%);
-                        border-bottom: 2px solid var(--card-border);
-                        padding: 60px 40px;
-                        margin: 0 0 40px 0;
-                        text-align: center;
-                    }
-                    
-                    #page-about .hero-icon {
-                        font-size: 64px;
-                        color: var(--accent);
-                        margin-bottom: 20px;
-                        display: inline-block;
-                        filter: drop-shadow(0 4px 16px rgba(0,200,83,0.2));
-                    }
-                    
-                    #page-about .hero-title {
-                        font-size: 42px;
-                        font-weight: 700;
+                    #page-about {
+                        padding: 0 !important;
+                        background: var(--bg);
                         color: var(--text);
-                        margin-bottom: 12px;
-                        letter-spacing: -0.5px;
+                        font-family: inherit;
                     }
-                    
-                    #page-about .hero-subtitle {
-                        font-size: 18px;
-                        color: var(--text-muted);
-                        margin-bottom: 24px;
-                        max-width: 600px;
-                        margin-left: auto;
-                        margin-right: auto;
+                    #page-about .about-hero {
+                        position: relative;
+                        padding: 80px 40px;
+                        background: linear-gradient(135deg, var(--card-bg) 0%, var(--bg) 100%);
+                        border-bottom: 1px solid var(--card-border);
+                        text-align: center;
+                        overflow: hidden;
                     }
-                    
-                    #page-about .hero-badges {
-                        display: flex;
-                        gap: 10px;
-                        justify-content: center;
-                        flex-wrap: wrap;
-                        margin-top: 20px;
+                    #page-about .about-hero::before {
+                        content: '';
+                        position: absolute;
+                        top: -50%;
+                        left: -50%;
+                        width: 200%;
+                        height: 200%;
+                        background: radial-gradient(circle at center, rgba(0,200,83,0.05) 0%, transparent 50%);
+                        z-index: 0;
                     }
-                    
-                    #page-about .hero-badge {
-                        background: var(--accent-dim);
-                        color: var(--accent);
-                        padding: 6px 16px;
-                        border-radius: 20px;
-                        font-size: 13px;
-                        font-weight: 600;
-                        border: 1px solid rgba(0,200,83,0.3);
-                        display: inline-flex;
-                        align-items: center;
-                        gap: 6px;
-                    }
-                    
-                    #page-about .hero-badge.version {
-                        background: var(--blue-dim);
-                        color: var(--blue);
-                        border-color: rgba(64,196,255,0.3);
-                    }
-                    
-                    #page-about .content-wrapper {
-                        padding: 0 40px 32px 40px;
-                        max-width: 1400px;
+                    #page-about .about-hero-content {
+                        position: relative;
+                        z-index: 1;
+                        max-width: 800px;
                         margin: 0 auto;
                     }
-                    
-                    #page-about .about-section,
-                    #page-about .features-section,
-                    #page-about .tech-section,
-                    #page-about .requirements-section,
-                    #page-about .developer-links-section {
-                        margin-bottom: 36px;
+                    #page-about .hero-logo {
+                        font-size: 72px;
+                        color: var(--accent);
+                        margin-bottom: 24px;
+                        text-shadow: 0 0 30px rgba(0,200,83,0.4);
+                        animation: float 6s ease-in-out infinite;
                     }
-                    
-                    #page-about .section-title {
-                        font-size: 24px;
-                        font-weight: 700;
-                        color: var(--text);
-                        margin-bottom: 16px;
+                    @keyframes float {
+                        0% { transform: translateY(0px); }
+                        50% { transform: translateY(-10px); }
+                        100% { transform: translateY(0px); }
+                    }
+                    #page-about .hero-title {
+                        font-size: 48px;
+                        font-weight: 800;
+                        margin: 0 0 16px 0;
+                        background: linear-gradient(90deg, var(--text) 0%, var(--text-muted) 100%);
+                        -webkit-background-clip: text;
+                        -webkit-text-fill-color: transparent;
+                        letter-spacing: -1px;
+                    }
+                    #page-about .hero-description {
+                        font-size: 20px;
+                        color: var(--text-muted);
+                        margin: 0 0 32px 0;
+                        line-height: 1.6;
+                    }
+                    #page-about .badge-container {
+                        display: flex;
+                        gap: 12px;
+                        justify-content: center;
+                        flex-wrap: wrap;
+                    }
+                    #page-about .status-badge {
+                        padding: 8px 16px;
+                        border-radius: 30px;
+                        font-size: 14px;
+                        font-weight: 600;
                         display: flex;
                         align-items: center;
-                        gap: 10px;
-                    }
-                    
-                    #page-about .section-title i {
-                        color: var(--accent);
-                    }
-                    
-                    #page-about .about-text {
+                        gap: 8px;
                         background: var(--card-bg);
                         border: 1px solid var(--card-border);
-                        border-radius: 12px;
-                        padding: 24px;
-                        font-size: 15px;
-                        line-height: 1.7;
-                        color: var(--text-muted);
+                        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+                        transition: transform 0.2s ease;
                     }
-                    
-                    #page-about .features-grid {
-                        display: grid;
-                        grid-template-columns: repeat(2, 1fr);
-                        gap: 16px;
-                    }
-                    
-                    #page-about .feature-item {
-                        background: var(--card-bg);
-                        border: 1.5px solid var(--card-border);
-                        border-radius: 12px;
-                        padding: 20px;
-                        display: flex;
-                        align-items: flex-start;
-                        gap: 14px;
-                        transition: all 0.3s ease;
-                    }
-                    
-                    #page-about .feature-item:hover {
-                        border-color: var(--accent);
-                        background: linear-gradient(180deg, rgba(0,200,83,0.04) 0%, var(--card-bg) 100%);
+                    #page-about .status-badge:hover {
                         transform: translateY(-2px);
-                        box-shadow: 0 8px 24px rgba(0,200,83,0.1);
+                    }
+                    #page-about .status-badge.accent { border-color: rgba(0,200,83,0.3); color: var(--accent); background: var(--accent-dim); }
+                    #page-about .status-badge.blue { border-color: rgba(64,196,255,0.3); color: var(--blue); background: rgba(64,196,255,0.1); }
+                    
+                    #page-about .about-container {
+                        max-width: 1200px;
+                        margin: 0 auto;
+                        padding: 60px 40px;
+                        display: flex;
+                        flex-direction: column;
+                        gap: 60px;
                     }
                     
-                    #page-about .feature-icon {
-                        width: 44px;
-                        height: 44px;
+                    #page-about .section-header {
+                        margin-bottom: 30px;
+                        border-bottom: 2px solid var(--card-border);
+                        padding-bottom: 12px;
+                    }
+                    #page-about .section-header h2 {
+                        font-size: 28px;
+                        color: var(--text);
+                        margin: 0;
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                    }
+                    #page-about .section-header h2 i { color: var(--accent); }
+                    
+                    #page-about .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
+                    #page-about .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; }
+                    
+                    #page-about .info-card {
+                        background: var(--card-bg);
+                        border: 1px solid var(--card-border);
+                        border-radius: 16px;
+                        padding: 30px;
+                        transition: all 0.3s ease;
+                        position: relative;
+                        overflow: hidden;
+                    }
+                    #page-about .info-card:hover {
+                        border-color: var(--accent);
+                        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+                        transform: translateY(-4px);
+                    }
+                    #page-about .info-card::before {
+                        content: '';
+                        position: absolute;
+                        top: 0;
+                        left: 0;
+                        width: 4px;
+                        height: 100%;
+                        background: var(--accent);
+                        opacity: 0;
+                        transition: opacity 0.3s ease;
+                    }
+                    #page-about .info-card:hover::before { opacity: 1; }
+                    
+                    #page-about .feat-icon {
+                        width: 50px;
+                        height: 50px;
+                        border-radius: 12px;
                         background: var(--accent-dim);
-                        border-radius: 10px;
+                        color: var(--accent);
                         display: flex;
                         align-items: center;
                         justify-content: center;
-                        color: var(--accent);
-                        font-size: 20px;
-                        flex-shrink: 0;
+                        font-size: 24px;
+                        margin-bottom: 20px;
                     }
-                    
-                    #page-about .feature-content {
-                        flex: 1;
-                    }
-                    
-                    #page-about .feature-name {
-                        font-size: 14px;
-                        font-weight: 700;
-                        color: var(--text);
-                        margin-bottom: 4px;
-                    }
-                    
-                    #page-about .feature-desc {
-                        font-size: 12px;
-                        color: var(--text-muted);
-                        line-height: 1.5;
-                    }
-                    
-                    #page-about .tech-grid {
-                        display: grid;
-                        grid-template-columns: repeat(3, 1fr);
-                        gap: 12px;
-                    }
-                    
-                    #page-about .tech-item {
-                        background: var(--card-bg);
-                        border: 1px solid var(--card-border);
-                        border-radius: 10px;
-                        padding: 14px;
-                        text-align: center;
-                        font-size: 13px;
-                        color: var(--text);
-                        font-weight: 500;
-                        transition: all 0.2s ease;
-                    }
-                    
-                    #page-about .tech-item:hover {
-                        border-color: var(--blue);
-                        background: var(--blue-dim);
-                        color: var(--blue);
-                    }
-                    
-                    #page-about .requirements-grid {
-                        display: grid;
-                        grid-template-columns: repeat(2, 1fr);
-                        gap: 14px;
-                    }
-                    
-                    #page-about .requirement-item {
-                        background: var(--card-bg);
-                        border: 1px solid var(--card-border);
-                        border-radius: 10px;
-                        padding: 18px;
-                    }
-                    
-                    #page-about .requirement-label {
-                        font-size: 12px;
-                        color: var(--text-muted);
-                        font-weight: 600;
-                        text-transform: uppercase;
-                        letter-spacing: 0.5px;
-                        margin-bottom: 6px;
-                    }
-                    
-                    #page-about .requirement-value {
-                        font-size: 15px;
-                        color: var(--text);
-                        font-weight: 600;
-                    }
-                    
-                    #page-about .developer-links-grid {
-                        display: grid;
-                        grid-template-columns: repeat(2, 1fr);
-                        gap: 20px;
-                    }
-                    
-                    #page-about .dev-card {
-                        background: var(--card-bg);
-                        border: 1.5px solid var(--card-border);
-                        border-radius: 12px;
-                        padding: 28px;
-                    }
-                    
-                    #page-about .dev-card.highlight {
-                        border-color: rgba(0,200,83,0.35);
-                        background: linear-gradient(180deg, rgba(0,200,83,0.04) 0%, var(--card-bg) 100%);
-                    }
-                    
-                    #page-about .dev-icon {
-                        font-size: 32px;
-                        margin-bottom: 12px;
-                        color: var(--accent);
-                    }
-                    
-                    #page-about .dev-card.highlight .dev-icon {
-                        color: var(--accent);
-                    }
-                    
-                    #page-about .dev-name {
+                    #page-about .feat-title {
                         font-size: 18px;
                         font-weight: 700;
                         color: var(--text);
-                        margin-bottom: 4px;
+                        margin-bottom: 10px;
                     }
-                    
-                    #page-about .dev-subtitle {
-                        font-size: 12px;
+                    #page-about .feat-desc {
+                        font-size: 14px;
                         color: var(--text-muted);
-                        margin-bottom: 14px;
+                        line-height: 1.6;
                     }
                     
-                    #page-about .dev-links {
-                        display: flex;
-                        flex-direction: column;
-                        gap: 6px;
-                    }
-                    
-                    #page-about .dev-link {
-                        background: transparent;
-                        border: 1.5px solid var(--card-border);
-                        color: var(--text-muted);
-                        padding: 8px 12px;
+                    #page-about .tech-pill {
+                        background: var(--card-bg);
+                        border: 1px solid var(--card-border);
+                        padding: 12px 20px;
                         border-radius: 8px;
-                        text-decoration: none;
-                        font-size: 13px;
+                        text-align: center;
                         font-weight: 600;
+                        color: var(--text-muted);
+                        transition: all 0.2s;
+                    }
+                    #page-about .tech-pill:hover {
+                        background: var(--accent-dim);
+                        color: var(--accent);
+                        border-color: var(--accent);
+                    }
+                    
+                    #page-about .req-box {
+                        display: flex;
+                        justify-content: space-between;
+                        padding: 16px 20px;
+                        background: var(--card-bg);
+                        border: 1px solid var(--card-border);
+                        border-radius: 8px;
+                    }
+                    #page-about .req-label { color: var(--text-muted); font-size: 14px; }
+                    #page-about .req-val { color: var(--text); font-weight: 700; font-size: 14px; }
+                    
+                    #page-about .dev-profile {
+                        display: flex;
+                        gap: 24px;
+                        align-items: flex-start;
+                        background: linear-gradient(to right, rgba(0,200,83,0.05), transparent);
+                        border: 1px solid var(--card-border);
+                        border-radius: 16px;
+                        padding: 30px;
+                    }
+                    #page-about .dev-avatar {
+                        width: 80px;
+                        height: 80px;
+                        border-radius: 50%;
+                        background: var(--card-bg);
+                        border: 2px solid var(--accent);
                         display: flex;
                         align-items: center;
-                        gap: 8px;
-                        transition: all 0.2s ease;
-                        cursor: pointer;
-                    }
-                    
-                    #page-about .dev-link:hover {
-                        border-color: var(--accent);
+                        justify-content: center;
+                        font-size: 40px;
                         color: var(--accent);
-                        background: var(--accent-dim);
+                        box-shadow: 0 0 20px var(--accent-dim);
                     }
-                    
-                    #page-about .links-section {
-                        display: flex;
-                        flex-direction: column;
-                        gap: 8px;
-                    }
-                    
-                    #page-about .link-btn {
-                        background: transparent;
-                        border: 1.5px solid var(--card-border);
-                        color: var(--text-muted);
-                        padding: 12px 16px;
-                        border-radius: 10px;
+                    #page-about .dev-info { flex: 1; }
+                    #page-about .dev-name { font-size: 24px; font-weight: 700; color: var(--text); margin: 0 0 4px 0; }
+                    #page-about .dev-handle { font-size: 14px; color: var(--accent); margin: 0 0 12px 0; font-family: monospace; }
+                    #page-about .dev-bio { font-size: 15px; color: var(--text-muted); line-height: 1.6; margin: 0 0 20px 0; max-width: 600px; }
+                    #page-about .dev-links { display: flex; gap: 12px; flex-wrap: wrap; }
+                    #page-about .social-btn {
+                        padding: 10px 20px;
+                        border-radius: 8px;
+                        background: var(--card-bg);
+                        border: 1px solid var(--card-border);
+                        color: var(--text);
                         text-decoration: none;
                         font-size: 14px;
                         font-weight: 600;
-                        display: flex;
-                        align-items: center;
-                        gap: 10px;
-                        transition: all 0.2s ease;
-                        cursor: pointer;
-                    }
-                    
-                    #page-about .link-btn:hover {
-                        border-color: var(--blue);
-                        color: var(--blue);
-                        background: var(--blue-dim);
-                    }
-                    
-                    #page-about .license-badge {
-                        background: var(--accent-dim);
-                        color: var(--accent);
                         display: inline-flex;
                         align-items: center;
-                        gap: 6px;
-                        padding: 6px 12px;
-                        border-radius: 20px;
-                        font-size: 12px;
-                        font-weight: 600;
-                        margin-top: 12px;
+                        gap: 8px;
+                        transition: all 0.2s;
                     }
-
-                    @media (max-width: 768px) {
-                        #page-about .hero-section { padding: 40px 18px; }
-                        #page-about .content-wrapper { padding: 0 18px 24px 18px; }
-                        #page-about .hero-title { font-size: 32px; }
-                        #page-about .hero-subtitle { font-size: 16px; }
-                        #page-about .features-grid { grid-template-columns: 1fr; }
-                        #page-about .tech-grid { grid-template-columns: repeat(2, 1fr); }
-                        #page-about .requirements-grid { grid-template-columns: 1fr; }
-                        #page-about .developer-links-grid { grid-template-columns: 1fr; }
+                    #page-about .social-btn:hover {
+                        border-color: var(--text);
+                        background: var(--text);
+                        color: var(--bg);
+                    }
+                    
+                    @media (max-width: 900px) {
+                        #page-about .grid-3 { grid-template-columns: repeat(2, 1fr); }
+                        #page-about .grid-2 { grid-template-columns: 1fr; }
+                        #page-about .dev-profile { flex-direction: column; align-items: center; text-align: center; }
+                        #page-about .dev-links { justify-content: center; }
+                    }
+                    @media (max-width: 600px) {
+                        #page-about .about-hero { padding: 60px 20px; }
+                        #page-about .hero-title { font-size: 36px; }
+                        #page-about .grid-3 { grid-template-columns: 1fr; }
+                        #page-about .about-container { padding: 40px 20px; gap: 40px; }
                     }
                 </style>
 
-                <div class="hero-section">
-                    <div class="hero-icon">
-                        <i class="fas fa-shield-alt"></i>
-                    </div>
-                    <h1 class="hero-title">${t('المشرف الآلي', 'WhatsApp Auto Mod')}</h1>
-                    <p class="hero-subtitle">${t('نظام إدارة مجموعات واتساب متقدم مع الذكاء الاصطناعي المحلي', 'Advanced WhatsApp group management with local AI intelligence')}</p>
-                    <div class="hero-badges">
-                        <span class="hero-badge"><i class="fas fa-rocket"></i> ${t('نشط', 'Active')}</span>
-                        <span class="hero-badge version"><i class="fas fa-code"></i> v6.4.0</span>
-                        <span class="hero-badge"><i class="fas fa-star"></i> ${t('مفتوح المصدر', 'Open Source')}</span>
+                <div class="about-hero">
+                    <div class="about-hero-content">
+                        <div class="hero-logo"><i class="fas fa-shield-alt"></i></div>
+                        <h1 class="hero-title">${t('المشرف الآلي', 'WhatsApp Auto Mod')}</h1>
+                        <p class="hero-description">${t('نظام إدارة مجموعات واتساب متقدم مع الذكاء الاصطناعي المحلي.', 'Advanced WhatsApp group management with local AI intelligence.')}</p>
+                        <div class="badge-container">
+                            <span class="status-badge accent"><i class="fas fa-check-circle"></i> ${t('نشط', 'Active')}</span>
+                            <span class="status-badge blue"><i class="fas fa-code-branch"></i> v6.4.0</span>
+                            <span class="status-badge"><i class="fab fa-osi"></i> ${t('مفتوح المصدر', 'Open Source')}</span>
+                        </div>
                     </div>
                 </div>
 
-                <div class="content-wrapper">
-                    <div class="about-section">
-                        <h2 class="section-title"><i class="fas fa-info-circle"></i> ${t('عن البرنامج', 'About')}</h2>
-                        <div class="about-text">
-                            ${t('هو نظام آلي ذكي لإدارة مجموعات واتساب يوفر حماية متقدمة من الرسائل غير المرغوبة والمحتوى المخالف. يتضمن تصفية كلمات مستخدمة، حجب الملحقات الخطرة، وإدارة قوائم حظر/سماح. يعمل البرنامج بذكاء اصطناعي محلي وواجهة تحكم متقدمة.', 'An intelligent automated system for managing WhatsApp groups that provides advanced protection against spam and inappropriate content. Features custom word filtering, malicious extension blocking, and blacklist/whitelist management. Powered by local AI with an advanced control dashboard.')}</div>
-                    </div>
+                <div class="about-container">
+                    
+                    <section class="overview-section">
+                        <div class="info-card" style="text-align: center; padding: 40px;">
+                            <h3 style="font-size: 22px; color: var(--text); margin-top: 0;">${t('عن النظام', 'About the System')}</h3>
+                            <p style="font-size: 16px; color: var(--text-muted); line-height: 1.8; max-width: 800px; margin: 0 auto;">
+                                ${t('هو نظام آلي ذكي لإدارة مجموعات واتساب يوفر حماية متقدمة من الرسائل غير المرغوبة والمحتوى المخالف. يتضمن تصفية كلمات مستخدمة، حجب الملحقات الخطرة، وإدارة قوائم حظر/سماح. يعمل بذكاء اصطناعي محلي ويوفر واجهة تحكم متقدمة.', 'An intelligent automated system for managing WhatsApp groups that provides advanced protection against spam and inappropriate content. Features custom word filtering, malicious extension blocking, and blacklist/whitelist management. Powered by local AI with an advanced dashboard.')}
+                            </p>
+                        </div>
+                    </section>
 
-                    <div class="features-section">
-                        <h2 class="section-title"><i class="fas fa-star"></i> ${t('الميزات الرئيسية', 'Key Features')}</h2>
-                        <div class="features-grid">
-                            <div class="feature-item">
-                                <div class="feature-icon"><i class="fas fa-brain"></i></div>
-                                <div class="feature-content">
-                                    <div class="feature-name">🧠 ${t('التصفية بالذكاء الاصطناعي', 'AI Moderation')}</div>
-                                    <div class="feature-desc">${t('كشف ومنع الرسائل غير المناسبة بذكاء محلي', 'Detect and block inappropriate messages with local AI')}</div>
-                                </div>
+                    <section>
+                        <div class="section-header">
+                            <h2><i class="fas fa-bolt"></i> ${t('الميزات الأساسية', 'Core Features')}</h2>
+                        </div>
+                        <div class="grid-3">
+                            <div class="info-card">
+                                <div class="feat-icon"><i class="fas fa-brain"></i></div>
+                                <div class="feat-title">${t('الذكاء الاصطناعي', 'AI Moderation')}</div>
+                                <div class="feat-desc">${t('كشف ومنع الرسائل غير المناسبة بذكاء محلي', 'Detect and block inappropriate messages dynamically.')}</div>
                             </div>
-                            <div class="feature-item">
-                                <div class="feature-icon"><i class="fas fa-ban"></i></div>
-                                <div class="feature-content">
-                                    <div class="feature-name">⚡ ${t('منع البريد المزعج', 'Anti-Spam')}</div>
-                                    <div class="feature-desc">${t('حماية من الرسائل الملحة والفيضانات', 'Protection against repetitive and flood messages')}</div>
-                                </div>
+                            <div class="info-card">
+                                <div class="feat-icon"><i class="fas fa-shield-virus"></i></div>
+                                <div class="feat-title">${t('منع البريد المزعج', 'Anti-Spam')}</div>
+                                <div class="feat-desc">${t('حماية من الرسائل الملحة والفيضانات', 'Protection against repetitive and flood messages.')}</div>
                             </div>
-                            <div class="feature-item">
-                                <div class="feature-icon"><i class="fas fa-list"></i></div>
-                                <div class="feature-content">
-                                    <div class="feature-name">🚫 ${t('قوائم الحظر والسماح', 'Blacklist/Whitelist')}</div>
-                                    <div class="feature-desc">${t('إدارة مرنة للأرقام المحظورة والمسموحة', 'Flexible management of blocked and allowed numbers')}</div>
-                                </div>
+                            <div class="info-card">
+                                <div class="feat-icon"><i class="fas fa-user-lock"></i></div>
+                                <div class="feat-title">${t('حظر وسماح مرن', 'Access Control')}</div>
+                                <div class="feat-desc">${t('إدارة مرنة للأرقام وقوائم الدخول', 'Flexible blacklist and whitelist configurations.')}</div>
                             </div>
-                            <div class="feature-item">
-                                <div class="feature-icon"><i class="fas fa-image"></i></div>
-                                <div class="feature-content">
-                                    <div class="feature-name">📂 ${t('تصفية الملفات', 'Media Filter')}</div>
-                                    <div class="feature-desc">${t('حظر أنواع معينة من الملفات بمرونة', 'Block specific file types with flexibility')}</div>
-                                </div>
+                            <div class="info-card">
+                                <div class="feat-icon"><i class="fas fa-photo-video"></i></div>
+                                <div class="feat-title">${t('تصفية الملفات', 'Media Filtering')}</div>
+                                <div class="feat-desc">${t('حظر أنواع معينة من المرفقات والملفات', 'Strict restrictions on unwanted or risky media assets.')}</div>
                             </div>
-                            <div class="feature-item">
-                                <div class="feature-icon"><i class="fas fa-globe"></i></div>
-                                <div class="feature-content">
-                                    <div class="feature-name">🛠️ ${t('واجهة متعددة اللغات', 'Multi-Language Dashboard')}</div>
-                                    <div class="feature-desc">${t('دعم كامل للعربية والإنجليزية', 'Full support for Arabic and English')}</div>
-                                </div>
+                            <div class="info-card">
+                                <div class="feat-icon"><i class="fas fa-sliders-h"></i></div>
+                                <div class="feat-title">${t('تحكم شامل', 'Advanced Control')}</div>
+                                <div class="feat-desc">${t('تحكم كامل في إعدادات كل مجموعة', 'Deep and granular configurations customizable per group.')}</div>
                             </div>
-                            <div class="feature-item">
-                                <div class="feature-icon"><i class="fas fa-database"></i></div>
-                                <div class="feature-content">
-                                    <div class="feature-name">💾 ${t('إدارة متقدمة', 'Advanced Management')}</div>
-                                    <div class="feature-desc">${t('تحكم كامل في إعدادات كل مجموعة', 'Complete control over each group settings')}</div>
-                                </div>
+                            <div class="info-card">
+                                <div class="feat-icon"><i class="fas fa-language"></i></div>
+                                <div class="feat-title">${t('تعدد اللغات', 'Multilingual')}</div>
+                                <div class="feat-desc">${t('دعم كامل للواجهتين العربية والإنجليزية', 'Native dashboard interfaces in both English and Arabic.')}</div>
                             </div>
                         </div>
+                    </section>
+
+                    <div class="grid-2">
+                        <section>
+                            <div class="section-header">
+                                <h2><i class="fas fa-layer-group"></i> ${t('التقنيات المستخدمة', 'Tech Stack')}</h2>
+                            </div>
+                            <div class="grid-2" style="gap: 12px;">
+                                <div class="tech-pill">whatsapp-web.js</div>
+                                <div class="tech-pill">Node.js / Express</div>
+                                <div class="tech-pill">better-sqlite3</div>
+                                <div class="tech-pill">Ollama AI</div>
+                                <div class="tech-pill">Docker</div>
+                                <div class="tech-pill">Vanilla JS / CSS</div>
+                            </div>
+                        </section>
+
+                        <section>
+                            <div class="section-header">
+                                <h2><i class="fas fa-server"></i> ${t('متطلبات التشغيل', 'System Requirements')}</h2>
+                            </div>
+                            <div style="display: flex; flex-direction: column; gap: 12px;">
+                                <div class="req-box">
+                                    <span class="req-label">${t('الذاكرة (بدون AI)', 'RAM (Base)')}</span>
+                                    <span class="req-val">2 GB</span>
+                                </div>
+                                <div class="req-box">
+                                    <span class="req-label">${t('الذاكرة (مع AI)', 'RAM (w/ AI)')}</span>
+                                    <span class="req-val">8 GB+</span>
+                                </div>
+                                <div class="req-box">
+                                    <span class="req-label">${t('التخزين', 'Storage')}</span>
+                                    <span class="req-val">5 GB+ (20GB+ AI)</span>
+                                </div>
+                                <div class="req-box">
+                                    <span class="req-label">${t('بيئة العمل', 'Environment')}</span>
+                                    <span class="req-val">Node 16+ / Docker</span>
+                                </div>
+                            </div>
+                        </section>
                     </div>
 
-                    <div class="tech-section">
-                        <h2 class="section-title"><i class="fas fa-microchip"></i> ${t('المكونات التقنية', 'Technology Stack')}</h2>
-                        <div class="tech-grid">
-                            <div class="tech-item">whatsapp-web.js</div>
-                            <div class="tech-item">better-sqlite3</div>
-                            <div class="tech-item">Ollama AI</div>
-                            <div class="tech-item">Express.js</div>
-                            <div class="tech-item">Node.js 16+</div>
-                            <div class="tech-item">Docker</div>
-                            <div class="tech-item">IBM Plex Sans</div>
-                            <div class="tech-item">Font Awesome 6</div>
-                            <div class="tech-item">SQLite 3</div>
+                    <section>
+                        <div class="section-header">
+                            <h2><i class="fas fa-laptop-code"></i> ${t('المطور', 'Developer')}</h2>
                         </div>
-                    </div>
-
-                    <div class="requirements-section">
-                        <h2 class="section-title"><i class="fas fa-cube"></i> ${t('متطلبات النظام', 'System Requirements')}</h2>
-                        <div class="requirements-grid">
-                            <div class="requirement-item">
-                                <div class="requirement-label">${t('الحد الأدنى للذاكرة', 'Minimum RAM')}</div>
-                                <div class="requirement-value">2 GB</div>
+                        <div class="dev-profile">
+                            <div class="dev-avatar">
+                                <i class="fas fa-user-astronaut"></i>
                             </div>
-                            <div class="requirement-item">
-                                <div class="requirement-label">${t('التخزين الأساسي', 'Base Storage')}</div>
-                                <div class="requirement-value">5 GB+</div>
-                            </div>
-                            <div class="requirement-item">
-                                <div class="requirement-label">${t('RAM للذكاء الاصطناعي', 'AI RAM')}</div>
-                                <div class="requirement-value">8 GB+</div>
-                            </div>
-                            <div class="requirement-item">
-                                <div class="requirement-label">${t('تخزين AI', 'AI Storage')}</div>
-                                <div class="requirement-value">10-20 GB</div>
-                            </div>
-                            <div class="requirement-item">
-                                <div class="requirement-label">${t('أنظمة التشغيل', 'Operating Systems')}</div>
-                                <div class="requirement-value">Linux / macOS / Windows</div>
-                            </div>
-                            <div class="requirement-item">
-                                <div class="requirement-label">${t('الإصدار الأدنى لـ Node', 'Node.js Version')}</div>
-                                <div class="requirement-value">16.0+</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="developer-links-section">
-                        <h2 class="section-title"><i class="fas fa-user-code"></i> ${t('المطور والروابط', 'Developer & Links')}</h2>
-                        <div class="developer-links-grid">
-                            <div class="dev-card highlight">
-                                <div class="dev-icon"><i class="fas fa-user-circle"></i></div>
-                                <div class="dev-name">Abdulaziz Algassem</div>
-                                <div class="dev-subtitle"><i class="fas fa-code-branch"></i> INTERSTELLAR</div>
-                                <p style="font-size: 12px; color: var(--text-muted); margin: 10px 0; line-height: 1.5;">${t('طالب تقنية معلومات متخصص في تطوير الحلول الذكية والتطبيقات المتقدمة.', 'IT student specialized in developing intelligent solutions and advanced applications.')}</p>
+                            <div class="dev-info">
+                                <h3 class="dev-name">Abdulaziz Algassem</h3>
+                                <p class="dev-handle">@az2oo1 / INTERSTELLAR</p>
+                                <p class="dev-bio">
+                                    ${t('طالب تقنية معلومات متخصص في تطوير الحلول الذكية والتطبيقات المتقدمة.', 'IT student specialized in developing intelligent solutions and advanced applications.')}
+                                </p>
                                 <div class="dev-links">
-                                    <a href="https://github.com/az2oo1" target="_blank" class="dev-link"><i class="fab fa-github"></i> GitHub</a>
-                                    <a href="https://instagram.com/az2oo1" target="_blank" class="dev-link"><i class="fab fa-instagram"></i> Instagram</a>
-                                    <a href="https://github.com/az2oo1?tab=repositories" target="_blank" class="dev-link"><i class="fas fa-star"></i> ${t('المشاريع', 'Projects')}</a>
-                                </div>
-                            </div>
-
-                            <div class="dev-card">
-                                <div class="dev-icon"><i class="fas fa-link"></i></div>
-                                <div class="dev-name">${t('الروابط المهمة', 'Important Links')}</div>
-                                <div class="dev-subtitle" style="margin-bottom: 18px;">${t('تواصل وتحديثات', 'Communication & Updates')}</div>
-                                <div class="links-section">
-                                    <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="link-btn"><i class="fab fa-github"></i> ${t('مستودع GitHub', 'GitHub Repository')}</a>
-                                    <a href="https://github.com/az2oo1/wa-bot/issues" target="_blank" class="link-btn"><i class="fas fa-bug"></i> ${t('إبلاغ عن مشكلة', 'Report Issues')}</a>
-                                    <a href="https://github.com/az2oo1/wa-bot/discussions" target="_blank" class="link-btn"><i class="fas fa-comments"></i> ${t('المناقشات', 'Discussions')}</a>
-                                    <a href="https://github.com/az2oo1/wa-bot/releases" target="_blank" class="link-btn"><i class="fas fa-tags"></i> ${t('الإصدارات', 'Releases')}</a>
-                                </div>
-                                <div class="license-badge">
-                                    <i class="fas fa-file-contract"></i> ${t('مفتوح المصدر', 'Open Source')}
+                                    <a href="https://github.com/az2oo1" target="_blank" class="social-btn"><i class="fab fa-github"></i> GitHub</a>
+                                    <a href="https://instagram.com/az2oo1" target="_blank" class="social-btn"><i class="fab fa-instagram"></i> Instagram</a>
+                                    <a href="https://github.com/az2oo1/wa-bot" target="_blank" class="social-btn" style="border-color: var(--accent); color: var(--accent);"><i class="fas fa-star"></i> Repository</a>
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    </section>
+
                 </div>
             </div>
 
