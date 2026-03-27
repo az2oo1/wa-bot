@@ -1212,10 +1212,10 @@ module.exports = function renderDashboard(req, db, config) {
                         </div>
                         <div class="dev-profile" style="margin-bottom: 20px;">
                             <div class="dev-avatar">
-                                <img src="https://github.com/az2oo1.png" alt="عبدالعزيز القاسم" style="width: 100%; height: 100%; object-fit: cover;">
+                                <img src="https://github.com/az2oo1.png" alt="${t('عبدالعزيز القاسم', 'Abdulaziz Algassem')}" style="width: 100%; height: 100%; object-fit: cover;">
                             </div>
                             <div class="dev-info">
-                                <h3 class="dev-name">عبدالعزيز القاسم</h3>
+                                <h3 class="dev-name">${t('عبدالعزيز القاسم', 'Abdulaziz Algassem')}</h3>
                                 <p class="dev-handle">@az2oo1 / INTERSTELLAR</p>
                                 <p class="dev-bio">
                                     ${t('طالب تقنية معلومات متخصص في تطوير الحلول الذكية والتطبيقات المتقدمة.', 'IT student specialized in developing intelligent solutions and advanced applications.')}
@@ -1230,10 +1230,10 @@ module.exports = function renderDashboard(req, db, config) {
 
                         <div class="info-card" style="display: flex; gap: 16px; align-items: flex-start; padding: 16px 20px;">
                             <div class="dev-avatar" style="width: 50px; height: 50px; flex-shrink: 0; border-width: 1.5px; overflow: hidden;">
-                                <img src="https://github.com/Fahad-Alshalawi1.png" alt="فهد الشلوي" style="width: 100%; height: 100%; object-fit: cover;">
+                                <img src="https://github.com/Fahad-Alshalawi1.png" alt="${t('فهد الشلوي', 'Fahad Alshalawi')}" style="width: 100%; height: 100%; object-fit: cover;">
                             </div>
                             <div class="dev-info">
-                                <h3 class="dev-name" style="font-size: 18px; margin: 0 0 2px 0;">فهد الشلوي</h3>
+                                <h3 class="dev-name" style="font-size: 18px; margin: 0 0 2px 0;">${t('فهد الشلوي', 'Fahad Alshalawi')}</h3>
                                 <p class="dev-handle" style="font-size: 13px; margin: 0 0 8px 0; color: var(--blue);"><i class="fas fa-brain"></i> ${t('مساهم الذكاء الاصطناعي', 'AI Contributor')}</p>
                                 <p class="dev-bio" style="font-size: 13px; margin: 0 0 12px 0; line-height: 1.5;">
                                     ${t('مساعدة قيمة في تطوير خوارزميات الذكاء الاصطناعي وتجهيزها للعمل داخل النظام.', 'Valuable assistance in developing and integrating AI capabilities into the system.')}
