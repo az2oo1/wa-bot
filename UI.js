@@ -409,14 +409,27 @@ module.exports = function renderDashboard(req, db, config) {
                     #page-blacklist .page-header p { color: var(--text); opacity: .84; }
                     #page-blacklist .field-label { color: var(--text); opacity: .78; }
                     #page-blacklist .toggle-label small { color: var(--text); opacity: .72; }
-                    #page-blacklist .blacklist-grid { align-items: start; }
+                    #page-blacklist .blacklist-grid { 
+                        align-items: start;
+                        grid-template-columns: 1fr 1fr;
+                    }
+                    #page-blacklist .blacklist-column {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 20px;
+                        min-width: 0;
+                    }
+                    #page-blacklist .blacklist-column .card { margin-bottom: 0; }
                     #page-blacklist .purge-card {
                         border-color: rgba(255,171,64,0.55);
                         box-shadow: 0 0 0 1px rgba(255,171,64,0.18) inset;
                     }
+                    @media (max-width:1100px) {
+                        #page-blacklist .blacklist-grid { grid-template-columns: 1fr; }
+                    }
                 </style>
                 <div class="card-grid blacklist-grid">
-                    
+                    <div class="blacklist-column">
                     <div class="card danger blacklist-main-card">
                         <div class="card-header">
                             <h3 style="color:var(--red);"><i class="fas fa-user-plus"></i> ${t('القائمة السوداء (حظر)', 'Blacklist (Banned)')}</h3>
@@ -442,6 +455,16 @@ module.exports = function renderDashboard(req, db, config) {
                         </div>
                     </div>
 
+                    <div class="card warning purge-card">
+                        <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
+                        <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
+                        <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; justify-content:center; padding:15px; font-size:16px;" onclick="purgeBlacklisted()">
+                            <i class="fas fa-gavel"></i> ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
+                        </button>
+                    </div>
+                    </div>
+
+                    <div class="blacklist-column">
                     <div class="card danger blocked-ext-card">
                         <div class="card-header">
                             <h3 style="color:var(--red);"><i class="fas fa-globe"></i> ${t('رموز الدول المحظورة', 'Blocked Extensions')}</h3>
@@ -456,14 +479,6 @@ module.exports = function renderDashboard(req, db, config) {
                         </div>
                         <label class="field-label">${t('رموز الدول المحظورة حالياً', 'Currently Blocked Extensions')}</label>
                         <div id="blockedExtensionsContainer" class="chip-container"></div>
-                    </div>
-
-                    <div class="card warning purge-card">
-                        <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
-                        <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
-                        <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; justify-content:center; padding:15px; font-size:16px;" onclick="purgeBlacklisted()">
-                            <i class="fas fa-gavel"></i> ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
-                        </button>
                     </div>
 
                     <div class="card success whitelist-card">
@@ -489,6 +504,7 @@ module.exports = function renderDashboard(req, db, config) {
                                 </div>
                             </div>
                         </div>
+                    </div>
                     </div>
 
 
@@ -1196,10 +1212,10 @@ module.exports = function renderDashboard(req, db, config) {
                         </div>
                         <div class="dev-profile" style="margin-bottom: 20px;">
                             <div class="dev-avatar">
-                                <img src="https://github.com/az2oo1.png" alt="Abdulaziz Algassem" style="width: 100%; height: 100%; object-fit: cover;">
+                                <img src="https://github.com/az2oo1.png" alt="عبدالعزيز القاسم" style="width: 100%; height: 100%; object-fit: cover;">
                             </div>
                             <div class="dev-info">
-                                <h3 class="dev-name">Abdulaziz Algassem</h3>
+                                <h3 class="dev-name">عبدالعزيز القاسم</h3>
                                 <p class="dev-handle">@az2oo1 / INTERSTELLAR</p>
                                 <p class="dev-bio">
                                     ${t('طالب تقنية معلومات متخصص في تطوير الحلول الذكية والتطبيقات المتقدمة.', 'IT student specialized in developing intelligent solutions and advanced applications.')}
@@ -1214,10 +1230,10 @@ module.exports = function renderDashboard(req, db, config) {
 
                         <div class="info-card" style="display: flex; gap: 16px; align-items: flex-start; padding: 16px 20px;">
                             <div class="dev-avatar" style="width: 50px; height: 50px; flex-shrink: 0; border-width: 1.5px; overflow: hidden;">
-                                <img src="https://github.com/Fahad-Alshalawi1.png" alt="Fahad-Alshalawi" style="width: 100%; height: 100%; object-fit: cover;">
+                                <img src="https://github.com/Fahad-Alshalawi1.png" alt="فهد الشلوي" style="width: 100%; height: 100%; object-fit: cover;">
                             </div>
                             <div class="dev-info">
-                                <h3 class="dev-name" style="font-size: 18px; margin: 0 0 2px 0;">Fahad-Alshalawi</h3>
+                                <h3 class="dev-name" style="font-size: 18px; margin: 0 0 2px 0;">فهد الشلوي</h3>
                                 <p class="dev-handle" style="font-size: 13px; margin: 0 0 8px 0; color: var(--blue);"><i class="fas fa-brain"></i> ${t('مساهم الذكاء الاصطناعي', 'AI Contributor')}</p>
                                 <p class="dev-bio" style="font-size: 13px; margin: 0 0 12px 0; line-height: 1.5;">
                                     ${t('مساعدة قيمة في تطوير خوارزميات الذكاء الاصطناعي وتجهيزها للعمل داخل النظام.', 'Valuable assistance in developing and integrating AI capabilities into the system.')}
