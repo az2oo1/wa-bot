@@ -2140,7 +2140,7 @@ module.exports = function renderDashboard(req, db, config) {
             }
 
             async function umDeletePermissionGroup(id) {
-                if (!confirm(currentLang === 'en' ? 'Delete this permission group?' : 'هل تريد حذف مجموعة الصلاحيات؟')) return;
+                if (!await showConfirmModal(currentLang === 'en' ? 'Delete this permission group?' : 'هل تريد حذف مجموعة الصلاحيات؟')) return;
                 try {
                     await umApi('/api/access/permission-groups/delete', {
                         method: 'POST',
@@ -2183,7 +2183,7 @@ module.exports = function renderDashboard(req, db, config) {
                     umSetStatus('um_access_status', currentLang === 'en' ? 'Select a user first' : 'اختر مستخدماً أولاً', true);
                     return;
                 }
-                if (!confirm(currentLang === 'en' ? 'Delete selected user?' : 'هل تريد حذف المستخدم المحدد؟')) return;
+                if (!await showConfirmModal(currentLang === 'en' ? 'Delete selected user?' : 'هل تريد حذف المستخدم المحدد؟')) return;
                 try {
                     await umApi('/api/users/delete', {
                         method: 'POST',
@@ -2520,8 +2520,8 @@ module.exports = function renderDashboard(req, db, config) {
                 document.getElementById('detailGroupName').textContent = groupName;
                 document.getElementById('detailGroupId').textContent = group.id || dict.no_id;
 
-                document.getElementById('detailDeleteBtn').onclick = () => {
-                    if (confirm(dict.delete_confirm.replace(/<[^>]*>?/gm, ''))) {
+                document.getElementById('detailDeleteBtn').onclick = async () => {
+                    if (await showConfirmModal(dict.delete_confirm.replace(/<[^>]*>?/gm, ''))) {
                         groupsArr.splice(groupIndex, 1);
                         closeGroupDetail();
                     }
@@ -3058,7 +3058,7 @@ module.exports = function renderDashboard(req, db, config) {
             }
 
             async function purgeBlacklisted() {
-                if(!confirm(dict.purge_warn.replace(/<[^>]*>?/gm, ''))) return;
+                if(!await showConfirmModal(dict.purge_warn.replace(/<[^>]*>?/gm, ''))) return;
                 const btn = document.getElementById('purgeBtn');
                 const originalHTML = btn.innerHTML;
                 btn.innerHTML = dict.purging;
@@ -3176,8 +3176,8 @@ module.exports = function renderDashboard(req, db, config) {
                 openGroupDetail(groupsArr.length - 1);
             }
 
-            function removeGroup(index) {
-                if(confirm(dict.delete_confirm.replace(/<[^>]*>?/gm, ''))) {
+            async function removeGroup(index) {
+                if(await showConfirmModal(dict.delete_confirm.replace(/<[^>]*>?/gm, ''))) {
                     groupsArr.splice(index, 1);
                     closeGroupDetail();
                 }
@@ -3468,8 +3468,8 @@ module.exports = function renderDashboard(req, db, config) {
 
             function clearQAMedia(groupIndex) { selectQAMedia(groupIndex, ''); }
 
-            function deleteGroupMedia(groupIndex, filename) {
-                if (!confirm(currentLang==='en' ? \`Delete \${filename}?\` : \`حذف \${filename}؟\`)) return;
+            async function deleteGroupMedia(groupIndex, filename) {
+                if (!await showConfirmModal(currentLang==='en' ? \`Delete \${filename}?\` : \`حذف \${filename}؟\`)) return;
                 const groupId = encodeURIComponent(groupsArr[groupIndex].id);
                 fetch(\`/api/media/delete/\${groupId}/\${encodeURIComponent(filename)}\`, { method:'DELETE' })
                     .then(() => {
@@ -3679,7 +3679,7 @@ module.exports = function renderDashboard(req, db, config) {
                         custom_groups_clear: document.getElementById('import_custom_groups_clear').checked
                     };
 
-                    if (!confirm(currentLang==='en' ? 'Confirm import? This action may override existing data.' : 'هل تؤكد الاستيراد؟ قد يؤدي هذا إلى إلغاء البيانات الموجودة.')) {
+                    if (!await showConfirmModal(currentLang==='en' ? 'Confirm import? This action may override existing data.' : 'هل تؤكد الاستيراد؟ قد يؤدي هذا إلى إلغاء البيانات الموجودة.')) {
                         return;
                     }
 
@@ -3770,6 +3770,19 @@ module.exports = function renderDashboard(req, db, config) {
             }
             
         </script>
+        <div class="modal" id="confirmModal">
+            <div class="modal-content" style="max-width:460px;">
+                <div class="modal-header" style="margin-bottom:14px;">
+                    <h3 id="confirmModalTitle"><i class="fas fa-circle-question"></i> ${t('تأكيد الإجراء', 'Confirm Action')}</h3>
+                    <button type="button" class="close-modal" id="confirmModalClose">&times;</button>
+                </div>
+                <div id="confirmModalMessage" style="color:var(--text-muted);line-height:1.8;margin-bottom:22px;"></div>
+                <div style="display:flex;justify-content:flex-end;gap:10px;">
+                    <button type="button" class="btn btn-ghost" id="confirmModalCancel">${t('إلغاء', 'Cancel')}</button>
+                    <button type="button" class="btn btn-danger" id="confirmModalConfirm">${t('تأكيد', 'Confirm')}</button>
+                </div>
+            </div>
+        </div>
     </body>
     </html>
     `;
