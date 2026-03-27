@@ -278,7 +278,7 @@ module.exports = function renderDashboard(req, db, config) {
         <nav class="sidebar" id="sidebar">
             <div class="sidebar-logo">
                 <div class="logo-icon"><img src="/public/logo.png?v=2" alt="${t('شعار البوت', 'Bot Logo')}" style="width:100%;height:100%;object-fit:cover;border-radius:14px;display:block;" onerror="if(!this.dataset.retry){this.dataset.retry='1';this.src='public/logo.png?v=2';return;}this.style.display='none';this.nextElementSibling.style.display='flex';"><i class="fas fa-robot" style="display:none;align-items:center;justify-content:center;width:100%;height:100%;font-size:22px;color:#fff;"></i></div>
-                <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V6.5', 'Dashboard V6.4')}</small></div>
+                <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V6.5.1', 'Dashboard V6.5.1')}</small></div>
             </div>
 
             <div class="sidebar-nav-scroll">
@@ -1106,7 +1106,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <p class="hero-description">${t('نظام إدارة مجموعات واتساب متقدم مع الذكاء الاصطناعي المحلي.', 'Advanced WhatsApp group management with local AI intelligence.')}</p>
                         <div class="badge-container">
                             <span class="status-badge accent"><i class="fas fa-check-circle"></i> ${t('نشط', 'Active')}</span>
-                            <span class="status-badge blue"><i class="fas fa-code-branch"></i> v6.5.0</span>
+                            <span class="status-badge blue"><i class="fas fa-code-branch"></i> v6.5.1</span>
                             <span class="status-badge"><i class="fab fa-osi"></i> ${t('مفتوح المصدر', 'Open Source')}</span>
                         </div>
                         <div style="margin-top: 28px;">
