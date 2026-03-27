@@ -409,27 +409,10 @@ module.exports = function renderDashboard(req, db, config) {
                     #page-blacklist .page-header p { color: var(--text); opacity: .84; }
                     #page-blacklist .field-label { color: var(--text); opacity: .78; }
                     #page-blacklist .toggle-label small { color: var(--text); opacity: .72; }
-                    #page-blacklist .blacklist-grid { 
-                        align-items: start;
-                        gap: 24px;
-                        grid-template-columns: 1fr 1fr;
-                    }
-                    #page-blacklist .blacklist-main-card { grid-column: 1; grid-row: 1; }
-                    #page-blacklist .blocked-ext-card { grid-column: 2; grid-row: 1; }
+                    #page-blacklist .blacklist-grid { align-items: start; }
                     #page-blacklist .purge-card {
-                        grid-column: 1; grid-row: 2;
                         border-color: rgba(255,171,64,0.55);
                         box-shadow: 0 0 0 1px rgba(255,171,64,0.18) inset;
-                    }
-                    #page-blacklist .whitelist-card { grid-column: 2; grid-row: 2; }
-                    @media (max-width:1100px) {
-                        #page-blacklist .blacklist-main-card,
-                        #page-blacklist .blocked-ext-card,
-                        #page-blacklist .whitelist-card,
-                        #page-blacklist .purge-card {
-                            grid-column: auto;
-                            grid-row: auto;
-                        }
                     }
                 </style>
                 <div class="card-grid blacklist-grid">
