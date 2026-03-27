@@ -1552,7 +1552,12 @@ module.exports = function renderDashboard(req, db, config) {
 
             async function loadKnownGroups() {
                 try {
-                    const res = await fetch('/api/groups');
+                    const res = await fetch('/api/groups', { cache: 'no-store' });
+                    if (res.status === 401) {
+                        window.location.replace('/login');
+                        return;
+                    }
+                    if (!res.ok) return;
                     fetchedGroups = await res.json();
 
                     const defAdminContainer = document.getElementById('defaultAdminGroupContainer');
@@ -1632,7 +1637,11 @@ module.exports = function renderDashboard(req, db, config) {
 
             async function enforceFirstLoginChange() {
                 try {
-                    const res = await fetch('/auth/me');
+                    const res = await fetch('/auth/me', { cache: 'no-store' });
+                    if (res.status === 401) {
+                        window.location.replace('/login');
+                        return;
+                    }
                     if (!res.ok) return;
                     const me = await res.json();
                     if (!me || !me.mustChangeCredentials) return;
@@ -3590,7 +3599,12 @@ module.exports = function renderDashboard(req, db, config) {
 
             setInterval(async () => {
                 try {
-                    let res = await fetch('/api/status?lang=' + currentLang);
+                    let res = await fetch('/api/status?lang=' + currentLang, { cache: 'no-store' });
+                    if (res.status === 401) {
+                        window.location.replace('/login');
+                        return;
+                    }
+                    if (!res.ok) return;
                     let data = await res.json();
                     renderDashboardStatus(data.statusText || '', data.statusKind || 'unknown');
 
