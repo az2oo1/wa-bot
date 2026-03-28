@@ -3403,34 +3403,34 @@ module.exports = function renderDashboard(req, db, config) {
                 if (!container) return;
                 const qaList = groupsArr[groupIndex].qaList || [];
                 container.innerHTML = qaList.map((qa, qaIdx) => \`
-                    <div class="group-card" style="margin-bottom:10px;">
-                        <div class="group-card-header" style="padding:12px;">
-                            <div class="group-card-title" style="font-size:14px;">
-                                <i class="fas fa-question" style="color:var(--blue);"></i> \${currentLang==='en'?'Question Variations':'صيغ الأسئلة'} (\${(qa.questions || []).length})
-                            </div>
-                            <div style="display:flex;gap:8px;">
-                                <button type="button" class="icon-btn" onclick="copyQA(\${groupIndex}, \${qaIdx})" style="background:rgba(255,160,0,0.1);color:#ffa000;border-color:rgba(255,160,0,0.3);" title="\${currentLang==='en'?'Copy':'نسخ'}">
-                                    <i class="fas fa-copy"></i>
-                                </button>
-                                <button type="button" class="icon-btn" onclick="editGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="\${currentLang==='en'?'Edit':'تعديل'}">
-                                    <i class="fas fa-edit"></i>
-                                </button>
-                                <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);" title="\${currentLang==='en'?'Delete':'حذف'}">
-                                    <i class="fas fa-trash"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="group-card-body" style="padding:12px;">
-                            <div style="margin-bottom:10px;">
-                                <div class="chip-container" style="background:rgba(64,196,255,0.05);border-color:rgba(64,196,255,0.2);">\${(qa.questions || []).map(q => \`<div class="chip" style="background:rgba(64,196,255,0.15);color:var(--blue);border-color:rgba(64,196,255,0.3);"><i class="fas fa-search"></i> \${q}</div>\`).join('')}</div>
-                            </div>
-                            <div style="color:var(--text-muted);font-size:13px;margin-bottom:6px;">
-                                <strong>\${currentLang==='en'?'Answer':'الإجابة'}:</strong> \${qa.answer || '(empty)'}
-                            </div>
-                            \${qa.mediaFile ? \`<div style="display:flex;align-items:center;gap:6px;font-size:12px;color:#64dc96;"><i class="fas fa-paperclip"></i> \${qa.mediaFile}</div>\` : ''}
-                        </div>
-                    </div>
-                \`).join('');
+                                    <div class="group-card" style="margin-bottom:0; display:flex; flex-direction:column; border:1px solid rgba(255,255,255,0.05); background:var(--card-bg);">
+                                        <div class="group-card-header" style="padding:14px; border-bottom:1px solid rgba(255,255,255,0.05);">
+                                            <div class="group-card-title" style="font-size:13px; font-weight:bold; color:var(--text);">
+                                                <i class="fas fa-bolt" style="color:var(--accent);"></i> \${qa.questions ? qa.questions.length : 0} \${currentLang==='en'?'Triggers':'محفزات'}
+                                            </div>
+                                            <div style="display:flex;gap:6px;">
+                                                <button type="button" class="icon-btn" onclick="copyQA(\${groupIndex}, \${qaIdx})" style="background:rgba(255,160,0,0.1);color:#ffa000;border-color:rgba(255,160,0,0.3); width:28px; height:28px;" title="\${currentLang==='en'?'Copy':'نسخ'}">
+                                                    <i class="fas fa-copy"></i>
+                                                </button>
+                                                <button type="button" class="icon-btn" onclick="editGroupQA(\${groupIndex}, \${qaIdx})" style="background:rgba(64,196,255,0.1);color:var(--blue);border-color:rgba(64,196,255,0.3); width:28px; height:28px;" title="\${currentLang==='en'?'Edit':'تعديل'}">
+                                                    <i class="fas fa-pen"></i>
+                                                </button>
+                                                <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" style="background:rgba(255,82,82,0.1);color:var(--red);border-color:rgba(255,82,82,0.3); width:28px; height:28px;" title="\${currentLang==='en'?'Delete':'حذف'}">
+                                                    <i class="fas fa-trash"></i>
+                                                </button>
+                                            </div>
+                                        </div>
+                                        <div class="group-card-body" style="padding:14px; flex:1; display:flex; flex-direction:column;">
+                                            <div style="margin-bottom:12px;">
+                                                <div class="chip-container" style="gap:4px; max-height:60px; overflow-y:auto; padding-right:4px;">\${(qa.questions || []).map((q) => \`<div class="chip" style="background:var(--input-bg); color:var(--text); border:1px solid var(--card-border); font-size:11px; padding:2px 8px;"><i class="fas fa-search" style="color:var(--text-muted); font-size:10px;"></i> \${q}</div>\`).join('')}</div>
+                                            </div>
+                                            <div style="color:var(--text-muted); font-size:13px; line-height:1.5; flex:1; background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; border-left:3px solid var(--card-border);">
+                                                \${(qa.answer || '').substring(0, 150) + (qa.answer && qa.answer.length > 150 ? '...' : '') || '<em style="opacity:0.5;">(empty)</em>'}
+                                            </div>
+                                            \${qa.mediaFile ? \`<div style="margin-top:12px;display:flex;align-items:center;gap:6px;font-size:11px;color:#64dc96; background:rgba(100,220,150,0.05); padding:6px 10px; border-radius:6px; border:1px dashed rgba(100,220,150,0.3);"><i class="fas fa-paperclip"></i> \${qa.mediaFile}</div>\` : ''}
+                                            \${qa.eventDates && qa.eventDates.length > 0 ? \`<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--blue); background:rgba(64,196,255,0.05); padding:6px 10px; border-radius:6px; border:1px dashed rgba(64,196,255,0.3);"><i class="fas fa-calendar-alt"></i> \${qa.eventDates.length} \${currentLang==='en'?'Event(s)':'حدث/أحداث'}</div>\` : ''}
+                                        </div>
+                                    </div>\`).join('');
             }
 
             // ── Media management for Q&A ──────────────────────────────────────
