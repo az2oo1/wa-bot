@@ -2744,7 +2744,7 @@ module.exports = function renderDashboard(req, db, config) {
                                     <button type="button" class="btn btn-primary btn-sm" onclick="addEventDate(\${groupIndex})"><i class="fas fa-plus"></i> \${currentLang==='en'?'Add Event':'إضافة حدث'}</button>
                                 </div>
                                 <div id="event_dates_container_\${groupIndex}" style="margin-bottom: 20px;">
-                                    \${(group.eventDates || []).map((ed, edIdx) => {
+                                    \${(group.currentQAEventDates || []).map((ed, edIdx) => {
                                         return \`<div class="field-row" style="margin-bottom:10px; background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; border: 1px solid var(--card-border); align-items: flex-end; gap: 12px;">
                                             <div class="field-group" style="margin-bottom:0; flex: 1.5;">
                                                 <label class="field-label" style="font-size:10px;">\${currentLang==='en'?'Label (e.g. Exam)':'العنوان (مثل: اختبار)'}</label>
@@ -2757,13 +2757,13 @@ module.exports = function renderDashboard(req, db, config) {
                                             <button type="button" class="icon-btn" onclick="removeEventDate(\${groupIndex}, \${edIdx})" style="border-color:rgba(255,82,82,0.3);color:var(--red);" title="\${currentLang==='en'?'Delete event':'حذف الحدث'}"><i class="fas fa-trash"></i></button>
                                         </div>\`;
                                     }).join('')}
-                                    \${(!group.eventDates || group.eventDates.length === 0) ? \`<div style="font-size:12px; color:var(--text-muted); padding:10px; text-align:center; border: 1px dashed var(--card-border); border-radius: 8px;">\${currentLang==='en'?'No extra events added yet.':'لم يتم إضافة أحداث إضافية بعد.'}</div>\` : ''}
+                                    \${(!group.currentQAEventDates || group.currentQAEventDates.length === 0) ? \`<div style="font-size:12px; color:var(--text-muted); padding:10px; text-align:center; border: 1px dashed var(--card-border); border-radius: 8px;">\${currentLang==='en'?'No extra events added yet.':'لم يتم إضافة أحداث إضافية بعد.'}</div>\` : ''}
                                 </div>
 
                                 <div class="field-row" style="margin-bottom:16px;">
                                     <div class="field-group" style="margin-bottom:0;">
                                         <label class="field-label" style="margin-bottom:4px;">\${currentLang==='en'?'Legacy Event Date (for {eventdate})':'تاريخ الحدث القديم (لحقل {eventdate})'}</label>
-                                        <input type="date" id="newQAEventDate_\${groupIndex}" value="\${group.eventDate || ''}" onchange="updateGroupData(\${groupIndex}, 'eventDate', this.value)" style="color-scheme: dark; font-family: var(--font);">
+                                        <input type="date" id="newQAEventDate_\${groupIndex}" value="\${group.currentQAEventDate || ''}" onchange="updateGroupData(\${groupIndex}, 'currentQAEventDate', this.value)" style="color-scheme: dark; font-family: var(--font);">
                                     </div>
                                     <div class="field-group" style="margin-bottom:0;">
                                         <label class="field-label" style="margin-bottom:4px;">\${currentLang==='en'?'Days-Left Language':'لغة عرض الأيام المتبقية'}</label>
@@ -3271,24 +3271,50 @@ module.exports = function renderDashboard(req, db, config) {
                 }
             }
 
+            function renderQAEventDatesForm(groupIndex) {
+                const container = document.getElementById(`event_dates_container_${groupIndex}`);
+                const legacyInput = document.getElementById(`newQAEventDate_${groupIndex}`);
+                if (!container) return;
+                const group = groupsArr[groupIndex];
+                container.innerHTML = (group.currentQAEventDates || []).map((ed, edIdx) => {
+                    return `<div class="field-row" style="margin-bottom:10px; background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; border: 1px solid var(--card-border); align-items: flex-end; gap: 12px;">
+                        <div class="field-group" style="margin-bottom:0; flex: 1.5;">
+                            <label class="field-label" style="font-size:10px;">${currentLang==='en'?'Label (e.g. Exam)':'العنوان (مثل: اختبار)'}</label>
+                            <input type="text" value="${ed.label || ''}" placeholder="..." onchange="updateEventDate(${groupIndex}, ${edIdx}, 'label', this.value)">
+                        </div>
+                        <div class="field-group" style="margin-bottom:0; flex: 1.5;">
+                            <label class="field-label" style="font-size:10px;">${currentLang==='en'?'Date':'التاريخ'}</label>
+                            <input type="date" value="${ed.date || ''}" onchange="updateEventDate(${groupIndex}, ${edIdx}, 'date', this.value)" style="color-scheme: dark;">
+                        </div>
+                        <button type="button" class="icon-btn" onclick="removeEventDate(${groupIndex}, ${edIdx})" style="border-color:rgba(255,82,82,0.3);color:var(--red);" title="${currentLang==='en'?'Delete event':'حذف الحدث'}"><i class="fas fa-trash"></i></button>
+                    </div>`;
+                }).join('');
+                
+                if (!group.currentQAEventDates || group.currentQAEventDates.length === 0) {
+                    container.innerHTML += `<div style="font-size:12px; color:var(--text-muted); padding:10px; text-align:center; border: 1px dashed var(--card-border); border-radius: 8px;">${currentLang==='en'?'No extra events added yet.':'لم يتم إضافة أحداث إضافية بعد.'}</div>`;
+                }
+                
+                if (legacyInput) legacyInput.value = group.currentQAEventDate || '';
+            }
+
             function addEventDate(groupIndex) {
                 const answerEl = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
                 if (answerEl) groupsArr[groupIndex].currentQAAnswer = answerEl.value;
-                if (!groupsArr[groupIndex].eventDates) groupsArr[groupIndex].eventDates = [];
-                groupsArr[groupIndex].eventDates.push({ label: '', date: '' });
+                if (!groupsArr[groupIndex].currentQAEventDates) groupsArr[groupIndex].currentQAEventDates = [];
+                groupsArr[groupIndex].currentQAEventDates.push({ label: '', date: '' });
                 renderGroupDetailBody(groupIndex, 'qa');
             }
 
             function removeEventDate(groupIndex, dateIndex) {
                 const answerEl = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
                 if (answerEl) groupsArr[groupIndex].currentQAAnswer = answerEl.value;
-                groupsArr[groupIndex].eventDates.splice(dateIndex, 1);
+                groupsArr[groupIndex].currentQAEventDates.splice(dateIndex, 1);
                 renderGroupDetailBody(groupIndex, 'qa');
             }
 
             function updateEventDate(groupIndex, dateIndex, field, value) {
-                if (!groupsArr[groupIndex].eventDates[dateIndex]) return;
-                groupsArr[groupIndex].eventDates[dateIndex][field] = value;
+                if (!groupsArr[groupIndex].currentQAEventDates[dateIndex]) return;
+                groupsArr[groupIndex].currentQAEventDates[dateIndex][field] = value;
             }
             
             function renderQAQuestions(groupIndex) {
@@ -3308,13 +3334,15 @@ module.exports = function renderDashboard(req, db, config) {
                 const answer = (answerInput ? answerInput.value : (groupsArr[groupIndex].currentQAAnswer || '')).trim();
                 const questions = groupsArr[groupIndex].currentQAQuestions || [];
                 const mediaFile = groupsArr[groupIndex].pendingMediaFile || '';
+                const eventDates = groupsArr[groupIndex].currentQAEventDates || [];
+                const eventDate = groupsArr[groupIndex].currentQAEventDate || '';
                 const editingIndex = Number.isInteger(groupsArr[groupIndex].editingQAIndex)
                     ? groupsArr[groupIndex].editingQAIndex
                     : null;
                 
                 if (questions.length > 0 && (answer || mediaFile)) {
                     if (!groupsArr[groupIndex].qaList) groupsArr[groupIndex].qaList = [];
-                    const newPair = { questions: questions, answer: answer };
+                    const newPair = { questions: questions, answer: answer, eventDates: JSON.parse(JSON.stringify(eventDates)), eventDate: eventDate };
                     if (mediaFile) newPair.mediaFile = mediaFile;
                     if (editingIndex !== null && editingIndex >= 0 && editingIndex < groupsArr[groupIndex].qaList.length) {
                         groupsArr[groupIndex].qaList[editingIndex] = newPair;
@@ -3324,21 +3352,17 @@ module.exports = function renderDashboard(req, db, config) {
                     if (answerInput) answerInput.value = '';
                     groupsArr[groupIndex].currentQAQuestions = [];
                     groupsArr[groupIndex].currentQAAnswer = '';
+                    groupsArr[groupIndex].currentQAEventDates = [];
+                    groupsArr[groupIndex].currentQAEventDate = '';
                     groupsArr[groupIndex].editingQAIndex = null;
                     // Clear media selection
                     groupsArr[groupIndex].pendingMediaFile = '';
                     const indicator = document.getElementById(\`qa_media_selected_\${groupIndex}\`);
                     if (indicator) indicator.style.display = 'none';
                     loadGroupMedia(groupIndex); // refresh grid (deselects all)
-                    renderQAQuestions(groupIndex);
-                    renderGroupQA(groupIndex);
-                    // Reset save button back to normal
-                    const saveBtn = document.getElementById(\`saveQABtn_\${groupIndex}\`);
-                    if (saveBtn) {
-                        saveBtn.innerHTML = '<i class="fas fa-save"></i> ' + (currentLang==='en' ? 'Save Q&A Pair' : 'حفظ زوج س و ج');
-                        saveBtn.style.background = '';
-                        saveBtn.style.color = '';
-                    }
+                    
+                    // Render form and list again to clear event dates from UI
+                    renderGroupDetailBody(groupIndex, 'qa');
                 } else {
                     const msg = currentLang === 'en' ? 'Please add at least one question variant and an answer or attach a media file' : 'يرجى إضافة صيغة سؤال واحدة على الأقل وملء الإجابة أو إرفاق وسائط';
                     alert(msg);
@@ -3493,27 +3517,16 @@ module.exports = function renderDashboard(req, db, config) {
             function editGroupQA(groupIndex, qaIndex) {
                 const qa = groupsArr[groupIndex].qaList[qaIndex];
                 if (!qa) return;
-                // Pre-fill questions
+                // Pre-fill questions and event dates
                 groupsArr[groupIndex].currentQAQuestions = [...(qa.questions || [])];
+                groupsArr[groupIndex].currentQAEventDates = JSON.parse(JSON.stringify(qa.eventDates || []));
+                groupsArr[groupIndex].currentQAEventDate = qa.eventDate || '';
                 groupsArr[groupIndex].editingQAIndex = qaIndex;
-                renderQAQuestions(groupIndex);
-                // Pre-fill answer
-                const answerEl = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
-                if (answerEl) answerEl.value = qa.answer || '';
-                // Pre-fill media selection while editing
+                groupsArr[groupIndex].currentQAAnswer = qa.answer || '';
                 groupsArr[groupIndex].pendingMediaFile = qa.mediaFile || '';
-                const indicator = document.getElementById(\`qa_media_selected_\${groupIndex}\`);
-                const nameEl = document.getElementById(\`qa_media_selected_name_\${groupIndex}\`);
-                if (indicator && nameEl) {
-                    if (qa.mediaFile) {
-                        indicator.style.display = 'flex';
-                        nameEl.textContent = '📎 ' + qa.mediaFile;
-                    } else {
-                        indicator.style.display = 'none';
-                    }
-                }
-                renderGroupQA(groupIndex);
-                loadGroupMedia(groupIndex);
+                
+                renderGroupDetailBody(groupIndex, 'qa');
+
                 // Update save button appearance to indicate edit mode
                 const saveBtn = document.getElementById(\`saveQABtn_\${groupIndex}\`);
                 if (saveBtn) {

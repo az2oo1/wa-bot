@@ -1168,6 +1168,25 @@ app.listen(3000, () => console.log('لوحة التحكم تعمل عبر الم
 // Serve uploaded media files statically
 app.use('/media', express.static(path.join(__dirname, 'media')));
 
+// Copy a file from one group to another
+app.post('/api/media/copy/:fromGroupId/:toGroupId', requireAuthApi, requirePermission('media:manage'), (req, res) => {
+    const filename = req.body.filename;
+    if (!filename) return res.status(400).json({ error: 'Filename required' });
+    const fromPath = path.join('./media', req.params.fromGroupId, filename);
+    const toDir = path.join('./media', req.params.toGroupId);
+    const toPath = path.join(toDir, filename);
+
+    if (!fs.existsSync(fromPath)) return res.status(404).json({ error: 'Source file not found' });
+    
+    try {
+        if (!fs.existsSync(toDir)) fs.mkdirSync(toDir, { recursive: true });
+        fs.copyFileSync(fromPath, toPath);
+        res.json({ success: true, filename: filename });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 // Upload a file for a group
 app.post('/api/media/upload/:groupId', requireAuthApi, requirePermission('media:manage'), upload.single('file'), (req, res) => {
     const allowedSet = getAllowedGroupIds(req.authUser);
@@ -2500,16 +2519,19 @@ client.on('message', async msg => {
                         }
 
                         // Handle legacy {eventdate}
-                        if (groupConfig.eventDate) {
-                            finalAnswer = finalAnswer.replace(/{eventdate}/g, getEventDateStr(groupConfig.eventDate));
-                        } else if (groupConfig.eventDates && groupConfig.eventDates.length > 0) {
+                        let eventDateLegacy = matchedQA.eventDate || groupConfig.eventDate;
+                        let eventDatesArray = (matchedQA.eventDates && matchedQA.eventDates.length > 0) ? matchedQA.eventDates : groupConfig.eventDates;
+
+                        if (eventDateLegacy) {
+                            finalAnswer = finalAnswer.replace(/{eventdate}/g, getEventDateStr(eventDateLegacy));
+                        } else if (eventDatesArray && eventDatesArray.length > 0) {
                             // If no single eventDate, use the first one from eventDates array for {eventdate}
-                            finalAnswer = finalAnswer.replace(/{eventdate}/g, getEventDateStr(groupConfig.eventDates[0].date));
+                            finalAnswer = finalAnswer.replace(/{eventdate}/g, getEventDateStr(eventDatesArray[0].date));
                         }
 
                         // Handle labeled {eventdate:Label}
-                        if (groupConfig.eventDates && groupConfig.eventDates.length > 0) {
-                            groupConfig.eventDates.forEach(ed => {
+                        if (eventDatesArray && eventDatesArray.length > 0) {
+                            eventDatesArray.forEach(ed => {
                                 if (ed.label && ed.date) {
                                     const regex = new RegExp(`{eventdate:${ed.label}}`, 'g');
                                     finalAnswer = finalAnswer.replace(regex, getEventDateStr(ed.date));
