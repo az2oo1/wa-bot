@@ -2805,10 +2805,7 @@ module.exports = function renderDashboard(req, db, config) {
                                     <div id="qa_media_grid_\${groupIndex}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;"></div>
                                 </div>
 
-                                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;margin-bottom:8px;">
-                                    <label class="field-label" style="margin:0;">\${currentLang==='en'?'Q&A Pairs':'أزواج الأسئلة والأجوبة'}</label>
-                                    <button type="button" class="btn btn-sm" onclick="pasteQA(\${groupIndex})" style="background:var(--accent-dim);color:var(--accent);border-color:rgba(0,230,118,0.3);"><i class="fas fa-paste"></i> \${currentLang==='en'?'Paste Q&A':'لصق س و ج'}</button>
-                                </div>
+                                <label class="field-label" style="margin-top:16px;">\${currentLang==='en'?'Q&A Pairs':'أزواج الأسئلة والأجوبة'}</label>
                                 <div id="qa_container_\${groupIndex}">
                                     \${(group.qaList || []).map((qa, qaIdx) => \`
                                         <div class="group-card" style="margin-bottom:10px;">
@@ -2817,9 +2814,6 @@ module.exports = function renderDashboard(req, db, config) {
                                                     <i class="fas fa-question" style="color:var(--blue);"></i> \${currentLang==='en'?'Question Variations':'صيغ الأسئلة'} (\${(qa.questions || []).length})
                                                 </div>
                                                 <div style="display:flex;gap:8px;">
-                                                    <button type="button" class="icon-btn" onclick="copyQA(\${groupIndex}, \${qaIdx})" style="background:rgba(255,160,0,0.1);color:#ffa000;border-color:rgba(255,160,0,0.3);" title="\${currentLang==='en'?'Copy':'نسخ'}">
-                                                        <i class="fas fa-copy"></i>
-                                                    </button>
                                                     <button type="button" class="icon-btn" onclick="editGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="\${currentLang==='en'?'Edit':'تعديل'}">
                                                         <i class="fas fa-edit"></i>
                                                     </button>
@@ -3401,9 +3395,6 @@ module.exports = function renderDashboard(req, db, config) {
                                 <i class="fas fa-question" style="color:var(--blue);"></i> \${currentLang==='en'?'Question Variations':'صيغ الأسئلة'} (\${(qa.questions || []).length})
                             </div>
                             <div style="display:flex;gap:8px;">
-                                <button type="button" class="icon-btn" onclick="copyQA(\${groupIndex}, \${qaIdx})" style="background:rgba(255,160,0,0.1);color:#ffa000;border-color:rgba(255,160,0,0.3);" title="\${currentLang==='en'?'Copy':'نسخ'}">
-                                    <i class="fas fa-copy"></i>
-                                </button>
                                 <button type="button" class="icon-btn" onclick="editGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="\${currentLang==='en'?'Edit':'تعديل'}">
                                     <i class="fas fa-edit"></i>
                                 </button>
@@ -3523,37 +3514,7 @@ module.exports = function renderDashboard(req, db, config) {
                     });
             }
 
-            function copyQA(groupIndex, qaIndex) {
-                const qa = groupsArr[groupIndex].qaList[qaIndex];
-                if (qa) {
-                    const clipData = { qa: qa, sourceGroupId: groupsArr[groupIndex].id };
-                    localStorage.setItem('wa_bot_qa_clipboard', JSON.stringify(clipData));
-                    alert(currentLang === 'en' ? 'Q&A copied!' : 'تم نسخ سؤال وجواب!');
-                }
-            }
-
-            async function pasteQA(groupIndex) {
-                const clipDataStr = localStorage.getItem('wa_bot_qa_clipboard');
-                if (!clipDataStr) {
-                    alert(currentLang === 'en' ? 'Nothing in clipboard.' : 'لا يوجد شيء في الحافظة.');
-                    return;
-                }
-                const clipData = JSON.parse(clipDataStr);
-                const targetGroupId = groupsArr[groupIndex].id;
-                let qa = JSON.parse(JSON.stringify(clipData.qa));
-                
-                if (qa.mediaFile && clipData.sourceGroupId && clipData.sourceGroupId !== targetGroupId) {
-                    try { await fetch('/api/media/copy/' + encodeURIComponent(clipData.sourceGroupId) + '/' + encodeURIComponent(targetGroupId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: qa.mediaFile }) }); } catch(e){}
-                }
-                
-                if (!groupsArr[groupIndex].qaList) groupsArr[groupIndex].qaList = [];
-                groupsArr[groupIndex].qaList.push(qa);
-                renderGroupDetailBody(groupIndex, 'qa');
-                loadGroupMedia(groupIndex);
-                alert(currentLang === 'en' ? 'Q&A pasted!' : 'تم لصق سؤال وجواب!');
-            }
-
-            function editGroupQA(groupIndex, qaIndex) { {
+            function editGroupQA(groupIndex, qaIndex) {
                 const qa = groupsArr[groupIndex].qaList[qaIndex];
                 if (!qa) return;
                 // Pre-fill questions and event dates
