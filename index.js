@@ -1250,6 +1250,27 @@ app.post('/api/export', requireAuthApi, requirePermission('import-export:manage'
         if (selected.custom_groups) {
             dataset.custom_groups = db.prepare('SELECT * FROM custom_groups').all();
         }
+        if (selected.media) {
+            const mediaData = {};
+            const mediaDir = require('path').join(__dirname, 'media');
+            if (fs.existsSync(mediaDir)) {
+                const groups = fs.readdirSync(mediaDir);
+                for (const group of groups) {
+                    const groupPath = require('path').join(mediaDir, group);
+                    if (fs.statSync(groupPath).isDirectory()) {
+                        const files = fs.readdirSync(groupPath);
+                        for (const file of files) {
+                            const filePath = require('path').join(groupPath, file);
+                            if (fs.statSync(filePath).isFile()) {
+                                const b64 = fs.readFileSync(filePath, { encoding: 'base64' });
+                                mediaData[group + '/' + file] = b64;
+                            }
+                        }
+                    }
+                }
+            }
+            dataset.media = mediaData;
+        }
 
         const exportData = {
             version: '6.1',

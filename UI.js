@@ -827,6 +827,10 @@ module.exports = function renderDashboard(req, db, config) {
                                     <input type="checkbox" id="export_custom_groups" checked>
                                     ${t('الإعدادات المخصصة للمجموعات', 'Custom Group Settings')}
                                 </label>
+                                <label class="cb-label">
+                                    <input type="checkbox" id="export_media" checked>
+                                    ${t('ملفات الوسائط', 'Media Files')}
+                                </label>
                             </div>
                         </div>
                         <button class="btn btn-primary btn-full" onclick="exportData()">
@@ -892,6 +896,10 @@ module.exports = function renderDashboard(req, db, config) {
                             <label class="cb-label">
                                 <input type="checkbox" id="import_custom_groups_clear">
                                 ${t('مسح إعدادات المجموعات المخصصة الحالية قبل الاستيراد', 'Clear current custom group settings before import')}
+                            </label>
+                            <label class="cb-label" style="margin-top:10px;">
+                                <input type="checkbox" id="import_media" checked>
+                                ${t('استيراد ملفات الوسائط (إن وجدت)', 'Import Media Files (if any)')}
                             </label>
                         </div>
                         <button class="btn btn-primary btn-full" onclick="importData()" style="margin-top:14px;">
@@ -3278,26 +3286,26 @@ module.exports = function renderDashboard(req, db, config) {
             }
 
             function renderQAEventDatesForm(groupIndex) {
-                const container = document.getElementById(`event_dates_container_${groupIndex}`);
-                const legacyInput = document.getElementById(`newQAEventDate_${groupIndex}`);
+                const container = document.getElementById(\`event_dates_container_\${groupIndex}\`);
+                const legacyInput = document.getElementById(\`newQAEventDate_\${groupIndex}\`);
                 if (!container) return;
                 const group = groupsArr[groupIndex];
                 container.innerHTML = (group.currentQAEventDates || []).map((ed, edIdx) => {
-                    return `<div class="field-row" style="margin-bottom:10px; background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; border: 1px solid var(--card-border); align-items: flex-end; gap: 12px;">
+                    return \`<div class="field-row" style="margin-bottom:10px; background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; border: 1px solid var(--card-border); align-items: flex-end; gap: 12px;">
                         <div class="field-group" style="margin-bottom:0; flex: 1.5;">
-                            <label class="field-label" style="font-size:10px;">${currentLang==='en'?'Label (e.g. Exam)':'العنوان (مثل: اختبار)'}</label>
-                            <input type="text" value="${ed.label || ''}" placeholder="..." onchange="updateEventDate(${groupIndex}, ${edIdx}, 'label', this.value)">
+                            <label class="field-label" style="font-size:10px;">\${currentLang==='en'?'Label (e.g. Exam)':'العنوان (مثل: اختبار)'}</label>
+                            <input type="text" value="\${ed.label || ''}" placeholder="..." onchange="updateEventDate(\${groupIndex}, \${edIdx}, 'label', this.value)">
                         </div>
                         <div class="field-group" style="margin-bottom:0; flex: 1.5;">
-                            <label class="field-label" style="font-size:10px;">${currentLang==='en'?'Date':'التاريخ'}</label>
-                            <input type="date" value="${ed.date || ''}" onchange="updateEventDate(${groupIndex}, ${edIdx}, 'date', this.value)" style="color-scheme: dark;">
+                            <label class="field-label" style="font-size:10px;">\${currentLang==='en'?'Date':'التاريخ'}</label>
+                            <input type="date" value="\${ed.date || ''}" onchange="updateEventDate(\${groupIndex}, \${edIdx}, 'date', this.value)" style="color-scheme: dark;">
                         </div>
-                        <button type="button" class="icon-btn" onclick="removeEventDate(${groupIndex}, ${edIdx})" style="border-color:rgba(255,82,82,0.3);color:var(--red);" title="${currentLang==='en'?'Delete event':'حذف الحدث'}"><i class="fas fa-trash"></i></button>
-                    </div>`;
+                        <button type="button" class="icon-btn" onclick="removeEventDate(\${groupIndex}, \${edIdx})" style="border-color:rgba(255,82,82,0.3);color:var(--red);" title="\${currentLang==='en'?'Delete event':'حذف الحدث'}"><i class="fas fa-trash"></i></button>
+                    </div>\`;
                 }).join('');
                 
                 if (!group.currentQAEventDates || group.currentQAEventDates.length === 0) {
-                    container.innerHTML += `<div style="font-size:12px; color:var(--text-muted); padding:10px; text-align:center; border: 1px dashed var(--card-border); border-radius: 8px;">${currentLang==='en'?'No extra events added yet.':'لم يتم إضافة أحداث إضافية بعد.'}</div>`;
+                    container.innerHTML += \`<div style="font-size:12px; color:var(--text-muted); padding:10px; text-align:center; border: 1px dashed var(--card-border); border-radius: 8px;">\${currentLang==='en'?'No extra events added yet.':'لم يتم إضافة أحداث إضافية بعد.'}</div>\`;
                 }
                 
                 if (legacyInput) legacyInput.value = group.currentQAEventDate || '';
@@ -3684,7 +3692,8 @@ module.exports = function renderDashboard(req, db, config) {
                     whitelist: document.getElementById('export_whitelist').checked,
                     blocked_extensions: document.getElementById('export_blocked_extensions').checked,
                     whatsapp_groups: document.getElementById('export_whatsapp_groups').checked,
-                    custom_groups: document.getElementById('export_custom_groups').checked
+                    custom_groups: document.getElementById('export_custom_groups').checked,
+                    media: document.getElementById('export_media') ? document.getElementById('export_media').checked : false
                 };
 
                 try {
@@ -3745,7 +3754,8 @@ module.exports = function renderDashboard(req, db, config) {
                         blocked_extensions_clear: document.getElementById('import_blocked_extensions_clear').checked,
                         whatsapp_groups: document.getElementById('import_whatsapp_groups').checked,
                         custom_groups: document.getElementById('import_custom_groups').checked,
-                        custom_groups_clear: document.getElementById('import_custom_groups_clear').checked
+                        custom_groups_clear: document.getElementById('import_custom_groups_clear').checked,
+                        media: document.getElementById('import_media') ? document.getElementById('import_media').checked : false
                     };
 
                     if (!await showConfirmModal(currentLang==='en' ? 'Confirm import? This action may override existing data.' : 'هل تؤكد الاستيراد؟ قد يؤدي هذا إلى إلغاء البيانات الموجودة.')) {
