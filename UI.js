@@ -3092,10 +3092,10 @@ module.exports = function renderDashboard(req, db, config) {
                 try {
                     const res = await fetch('/api/blacklist/purge', { method: 'POST' });
                     const data = await res.json();
-                    if(data.error) alert('Error: ' + data.error);
-                    else alert('Success: ' + data.message);
+                    if(data.error) showToast('Error: ' + data.error);
+                    else showToast('Success: ' + data.message);
                 } catch(e) {
-                    alert(dict.conn_err.replace(/<[^>]*>?/gm, ''));
+                    showToast(dict.conn_err.replace(/<[^>]*>?/gm, ''));
                 }
                 btn.innerHTML = originalHTML;
                 btn.disabled = false;
@@ -3273,7 +3273,7 @@ module.exports = function renderDashboard(req, db, config) {
                         input.value = '';
                         renderQAQuestions(groupIndex);
                     } else {
-                        alert(currentLang === 'en' ? 'This question variant already exists' : 'صيغة السؤال هذه موجودة بالفعل');
+                        showToast(currentLang === 'en' ? 'This question variant already exists' : 'صيغة السؤال هذه موجودة بالفعل');
                     }
                 }
             }
@@ -3379,7 +3379,7 @@ module.exports = function renderDashboard(req, db, config) {
                     renderGroupDetailBody(groupIndex, 'qa');
                 } else {
                     const msg = currentLang === 'en' ? 'Please add at least one question variant and an answer or attach a media file' : 'يرجى إضافة صيغة سؤال واحدة على الأقل وملء الإجابة أو إرفاق وسائط';
-                    alert(msg);
+                    showToast(msg);
                 }
             }
 
@@ -3536,14 +3536,14 @@ module.exports = function renderDashboard(req, db, config) {
                 if (qa) {
                     const clipData = { qa: qa, sourceGroupId: groupsArr[groupIndex].id };
                     localStorage.setItem('wa_bot_qa_clipboard', JSON.stringify(clipData));
-                    alert(currentLang === 'en' ? 'Q&A copied!' : 'تم نسخ سؤال وجواب!');
+                    showToast(currentLang === 'en' ? 'Q&A copied!' : 'تم نسخ سؤال وجواب!');
                 }
             }
 
             async function pasteQA(groupIndex) {
                 const clipDataStr = localStorage.getItem('wa_bot_qa_clipboard');
                 if (!clipDataStr) {
-                    alert(currentLang === 'en' ? 'Nothing in clipboard.' : 'لا يوجد شيء في الحافظة.');
+                    showToast(currentLang === 'en' ? 'Nothing in clipboard.' : 'لا يوجد شيء في الحافظة.');
                     return;
                 }
                 const clipData = JSON.parse(clipDataStr);
@@ -3558,7 +3558,7 @@ module.exports = function renderDashboard(req, db, config) {
                 groupsArr[groupIndex].qaList.push(qa);
                 renderGroupDetailBody(groupIndex, 'qa');
                 loadGroupMedia(groupIndex);
-                alert(currentLang === 'en' ? 'Q&A pasted!' : 'تم لصق سؤال وجواب!');
+                showToast(currentLang === 'en' ? 'Q&A pasted!' : 'تم لصق سؤال وجواب!');
             }
 
             function editGroupQA(groupIndex, qaIndex) {
