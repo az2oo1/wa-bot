@@ -3561,7 +3561,7 @@ module.exports = function renderDashboard(req, db, config) {
                 alert(currentLang === 'en' ? 'Q&A pasted!' : 'تم لصق سؤال وجواب!');
             }
 
-            function editGroupQA(groupIndex, qaIndex) { {
+            function editGroupQA(groupIndex, qaIndex) {
                 const qa = groupsArr[groupIndex].qaList[qaIndex];
                 if (!qa) return;
                 // Pre-fill questions and event dates
