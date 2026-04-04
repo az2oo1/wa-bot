@@ -1020,7 +1020,7 @@ app.post('/api/blacklist/purge', requireAuthApi, requirePermission('security:man
         const blacklistArr = blacklistRows.map(r => r.number);
         const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
         const blockedExtensionsArr = blockedExtensionsRows.map(r => r.ext);
-        if (blacklistArr.length === 0 && blockedExtensionsArr.length === 0) return res.json({ message: 'القائمة السوداء فارغة. / Blacklist is empty.' });
+
 
         const chats = await client.getChats();
         const botId = client.info.wid._serialized;
@@ -1052,6 +1052,26 @@ app.post('/api/blacklist/purge', requireAuthApi, requirePermission('security:man
                     try {
                         const pendingReqs = await chat.getGroupMembershipRequests();
                         if (pendingReqs && pendingReqs.length > 0) {
+                            // Resolve per-group screening settings
+                            const groupId = chat.id._serialized;
+                            const groupConfig = config.groupsConfig[groupId];
+                            let isJoinProfileScreeningEnabled = config.enableJoinProfileScreening;
+                            let isWordFilterEnabled = config.enableWordFilter;
+                            let isAIFilterEnabled = config.enableAIFilter;
+                            let isBlacklistEnabled = config.enableBlacklist;
+                            let forbiddenWords = [...config.defaultWords];
+                            let aiTriggerWords = Array.isArray(config.aiFilterTriggerWords) && config.aiFilterTriggerWords.length > 0 ? config.aiFilterTriggerWords : ['نعم'];
+                            if (groupConfig) {
+                                if (typeof groupConfig.enableJoinProfileScreening !== 'undefined') isJoinProfileScreeningEnabled = groupConfig.enableJoinProfileScreening;
+                                if (typeof groupConfig.enableWordFilter !== 'undefined') isWordFilterEnabled = groupConfig.enableWordFilter;
+                                if (typeof groupConfig.enableAIFilter !== 'undefined') isAIFilterEnabled = groupConfig.enableAIFilter;
+                                if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabled = groupConfig.enableBlacklist;
+                                if (groupConfig.useDefaultWords === false) forbiddenWords = [];
+                                if (groupConfig.words && groupConfig.words.length > 0) forbiddenWords = [...forbiddenWords, ...groupConfig.words];
+                                if (Array.isArray(groupConfig.aiFilterTriggerWords) && groupConfig.aiFilterTriggerWords.length > 0) aiTriggerWords = groupConfig.aiFilterTriggerWords;
+                            }
+                            const canScreenProfiles = isJoinProfileScreeningEnabled && (isWordFilterEnabled || isAIFilterEnabled);
+
                             let usersToReject = [];
                             for (const req of pendingReqs) {
                                 let rawId = typeof req.id === 'string' ? req.id : (req.id._serialized || (req.id.user && req.id.server ? `${req.id.user}@${req.id.server}` : null));
@@ -1061,23 +1081,46 @@ app.post('/api/blacklist/purge', requireAuthApi, requirePermission('security:man
                                 if (cleanId.includes('@lid')) {
                                     try {
                                         const contact = await client.getContactById(rawId);
-                                        if (contact && contact.number) {
-                                            cleanId = `${contact.number}@c.us`;
-                                        }
+                                        if (contact && contact.number) cleanId = `${contact.number}@c.us`;
                                     } catch (err) { }
                                 }
 
                                 const finalCleanId = cleanId.replace(/:[0-9]+/, '').replace('@c.us', '');
                                 const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+
+                                // 1. Blacklist / blocked-extensions check
                                 if (isExtBlocked || blacklistArr.includes(finalCleanId) || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId)) {
                                     usersToReject.push(rawId);
+                                    continue;
+                                }
+
+                                // 2. Join Profile Screening check
+                                if (canScreenProfiles) {
+                                    try {
+                                        const profileResult = await evaluateJoinProfileViolation({
+                                            participantId: rawId,
+                                            cleanUserId: cleanId,
+                                            groupName: chat.name,
+                                            isWordFilterEnabled,
+                                            isAIFilterEnabled,
+                                            forbiddenWords,
+                                            aiTriggerWords
+                                        });
+                                        if (profileResult.isViolating) {
+                                            usersToReject.push(rawId);
+                                            if (isBlacklistEnabled) {
+                                                try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId); } catch (e) { }
+                                            }
+                                            console.log(`[تنظيف] رفض طلب انضمام (فحص الملف الشخصي) - ${cleanId} في ${chat.name}: ${profileResult.reason}`);
+                                        }
+                                    } catch (e) { }
                                 }
                             }
 
                             if (usersToReject.length > 0) {
                                 await chat.rejectGroupMembershipRequests({ requesterIds: usersToReject });
                                 rejectedCount += usersToReject.length;
-                                console.log(`[أمان] تم رفض ${usersToReject.length} طلبات انضمام لمحظورين في: ${chat.name}`);
+                                console.log(`[أمان] تم رفض ${usersToReject.length} طلبات انضمام في: ${chat.name}`);
                                 await new Promise(resolve => setTimeout(resolve, 1500));
                             }
                         }
@@ -2889,7 +2932,8 @@ async function screenPendingMembershipRequests() {
                 }
             }
 
-            if (!isJoinProfileScreeningEnabled || (!isWordFilterEnabled && !isAIFilterEnabled)) continue;
+            // Skip this group entirely only if neither blacklist nor profile screening is active
+            if (!isBlacklistEnabled && (!isJoinProfileScreeningEnabled || (!isWordFilterEnabled && !isAIFilterEnabled))) continue;
 
             let pendingReqs = [];
             try {
@@ -2898,6 +2942,12 @@ async function screenPendingMembershipRequests() {
                 continue;
             }
             if (!pendingReqs || pendingReqs.length === 0) continue;
+
+            // Load blacklist data once per group iteration
+            const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
+            const blacklistArr = blacklistRows.map(r => r.number);
+            const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+            const blockedExtensionsArr = blockedExtensionsRows.map(r => r.ext);
 
             for (const req of pendingReqs) {
                 const rawRequesterId = (req && (req.id || req.requesterId || req.author)) ? (req.id || req.requesterId || req.author) : null;
@@ -2908,7 +2958,14 @@ async function screenPendingMembershipRequests() {
                 if (Date.now() - lastTs < 2 * 60 * 1000) continue;
                 joinProfileReviewCache.set(cacheKey, Date.now());
 
-                const cleanRequesterId = rawRequesterId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                let cleanRequesterId = rawRequesterId.replace(/:[0-9]+/, '');
+                if (cleanRequesterId.includes('@lid')) {
+                    try {
+                        const contact = await client.getContactById(rawRequesterId);
+                        if (contact && contact.number) cleanRequesterId = `${contact.number}@c.us`;
+                        else cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us');
+                    } catch (e) { cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us'); }
+                }
 
                 if (isWhitelistEnabled) {
                     const globalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanRequesterId);
@@ -2918,6 +2975,33 @@ async function screenPendingMembershipRequests() {
                         continue;
                     }
                 }
+
+                // ── Blacklist check for pending join requests ──────────────────
+                if (isBlacklistEnabled) {
+                    const finalCleanId = cleanRequesterId.replace('@c.us', '');
+                    const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                    const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
+                    const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanRequesterId) : false;
+                    const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanRequesterId);
+
+                    if ((useGlobalBl && (globalBl || isExtBlocked)) || inCustomBl) {
+                        console.log(`[أمان] رفض طلب انضمام لرقم محظور (${cleanRequesterId}) في: ${chat.name}`);
+                        try {
+                            await chat.rejectGroupMembershipRequests({ requesterIds: [rawRequesterId] });
+                            const reportText = tAdmin(
+                                groupConfig,
+                                config,
+                                `🛡️ *حماية (قائمة سوداء)*\nتم رفض طلب انضمام لرقم محظور في مجموعة "${chat.name}" تلقائياً.\nالرقم: @${cleanRequesterId.split('@')[0]}`,
+                                `🛡️ *Protection (Blacklist)*\nA join request from a blacklisted number was automatically rejected in "${chat.name}".\nNumber: @${cleanRequesterId.split('@')[0]}`
+                            );
+                            try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanRequesterId] }); } catch (e) { }
+                        } catch (e) { }
+                        continue; // skip profile screening for this requester
+                    }
+                }
+                // ─────────────────────────────────────────────────────────────
+
+                if (!isJoinProfileScreeningEnabled || (!isWordFilterEnabled && !isAIFilterEnabled)) continue;
 
                 const profileResult = await evaluateJoinProfileViolation({
                     participantId: rawRequesterId,
