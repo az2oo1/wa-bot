@@ -2246,6 +2246,121 @@ client.on('message', async msg => {
             const groupId = chat.id._serialized;
             const groupConfig = config.groupsConfig[groupId];
 
+            // ── Inline commands: /ban  /kick  /report ────────────────────────
+            const cmdBody = (msg.body || '').trim();
+            const cmdMatch = cmdBody.match(/^\/(\w+)/i);
+            if (cmdMatch && ['ban', 'kick', 'report'].includes(cmdMatch[1].toLowerCase())) {
+                const cmd = cmdMatch[1].toLowerCase();
+
+                // Only whitelisted senders may use commands
+                const senderGlobalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanAuthorId);
+                const senderUseGlobal = groupConfig ? (groupConfig.useGlobalWhitelist !== false) : true;
+                const senderInCustom = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanAuthorId) : false;
+                const isSenderWhitelisted = (senderUseGlobal && senderGlobalWl) || senderInCustom;
+
+                if (isSenderWhitelisted) {
+                    const cmdAdminLang = resolveAdminLang(groupConfig, config);
+                    const cmdAdminGroup = (groupConfig && groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '')
+                        ? groupConfig.adminGroup.trim()
+                        : config.defaultAdminGroup;
+                    const cmdBlacklistEnabled = groupConfig
+                        ? (typeof groupConfig.enableBlacklist !== 'undefined' ? groupConfig.enableBlacklist : config.enableBlacklist)
+                        : config.enableBlacklist;
+
+                    // Resolve target: mention takes priority, then quoted message author
+                    let targetRawId = null;
+                    let targetCleanId = null;
+
+                    if (msg.mentionedIds && msg.mentionedIds.length > 0) {
+                        targetRawId = msg.mentionedIds[0];
+                        targetCleanId = targetRawId.replace(/:[0-9]+/, '');
+                    }
+                    if (!targetRawId && msg.hasQuotedMsg) {
+                        try {
+                            const quoted = await msg.getQuotedMessage();
+                            targetRawId = quoted.author || quoted.from;
+                            targetCleanId = targetRawId ? targetRawId.replace(/:[0-9]+/, '') : null;
+                        } catch (e) { }
+                    }
+
+                    if (!targetRawId) {
+                        // No target — tell the user how to use it
+                        try {
+                            await msg.reply(cmdAdminLang === 'en'
+                                ? `⚠️ Please mention a user or reply to their message with /${cmd}.`
+                                : `⚠️ يرجى ذكر مستخدم أو الرد على رسالته مع الأمر /${cmd}.`);
+                        } catch (e) { }
+                    } else if (cmd === 'kick' || cmd === 'ban') {
+                        const botWid = client.info && client.info.wid ? client.info.wid._serialized : null;
+                        const botParticipant = botWid ? chat.participants.find(p => p.id._serialized === botWid) : null;
+                        const botIsAdmin = botParticipant && (botParticipant.isAdmin || botParticipant.isSuperAdmin);
+
+                        if (!botIsAdmin) {
+                            try {
+                                await msg.reply(cmdAdminLang === 'en'
+                                    ? '⚠️ The bot must be a group admin to use this command.'
+                                    : '⚠️ يجب أن يكون البوت مشرفاً في المجموعة لتنفيذ هذا الأمر.');
+                            } catch (e) { }
+                        } else {
+                            try {
+                                await safeDelay();
+                                await chat.removeParticipants([targetRawId]);
+                                if (cmd === 'ban' && cmdBlacklistEnabled) {
+                                    try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(targetCleanId); } catch (e) { }
+                                }
+                                const senderNum = cleanAuthorId.split('@')[0];
+                                const targetNum = (targetCleanId || '').split('@')[0];
+                                const confirmText = cmdAdminLang === 'en'
+                                    ? `✅ *${cmd === 'ban' ? 'Ban' : 'Kick'} executed*\nGroup: "${chat.name}"\nBy: @${senderNum}\nTarget: @${targetNum}${cmd === 'ban' && cmdBlacklistEnabled ? '\n🚫 Added to blacklist.' : ''}`
+                                    : `✅ *تم تنفيذ ${cmd === 'ban' ? 'الحظر' : 'الطرد'}*\nالمجموعة: "${chat.name}"\nبواسطة: @${senderNum}\nالمستهدف: @${targetNum}${cmd === 'ban' && cmdBlacklistEnabled ? '\n🚫 تم إضافته للقائمة السوداء.' : ''}`;
+                                try { await client.sendMessage(cmdAdminGroup, confirmText, { mentions: [cleanAuthorId, targetCleanId] }); } catch (e) { }
+                                console.log(`[أمر] ${cmd} على ${targetCleanId} في ${chat.name} بواسطة ${cleanAuthorId}`);
+                            } catch (err) {
+                                try {
+                                    await msg.reply(cmdAdminLang === 'en'
+                                        ? '⚠️ Failed to remove the participant. They may have already left or the bot lacks permissions.'
+                                        : '⚠️ فشل الطرد. ربما غادر العضو مسبقاً أو البوت لا يملك الصلاحية الكافية.');
+                                } catch (e) { }
+                            }
+                        }
+                    } else if (cmd === 'report') {
+                        // Get quoted message body for context
+                        let reportedContent = '';
+                        if (msg.hasQuotedMsg) {
+                            try {
+                                const quoted = await msg.getQuotedMessage();
+                                reportedContent = quoted.body || '';
+                            } catch (e) { }
+                        }
+                        const senderNum = cleanAuthorId.split('@')[0];
+                        const targetNum = (targetCleanId || '').split('@')[0];
+                        const pollTitle = cmdAdminLang === 'en'
+                            ? `🚨 Member Report in "${chat.name}"\nReported by: @${senderNum}\nReported user: @${targetNum}${reportedContent ? `\nMessage:\n"${reportedContent.slice(0, 200)}"` : ''}\n\nRemove this member${cmdBlacklistEnabled ? ' and blacklist' : ''}?`
+                            : `🚨 بلاغ عضو في "${chat.name}"\nأرسله: @${senderNum}\nالمُبلَّغ عنه: @${targetNum}${reportedContent ? `\nالمحتوى:\n"${reportedContent.slice(0, 200)}"` : ''}\n\nهل تريد طرد هذا العضو${cmdBlacklistEnabled ? ' وحظره' : ''}؟`;
+                        const pollOptions = cmdBlacklistEnabled
+                            ? (cmdAdminLang === 'en' ? ['Yes, remove and blacklist', 'No'] : ['نعم، طرد وحظر', 'لا'])
+                            : (cmdAdminLang === 'en' ? ['Yes, remove', 'No'] : ['نعم، طرد', 'لا']);
+                        try {
+                            const poll = new Poll(pollTitle, pollOptions);
+                            const pollMsg = await client.sendMessage(cmdAdminGroup, poll, { mentions: [cleanAuthorId, targetCleanId] });
+                            pendingBans.set(pollMsg.id._serialized, {
+                                senderId: targetCleanId,
+                                rawSenderId: targetRawId,
+                                sourceGroupId: groupId,
+                                pollMsg,
+                                isBlacklistEnabled: cmdBlacklistEnabled
+                            });
+                            await msg.reply(cmdAdminLang === 'en'
+                                ? '✅ Your report has been sent to the admins for review.'
+                                : '✅ تم إرسال بلاغك للإدارة للمراجعة والتصويت.');
+                            console.log(`[أمر] /report على ${targetCleanId} في ${chat.name} بواسطة ${cleanAuthorId}`);
+                        } catch (e) { }
+                    }
+                }
+                return; // Always exit after a command (authorized or not)
+            }
+            // ─────────────────────────────────────────────────────────────────
+
             let isWhitelistEnabled = config.enableWhitelist;
             if (groupConfig && typeof groupConfig.enableWhitelist !== 'undefined') {
                 isWhitelistEnabled = groupConfig.enableWhitelist;
