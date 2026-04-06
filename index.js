@@ -272,7 +272,8 @@ const colsToAdd = [
     'enable_whitelist INTEGER', 'custom_blacklist TEXT', 'custom_whitelist TEXT',
     'use_global_blacklist INTEGER', 'use_global_whitelist INTEGER',
     'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT', 'qa_language TEXT', 'qa_event_dates TEXT',
-    'admin_language TEXT', 'custom_ai_trigger_words TEXT', 'enable_join_profile_screening INTEGER'
+    'admin_language TEXT', 'custom_ai_trigger_words TEXT', 'enable_join_profile_screening INTEGER',
+    'enable_admin_sync INTEGER DEFAULT 0', 'enable_commands INTEGER DEFAULT 1'
 ];
 colsToAdd.forEach(col => {
     try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch (e) { }
@@ -284,6 +285,7 @@ function loadConfigFromDB() {
         autoAction: false, enableBlacklist: true, enableWhitelist: true, enableAntiSpam: false,
         enableJoinProfileScreening: false,
         safeMode: false,
+        purgeScheduleEnabled: false, purgeScheduleIntervalHours: 24,
         spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll',
         blockedTypes: [], blockedAction: 'delete',
         spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
@@ -295,9 +297,9 @@ function loadConfigFromDB() {
 
     db.prepare('SELECT * FROM global_settings').all().forEach(row => {
         if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits', 'aiFilterTriggerWords'].includes(row.key)) newConfig[row.key] = JSON.parse(row.value);
-        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening'].includes(row.key)) {
+        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
-        } else if (['spamDuplicateLimit', 'spamFloodLimit'].includes(row.key)) {
+        } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours'].includes(row.key)) {
             newConfig[row.key] = parseInt(row.value, 10);
         } else newConfig[row.key] = row.value;
     });
@@ -324,7 +326,9 @@ function loadConfigFromDB() {
             panicAlertTarget: g.panic_alert_target || 'both', panicAlertMessage: g.panic_alert_message || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.',
             enableQAFeature: g.enable_qa_feature === 1, qaList: JSON.parse(g.custom_qa || '[]'), eventDate: g.qa_event_date || '', qaLanguage: g.qa_language || 'ar', eventDates: JSON.parse(g.qa_event_dates || '[]'),
             aiFilterTriggerWords: JSON.parse(g.custom_ai_trigger_words || '[]'),
-            enableJoinProfileScreening: g.enable_join_profile_screening === 1
+            enableJoinProfileScreening: g.enable_join_profile_screening === 1,
+            enableAdminSync: g.enable_admin_sync === 1,
+            enableCommands: g.enable_commands !== 0
         };
     });
     return newConfig;
@@ -359,6 +363,8 @@ function saveConfigToDB(conf) {
         setGlobal.run('enableAntiSpam', conf.enableAntiSpam ? '1' : '0');
         setGlobal.run('enableJoinProfileScreening', conf.enableJoinProfileScreening ? '1' : '0');
         setGlobal.run('safeMode', conf.safeMode ? '1' : '0');
+        setGlobal.run('purgeScheduleEnabled', conf.purgeScheduleEnabled ? '1' : '0');
+        setGlobal.run('purgeScheduleIntervalHours', (conf.purgeScheduleIntervalHours || 24).toString());
         setGlobal.run('spamDuplicateLimit', conf.spamDuplicateLimit.toString());
         setGlobal.run('spamAction', conf.spamAction);
         setGlobal.run('blockedTypes', JSON.stringify(conf.blockedTypes));
@@ -382,8 +388,9 @@ function saveConfigToDB(conf) {
                 blocked_types, blocked_action, spam_types, spam_limits,
                 enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
                 panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist,
-                enable_qa_feature, custom_qa, qa_event_date, qa_language, qa_event_dates, custom_ai_trigger_words, enable_join_profile_screening
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                enable_qa_feature, custom_qa, qa_event_date, qa_language, qa_event_dates, custom_ai_trigger_words, enable_join_profile_screening,
+                enable_admin_sync, enable_commands
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
@@ -398,7 +405,8 @@ function saveConfigToDB(conf) {
                 gData.panicLockoutDuration, gData.panicAlertTarget, gData.panicAlertMessage,
                 JSON.stringify(gData.customBlacklist || []), JSON.stringify(gData.customWhitelist || []),
                 gData.useGlobalBlacklist ? 1 : 0, gData.useGlobalWhitelist ? 1 : 0,
-                gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || '', gData.qaLanguage || 'ar', JSON.stringify(gData.eventDates || []), JSON.stringify(gData.aiFilterTriggerWords || []), gData.enableJoinProfileScreening ? 1 : 0
+                gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || '', gData.qaLanguage || 'ar', JSON.stringify(gData.eventDates || []), JSON.stringify(gData.aiFilterTriggerWords || []), gData.enableJoinProfileScreening ? 1 : 0,
+                gData.enableAdminSync ? 1 : 0, gData.enableCommands !== false ? 1 : 0
             );
         }
     });
@@ -1197,6 +1205,7 @@ app.post('/save', requireAuthApi, (req, res) => {
             saveConfigToDB(current);
         }
         config = loadConfigFromDB();
+        setupPurgeSchedule();
         console.log('[فحص] تم حفظ الإعدادات بنجاح.');
         res.sendStatus(200);
     } catch (e) {
@@ -1659,6 +1668,93 @@ async function safeDelay() {
     await new Promise(r => setTimeout(r, ms));
 };
 
+// ── Shared global purge function ──────────────────────────────────────────────
+async function runGlobalPurge() {
+    if (!client.info || !client.info.wid) {
+        console.log('[تنظيف مجدول] البوت غير متصل، تخطي دورة المسح.');
+        return;
+    }
+    try {
+        console.log('[تنظيف مجدول] بدأت عملية المسح الشامل التلقائية...');
+        const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
+        const blacklistArr = blacklistRows.map(r => r.number);
+        const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+        const blockedExtensionsArr = blockedExtensionsRows.map(r => r.ext);
+
+        const chats = await client.getChats();
+        const botId = client.info.wid._serialized;
+        let kickedCount = 0;
+        let rejectedCount = 0;
+
+        for (const chat of chats) {
+            if (!chat.isGroup) continue;
+            const botData = chat.participants.find(p => p.id._serialized === botId);
+            const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
+            if (!botIsAdmin) continue;
+
+            const usersToKick = chat.participants
+                .map(p => p.id._serialized)
+                .filter(id => {
+                    const cleanId = id.replace(/:[0-9]+/, '');
+                    const finalCleanId = cleanId.replace('@c.us', '');
+                    const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                    return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(id);
+                });
+            if (usersToKick.length > 0) {
+                try {
+                    await chat.removeParticipants(usersToKick);
+                    kickedCount += usersToKick.length;
+                    console.log(`[تنظيف مجدول] طرد ${usersToKick.length} محظور من: ${chat.name}`);
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                } catch (e) { }
+            }
+
+            try {
+                const pendingReqs = await chat.getGroupMembershipRequests();
+                if (pendingReqs && pendingReqs.length > 0) {
+                    const groupId = chat.id._serialized;
+                    const groupConfig = config.groupsConfig[groupId];
+                    let usersToReject = [];
+                    for (const req of pendingReqs) {
+                        let rawId = typeof req.id === 'string' ? req.id : (req.id._serialized || null);
+                        if (!rawId) continue;
+                        let cleanId = rawId.replace(/:[0-9]+/, '');
+                        const finalCleanId = cleanId.replace('@c.us', '');
+                        const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                        if (isExtBlocked || blacklistArr.includes(finalCleanId) || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId)) {
+                            usersToReject.push(rawId);
+                        }
+                    }
+                    if (usersToReject.length > 0) {
+                        await chat.rejectGroupMembershipRequests({ requesterIds: usersToReject });
+                        rejectedCount += usersToReject.length;
+                        console.log(`[تنظيف مجدول] رفض ${usersToReject.length} طلبات في: ${chat.name}`);
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                    }
+                }
+            } catch (e) { }
+        }
+        console.log(`[تنظيف مجدول] انتهت دورة المسح. طرد ${kickedCount} ورفض ${rejectedCount}.`);
+    } catch (error) {
+        console.error('[تنظيف مجدول] خطأ أثناء المسح:', error.message || error);
+    }
+}
+
+// ── Purge scheduler ───────────────────────────────────────────────────────────
+let purgeScheduleTimer = null;
+function setupPurgeSchedule() {
+    if (purgeScheduleTimer) { clearInterval(purgeScheduleTimer); purgeScheduleTimer = null; }
+    if (!config.purgeScheduleEnabled) {
+        console.log('[تنظيف مجدول] الجدولة التلقائية معطلة.');
+        return;
+    }
+    const hours = Math.max(1, config.purgeScheduleIntervalHours || 24);
+    const ms = hours * 60 * 60 * 1000;
+    purgeScheduleTimer = setInterval(() => runGlobalPurge().catch(() => {}), ms);
+    if (purgeScheduleTimer.unref) purgeScheduleTimer.unref();
+    console.log(`[تنظيف مجدول] تم جدولة المسح التلقائي كل ${hours} ساعة.`);
+}
+
 const authDataPath = process.env.WA_AUTH_PATH || path.join(process.cwd(), '.wwebjs_auth');
 const browserProfileDir = process.env.WA_BROWSER_PROFILE_DIR || `/tmp/chromium-wa-bot-${process.pid}`;
 
@@ -1787,6 +1883,9 @@ client.on('ready', async () => {
         botStatus = '<i class="fas fa-check-circle"></i> متصل وجاهز للعمل';
         botStatusKind = 'connected';
         addConnectionLog('متصل', `متصل وجاهز - ${chats.length} مجموعة`);
+
+        // Start scheduled purge if configured
+        setupPurgeSchedule();
     } catch (error) {
         const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
         const errorStack = error && error.stack ? error.stack : 'No stack trace';
@@ -2249,7 +2348,9 @@ client.on('message', async msg => {
             // ── Inline commands: /ban  /kick  /report ────────────────────────
             const cmdBody = (msg.body || '').trim();
             const cmdMatch = cmdBody.match(/^\/(\w+)/i);
-            if (cmdMatch && ['ban', 'kick', 'report'].includes(cmdMatch[1].toLowerCase())) {
+            // Check if commands are enabled for this group (default: enabled)
+            const cmdEnabled = groupConfig ? (groupConfig.enableCommands !== false) : true;
+            if (cmdEnabled && cmdMatch && ['ban', 'kick', 'report'].includes(cmdMatch[1].toLowerCase())) {
                 const cmd = cmdMatch[1].toLowerCase();
 
                 // Only whitelisted senders may use commands
@@ -2304,6 +2405,13 @@ client.on('message', async msg => {
                         } else {
                             try {
                                 await safeDelay();
+                                // Smart /ban: delete the replied-to message first
+                                if (cmd === 'ban' && msg.hasQuotedMsg) {
+                                    try {
+                                        const quotedToDelete = await msg.getQuotedMessage();
+                                        await quotedToDelete.delete(true);
+                                    } catch (e) { }
+                                }
                                 await chat.removeParticipants([targetRawId]);
                                 if (cmd === 'ban' && cmdBlacklistEnabled) {
                                     try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(targetCleanId); } catch (e) { }
@@ -2311,8 +2419,8 @@ client.on('message', async msg => {
                                 const senderNum = cleanAuthorId.split('@')[0];
                                 const targetNum = (targetCleanId || '').split('@')[0];
                                 const confirmText = cmdAdminLang === 'en'
-                                    ? `✅ *${cmd === 'ban' ? 'Ban' : 'Kick'} executed*\nGroup: "${chat.name}"\nBy: @${senderNum}\nTarget: @${targetNum}${cmd === 'ban' && cmdBlacklistEnabled ? '\n🚫 Added to blacklist.' : ''}`
-                                    : `✅ *تم تنفيذ ${cmd === 'ban' ? 'الحظر' : 'الطرد'}*\nالمجموعة: "${chat.name}"\nبواسطة: @${senderNum}\nالمستهدف: @${targetNum}${cmd === 'ban' && cmdBlacklistEnabled ? '\n🚫 تم إضافته للقائمة السوداء.' : ''}`;
+                                    ? `✅ *${cmd === 'ban' ? 'Ban' : 'Kick'} executed*\nGroup: "${chat.name}"\nBy: @${senderNum}\nTarget: @${targetNum}${cmd === 'ban' && cmdBlacklistEnabled ? '\n🚫 Added to blacklist.' : ''}${cmd === 'ban' && msg.hasQuotedMsg ? '\n🗑️ Replied message deleted.' : ''}`
+                                    : `✅ *تم تنفيذ ${cmd === 'ban' ? 'الحظر' : 'الطرد'}*\nالمجموعة: "${chat.name}"\nبواسطة: @${senderNum}\nالمستهدف: @${targetNum}${cmd === 'ban' && cmdBlacklistEnabled ? '\n🚫 تم إضافته للقائمة السوداء.' : ''}${cmd === 'ban' && msg.hasQuotedMsg ? '\n🗑️ تم حذف الرسالة المشار إليها.' : ''}`;
                                 try { await client.sendMessage(cmdAdminGroup, confirmText, { mentions: [cleanAuthorId, targetCleanId] }); } catch (e) { }
                                 console.log(`[أمر] ${cmd} على ${targetCleanId} في ${chat.name} بواسطة ${cleanAuthorId}`);
                             } catch (err) {
@@ -3166,3 +3274,25 @@ Profile:
 setInterval(() => {
     screenPendingMembershipRequests().catch(() => { });
 }, 30000);
+
+// ── Admin auto-sync: scan group admins and add them to custom whitelist ────────
+setInterval(async () => {
+    if (!client.info || !client.info.wid) return;
+    for (const [groupId, gConf] of Object.entries(config.groupsConfig)) {
+        if (!gConf.enableAdminSync) continue;
+        try {
+            const chat = await client.getChatById(groupId);
+            if (!chat || !chat.isGroup) continue;
+            const adminIds = chat.participants
+                .filter(p => p.isAdmin || p.isSuperAdmin)
+                .map(p => p.id._serialized.replace(/:[0-9]+/, ''));
+            if (adminIds.length === 0) continue;
+            const merged = Array.from(new Set([...(gConf.customWhitelist || []), ...adminIds]));
+            if (merged.length === (gConf.customWhitelist || []).length) continue; // nothing new
+            config.groupsConfig[groupId].customWhitelist = merged;
+            saveConfigToDB(config);
+            config = loadConfigFromDB();
+            console.log(`[مزامنة المشرفين] تم تحديث القائمة البيضاء في "${chat.name}" — ${adminIds.length} مشرف`);
+        } catch (e) { }
+    }
+}, 60 * 60 * 1000); // every hour
