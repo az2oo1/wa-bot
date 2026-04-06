@@ -286,6 +286,8 @@ function loadConfigFromDB() {
         enableJoinProfileScreening: false,
         safeMode: false,
         purgeScheduleEnabled: false, purgeScheduleIntervalHours: 24,
+        adminSyncEnabled: false, adminSyncIntervalHours: 1,
+        globalQAEnabled: false, globalQA: [],
         spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll',
         blockedTypes: [], blockedAction: 'delete',
         spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
@@ -296,10 +298,10 @@ function loadConfigFromDB() {
     };
 
     db.prepare('SELECT * FROM global_settings').all().forEach(row => {
-        if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits', 'aiFilterTriggerWords'].includes(row.key)) newConfig[row.key] = JSON.parse(row.value);
-        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled'].includes(row.key)) {
+        if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits', 'aiFilterTriggerWords', 'globalQA'].includes(row.key)) newConfig[row.key] = JSON.parse(row.value);
+        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
-        } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours'].includes(row.key)) {
+        } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours'].includes(row.key)) {
             newConfig[row.key] = parseInt(row.value, 10);
         } else newConfig[row.key] = row.value;
     });
@@ -365,6 +367,10 @@ function saveConfigToDB(conf) {
         setGlobal.run('safeMode', conf.safeMode ? '1' : '0');
         setGlobal.run('purgeScheduleEnabled', conf.purgeScheduleEnabled ? '1' : '0');
         setGlobal.run('purgeScheduleIntervalHours', (conf.purgeScheduleIntervalHours || 24).toString());
+        setGlobal.run('adminSyncEnabled', conf.adminSyncEnabled ? '1' : '0');
+        setGlobal.run('adminSyncIntervalHours', (conf.adminSyncIntervalHours || 1).toString());
+        setGlobal.run('globalQAEnabled', conf.globalQAEnabled ? '1' : '0');
+        setGlobal.run('globalQA', JSON.stringify(conf.globalQA || []));
         setGlobal.run('spamDuplicateLimit', conf.spamDuplicateLimit.toString());
         setGlobal.run('spamAction', conf.spamAction);
         setGlobal.run('blockedTypes', JSON.stringify(conf.blockedTypes));
@@ -1206,11 +1212,25 @@ app.post('/save', requireAuthApi, (req, res) => {
         }
         config = loadConfigFromDB();
         setupPurgeSchedule();
+        setupAdminSyncSchedule();
         console.log('[فحص] تم حفظ الإعدادات بنجاح.');
         res.sendStatus(200);
     } catch (e) {
         console.error('[خطأ] تعذر الحفظ في قاعدة البيانات:', e.message);
         res.sendStatus(500);
+    }
+});
+
+// ── Admin Sync: manual trigger API ────────────────────────────────────────────
+app.post('/api/admin-sync/run', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    if (!client.info || !client.info.wid) {
+        return res.status(400).json({ error: 'البوت غير متصل حالياً. / Bot disconnected.' });
+    }
+    try {
+        await runAdminSync();
+        res.json({ message: 'تمت مزامنة مشرفي المجموعات وتحديث القوائم البيضاء بنجاح. / Admin sync completed.' });
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'خطأ في المزامنة.' });
     }
 });
 
@@ -1884,8 +1904,9 @@ client.on('ready', async () => {
         botStatusKind = 'connected';
         addConnectionLog('متصل', `متصل وجاهز - ${chats.length} مجموعة`);
 
-        // Start scheduled purge if configured
+        // Start scheduled purge and admin sync if configured
         setupPurgeSchedule();
+        setupAdminSyncSchedule();
     } catch (error) {
         const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
         const errorStack = error && error.stack ? error.stack : 'No stack trace';
@@ -2368,21 +2389,39 @@ client.on('message', async msg => {
                         ? (typeof groupConfig.enableBlacklist !== 'undefined' ? groupConfig.enableBlacklist : config.enableBlacklist)
                         : config.enableBlacklist;
 
-                    // Resolve target: mention takes priority, then quoted message author
-                    let targetRawId = null;
-                    let targetCleanId = null;
+                    // ── Build target list ──────────────────────────────────
+                    // For /ban and /kick: all mentions (multi-ban support)
+                    // For /report: first mention or quoted author (single)
+                    // Also support: reply to a message → add quoted author as target
+                    let targetList = []; // [{ rawId, cleanId }]
 
                     if (msg.mentionedIds && msg.mentionedIds.length > 0) {
-                        targetRawId = msg.mentionedIds[0];
-                        targetCleanId = targetRawId.replace(/:[0-9]+/, '');
+                        if (cmd === 'ban' || cmd === 'kick') {
+                            // All mentioned numbers
+                            for (const mid of msg.mentionedIds) {
+                                targetList.push({ rawId: mid, cleanId: mid.replace(/:[0-9]+/, '') });
+                            }
+                        } else {
+                            // /report: only first mention
+                            const mid = msg.mentionedIds[0];
+                            targetList.push({ rawId: mid, cleanId: mid.replace(/:[0-9]+/, '') });
+                        }
                     }
-                    if (!targetRawId && msg.hasQuotedMsg) {
+
+                    // If /ban reply (no mentions): add quoted message author
+                    if (targetList.length === 0 && msg.hasQuotedMsg) {
                         try {
                             const quoted = await msg.getQuotedMessage();
-                            targetRawId = quoted.author || quoted.from;
-                            targetCleanId = targetRawId ? targetRawId.replace(/:[0-9]+/, '') : null;
+                            const qRawId = quoted.author || quoted.from;
+                            const qCleanId = qRawId ? qRawId.replace(/:[0-9]+/, '') : null;
+                            if (qRawId) targetList.push({ rawId: qRawId, cleanId: qCleanId });
                         } catch (e) { }
                     }
+
+                    // Keep single-target aliases for /report compatibility
+                    const targetRawId  = targetList.length > 0 ? targetList[0].rawId  : null;
+                    const targetCleanId = targetList.length > 0 ? targetList[0].cleanId : null;
+                    // ──────────────────────────────────────────────────────
 
                     if (!targetRawId) {
                         // No target — tell the user how to use it
@@ -2403,31 +2442,71 @@ client.on('message', async msg => {
                                     : '⚠️ يجب أن يكون البوت مشرفاً في المجموعة لتنفيذ هذا الأمر.');
                             } catch (e) { }
                         } else {
-                            try {
-                                await safeDelay();
-                                // Smart /ban: delete the replied-to message first
-                                if (cmd === 'ban' && msg.hasQuotedMsg) {
-                                    try {
-                                        const quotedToDelete = await msg.getQuotedMessage();
-                                        await quotedToDelete.delete(true);
-                                    } catch (e) { }
+                            await safeDelay();
+
+                            // Smart /ban reply: delete the replied-to message first
+                            if (cmd === 'ban' && msg.hasQuotedMsg) {
+                                try {
+                                    const quotedToDelete = await msg.getQuotedMessage();
+                                    await quotedToDelete.delete(true);
+                                } catch (e) { }
+                            }
+
+                            const senderNum = cleanAuthorId.split('@')[0];
+                            const succeeded = [];
+                            const failed = [];
+
+                            for (const target of targetList) {
+                                try {
+                                    await chat.removeParticipants([target.rawId]);
+                                    if (cmd === 'ban' && cmdBlacklistEnabled) {
+                                        try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(target.cleanId); } catch (e) { }
+                                    }
+                                    succeeded.push(target.cleanId.split('@')[0]);
+                                    console.log(`[أمر] ${cmd} على ${target.cleanId} في ${chat.name} بواسطة ${cleanAuthorId}`);
+                                    if (targetList.length > 1) await new Promise(r => setTimeout(r, 600)); // small gap between kicks
+                                } catch (err) {
+                                    failed.push(target.cleanId.split('@')[0]);
                                 }
-                                await chat.removeParticipants([targetRawId]);
-                                if (cmd === 'ban' && cmdBlacklistEnabled) {
-                                    try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(targetCleanId); } catch (e) { }
-                                }
-                                const senderNum = cleanAuthorId.split('@')[0];
-                                const targetNum = (targetCleanId || '').split('@')[0];
-                                const confirmText = cmdAdminLang === 'en'
-                                    ? `✅ *${cmd === 'ban' ? 'Ban' : 'Kick'} executed*\nGroup: "${chat.name}"\nBy: @${senderNum}\nTarget: @${targetNum}${cmd === 'ban' && cmdBlacklistEnabled ? '\n🚫 Added to blacklist.' : ''}${cmd === 'ban' && msg.hasQuotedMsg ? '\n🗑️ Replied message deleted.' : ''}`
-                                    : `✅ *تم تنفيذ ${cmd === 'ban' ? 'الحظر' : 'الطرد'}*\nالمجموعة: "${chat.name}"\nبواسطة: @${senderNum}\nالمستهدف: @${targetNum}${cmd === 'ban' && cmdBlacklistEnabled ? '\n🚫 تم إضافته للقائمة السوداء.' : ''}${cmd === 'ban' && msg.hasQuotedMsg ? '\n🗑️ تم حذف الرسالة المشار إليها.' : ''}`;
-                                try { await client.sendMessage(cmdAdminGroup, confirmText, { mentions: [cleanAuthorId, targetCleanId] }); } catch (e) { }
-                                console.log(`[أمر] ${cmd} على ${targetCleanId} في ${chat.name} بواسطة ${cleanAuthorId}`);
-                            } catch (err) {
+                            }
+
+                            // Summary report to admin group
+                            const succeededMentions = targetList
+                                .filter(t => succeeded.includes(t.cleanId.split('@')[0]))
+                                .map(t => t.cleanId);
+                            const allMentions = [cleanAuthorId, ...succeededMentions];
+
+                            const successLine = succeeded.length > 0
+                                ? (cmdAdminLang === 'en'
+                                    ? `✅ ${cmd === 'ban' ? 'Banned' : 'Kicked'}: @${succeeded.join(', @')}`
+                                    : `✅ تم ${cmd === 'ban' ? 'حظر' : 'طرد'}: @${succeeded.join(', @')}`)
+                                : '';
+                            const failLine = failed.length > 0
+                                ? (cmdAdminLang === 'en'
+                                    ? `⚠️ Failed (may have left or bot lacks permission): @${failed.join(', @')}`
+                                    : `⚠️ فشل (ربما غادروا أو البوت لا يملك صلاحية): @${failed.join(', @')}`)
+                                : '';
+                            const blacklistLine = cmd === 'ban' && cmdBlacklistEnabled && succeeded.length > 0
+                                ? (cmdAdminLang === 'en' ? '🚫 Added to blacklist.' : '🚫 تمت إضافتهم للقائمة السوداء.')
+                                : '';
+                            const deletedLine = cmd === 'ban' && msg.hasQuotedMsg && succeeded.length > 0
+                                ? (cmdAdminLang === 'en' ? '🗑️ Replied message deleted.' : '🗑️ تم حذف الرسالة المشار إليها.')
+                                : '';
+
+                            const confirmText = [
+                                cmdAdminLang === 'en'
+                                    ? `*${cmd === 'ban' ? 'Ban' : 'Kick'} executed* — Group: "${chat.name}" — By: @${senderNum}`
+                                    : `*تم تنفيذ ${cmd === 'ban' ? 'الحظر' : 'الطرد'}* — المجموعة: "${chat.name}" — بواسطة: @${senderNum}`,
+                                successLine, failLine, blacklistLine, deletedLine
+                            ].filter(Boolean).join('\n');
+
+                            try { await client.sendMessage(cmdAdminGroup, confirmText, { mentions: allMentions }); } catch (e) { }
+
+                            if (succeeded.length === 0) {
                                 try {
                                     await msg.reply(cmdAdminLang === 'en'
-                                        ? '⚠️ Failed to remove the participant. They may have already left or the bot lacks permissions.'
-                                        : '⚠️ فشل الطرد. ربما غادر العضو مسبقاً أو البوت لا يملك الصلاحية الكافية.');
+                                        ? '⚠️ Failed to remove all participants. They may have already left or the bot lacks permissions.'
+                                        : '⚠️ فشل الطرد لجميع المستهدفين. ربما غادروا مسبقاً أو البوت لا يملك الصلاحية الكافية.');
                                 } catch (e) { }
                             }
                         }
@@ -2468,6 +2547,7 @@ client.on('message', async msg => {
                 return; // Always exit after a command (authorized or not)
             }
             // ─────────────────────────────────────────────────────────────────
+
 
             let isWhitelistEnabled = config.enableWhitelist;
             if (groupConfig && typeof groupConfig.enableWhitelist !== 'undefined') {
@@ -2851,6 +2931,37 @@ client.on('message', async msg => {
                 }
             }
 
+            // ── Global Q&A Check (runs if group Q&A did not match) ────────────
+            if (!isQAMatched && config.globalQAEnabled && Array.isArray(config.globalQA) && config.globalQA.length > 0 && msg.body && internalMsgType === 'text') {
+                const messageText = msg.body.toLowerCase().trim();
+                for (const gqa of config.globalQA) {
+                    const gQuestions = gqa.questions || (gqa.question ? [gqa.question] : []);
+                    const gMatched = gQuestions.find(q => typeof q === 'string' && messageText.includes(q.toLowerCase().trim()));
+                    if (gMatched) {
+                        isQAMatched = true;
+                        try {
+                            let gFinalAnswer = gqa.answer || '';
+                            // Replace {date}
+                            const gnow = new Date();
+                            gFinalAnswer = gFinalAnswer.replace(/{date}/g,
+                                `${String(gnow.getDate()).padStart(2,'0')}/${String(gnow.getMonth()+1).padStart(2,'0')}/${gnow.getFullYear()}`);
+                            // Replace {user}
+                            const gcontact = await msg.getContact();
+                            const guserName = gcontact ? (gcontact.name || gcontact.number) : cleanAuthorId.split('@')[0];
+                            gFinalAnswer = gFinalAnswer.replace(/{user}/g, guserName);
+                            if (gFinalAnswer) {
+                                await safeDelay();
+                                await chat.sendMessage(gFinalAnswer);
+                                console.log(`[Q&A عالمي] رد على "${gMatched}" في "${chat.name}"`);
+                            }
+                        } catch (err) {
+                            console.error(`[Q&A عالمي] خطأ: ${err.message}`);
+                        }
+                        return;
+                    }
+                }
+            }
+            // ─────────────────────────────────────────────────────────────────
 
             let canSendToAI = false;
             let base64Image = null;
@@ -3275,9 +3386,13 @@ setInterval(() => {
     screenPendingMembershipRequests().catch(() => { });
 }, 30000);
 
-// ── Admin auto-sync: scan group admins and add them to custom whitelist ────────
-setInterval(async () => {
-    if (!client.info || !client.info.wid) return;
+// ── Admin auto-sync: extract as named function ────────────────────────────────
+async function runAdminSync() {
+    if (!client.info || !client.info.wid) {
+        console.log('[مزامنة المشرفين] البوت غير متصل، تخطي الدورة.');
+        return;
+    }
+    let updatedCount = 0;
     for (const [groupId, gConf] of Object.entries(config.groupsConfig)) {
         if (!gConf.enableAdminSync) continue;
         try {
@@ -3290,9 +3405,35 @@ setInterval(async () => {
             const merged = Array.from(new Set([...(gConf.customWhitelist || []), ...adminIds]));
             if (merged.length === (gConf.customWhitelist || []).length) continue; // nothing new
             config.groupsConfig[groupId].customWhitelist = merged;
-            saveConfigToDB(config);
-            config = loadConfigFromDB();
-            console.log(`[مزامنة المشرفين] تم تحديث القائمة البيضاء في "${chat.name}" — ${adminIds.length} مشرف`);
+            updatedCount++;
+            console.log(`[مزامنة المشرفين] تحديث القائمة البيضاء في "${chat.name}" — ${adminIds.length} مشرف`);
         } catch (e) { }
     }
-}, 60 * 60 * 1000); // every hour
+    if (updatedCount > 0) {
+        saveConfigToDB(config);
+        config = loadConfigFromDB();
+        console.log(`[مزامنة المشرفين] اكتملت — تم تحديث ${updatedCount} مجموعة.`);
+    } else {
+        console.log('[مزامنة المشرفين] لا توجد تحديثات جديدة.');
+    }
+}
+
+// Admin sync scheduler — interval options: 1h / 24h / 168h (week) / 720h (month)
+let adminSyncTimer = null;
+function setupAdminSyncSchedule() {
+    if (adminSyncTimer) { clearInterval(adminSyncTimer); adminSyncTimer = null; }
+    if (!config.adminSyncEnabled) {
+        console.log('[مزامنة المشرفين] الجدولة التلقائية معطلة.');
+        return;
+    }
+    // Clamp to one of the four preset values: 1, 24, 168, 720
+    const validHours = [1, 24, 168, 720];
+    const rawHours = parseInt(config.adminSyncIntervalHours, 10) || 1;
+    const hours = validHours.reduce((prev, cur) =>
+        Math.abs(cur - rawHours) < Math.abs(prev - rawHours) ? cur : prev
+    );
+    const ms = hours * 60 * 60 * 1000;
+    adminSyncTimer = setInterval(() => runAdminSync().catch(() => {}), ms);
+    if (adminSyncTimer.unref) adminSyncTimer.unref();
+    console.log(`[مزامنة المشرفين] تم جدولة المزامنة كل ${hours} ساعة.`);
+}
