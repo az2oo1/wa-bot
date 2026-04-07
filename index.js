@@ -1141,9 +1141,10 @@ async function runAdminWhitelistSync() {
     const chats = await client.getChats();
     const botId = client.info.wid._serialized;
     const botIdClean = botId.replace(/:[0-9]+/, '');
-    const adminIds = new Set();
     let scannedGroups = 0;
     let skippedGroups = 0;
+    let updatedGroups = 0;
+    let addedMembers = 0;
 
     for (const chat of chats) {
         if (!chat.isGroup) continue;
@@ -1155,13 +1156,28 @@ async function runAdminWhitelistSync() {
                 continue;
             }
 
+            const groupId = chat.id && chat.id._serialized ? chat.id._serialized : '';
+            if (!groupId || !config.groupsConfig[groupId]) continue;
+
+            const groupConfig = config.groupsConfig[groupId];
+            const currentWhitelist = Array.isArray(groupConfig.customWhitelist) ? groupConfig.customWhitelist : [];
+            const toAdd = [];
+
             for (const participant of chat.participants) {
                 if (!participant || !participant.id || !participant.id._serialized) continue;
                 if (!(participant.isAdmin || participant.isSuperAdmin)) continue;
 
                 const normalized = participant.id._serialized.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
                 if (!normalized || normalized === botId || normalized === botIdClean) continue;
-                adminIds.add(normalized);
+                if (!currentWhitelist.includes(normalized) && !toAdd.includes(normalized)) {
+                    toAdd.push(normalized);
+                }
+            }
+
+            if (toAdd.length > 0) {
+                groupConfig.customWhitelist = currentWhitelist.concat(toAdd);
+                updatedGroups += 1;
+                addedMembers += toAdd.length;
             }
         } catch (groupErr) {
             skippedGroups += 1;
@@ -1169,20 +1185,18 @@ async function runAdminWhitelistSync() {
         }
     }
 
-    let added = 0;
-    const insert = db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)');
-    for (const adminId of adminIds) {
-        const info = insert.run(adminId);
-        if (info && info.changes > 0) added += 1;
+    if (updatedGroups > 0) {
+        saveConfigToDB(config);
+        config = loadConfigFromDB();
     }
 
-    console.log(`[أمان] مزامنة قائمة الإدارة البيضاء: مجموعات مفحوصة ${scannedGroups} (تخطي ${skippedGroups})، مشرفون ${adminIds.size}، مضاف ${added}.`);
+    console.log(`[أمان] مزامنة القوائم البيضاء للمجموعات: مجموعات مفحوصة ${scannedGroups} (تخطي ${skippedGroups})، مجموعات تم تحديثها ${updatedGroups}، أعضاء تمت إضافتهم ${addedMembers}.`);
     return {
         scannedGroups,
         skippedGroups,
-        scannedAdmins: adminIds.size,
-        added,
-        message: `تمت مزامنة مشرفي المجموعات مع القائمة البيضاء. / Admin whitelist sync complete. Groups scanned: ${scannedGroups}, admins: ${adminIds.size}, added: ${added}.`
+        updatedGroups,
+        addedMembers,
+        message: `تمت مزامنة مشرفي كل مجموعة داخل القائمة البيضاء المخصصة لها. / Group whitelist sync complete. Groups scanned: ${scannedGroups}, groups updated: ${updatedGroups}, members added: ${addedMembers}.`
     };
 }
 
@@ -1244,8 +1258,7 @@ app.post('/api/blacklist/purge', requireAuthApi, requirePermission('security:man
 app.post('/api/whitelist/sync-admins', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
     try {
         const result = await runAdminWhitelistSync();
-        const whitelist = db.prepare('SELECT number FROM whitelist ORDER BY number').all().map(r => r.number);
-        res.json({ ...result, whitelist });
+        res.json(result);
     } catch (error) {
         console.error('[خطأ] فشل مزامنة مشرفي المجموعات للقائمة البيضاء:', error.message || error);
         res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'حدث خطأ في مزامنة مشرفي المجموعات. / Server error during admin whitelist sync.' });
