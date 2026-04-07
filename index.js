@@ -1140,21 +1140,32 @@ async function runAdminWhitelistSync() {
 
     const chats = await client.getChats();
     const botId = client.info.wid._serialized;
+    const botIdClean = botId.replace(/:[0-9]+/, '');
     const adminIds = new Set();
+    let scannedGroups = 0;
+    let skippedGroups = 0;
 
     for (const chat of chats) {
         if (!chat.isGroup) continue;
-        const botData = chat.participants.find(p => p.id._serialized === botId);
-        const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
-        if (!botIsAdmin) continue;
+        scannedGroups += 1;
 
-        for (const participant of chat.participants) {
-            if (!participant || !participant.id || !participant.id._serialized) continue;
-            if (!(participant.isAdmin || participant.isSuperAdmin)) continue;
+        try {
+            if (!Array.isArray(chat.participants) || chat.participants.length === 0) {
+                skippedGroups += 1;
+                continue;
+            }
 
-            const normalized = participant.id._serialized.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-            if (!normalized || normalized === botId || normalized === botId.replace(/:[0-9]+/, '')) continue;
-            adminIds.add(normalized);
+            for (const participant of chat.participants) {
+                if (!participant || !participant.id || !participant.id._serialized) continue;
+                if (!(participant.isAdmin || participant.isSuperAdmin)) continue;
+
+                const normalized = participant.id._serialized.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                if (!normalized || normalized === botId || normalized === botIdClean) continue;
+                adminIds.add(normalized);
+            }
+        } catch (groupErr) {
+            skippedGroups += 1;
+            console.error(`[خطأ] تعذر فحص المجموعة أثناء مزامنة القائمة البيضاء: ${chat && chat.name ? chat.name : 'unknown'} | ${groupErr.message || groupErr}`);
         }
     }
 
@@ -1165,11 +1176,13 @@ async function runAdminWhitelistSync() {
         if (info && info.changes > 0) added += 1;
     }
 
-    console.log(`[أمان] مزامنة قائمة الإدارة البيضاء: تمت معالجة ${adminIds.size} مشرف، تمت إضافة ${added} جديد.`);
+    console.log(`[أمان] مزامنة قائمة الإدارة البيضاء: مجموعات مفحوصة ${scannedGroups} (تخطي ${skippedGroups})، مشرفون ${adminIds.size}، مضاف ${added}.`);
     return {
+        scannedGroups,
+        skippedGroups,
         scannedAdmins: adminIds.size,
         added,
-        message: `تمت مزامنة مشرفي المجموعات مع القائمة البيضاء. / Admin whitelist sync complete. Total admins: ${adminIds.size}, added: ${added}.`
+        message: `تمت مزامنة مشرفي المجموعات مع القائمة البيضاء. / Admin whitelist sync complete. Groups scanned: ${scannedGroups}, admins: ${adminIds.size}, added: ${added}.`
     };
 }
 
