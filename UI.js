@@ -307,9 +307,7 @@ module.exports = function renderDashboard(req, db, config) {
                 <button class="nav-item" onclick="showPage('page-groups', this)">
                     <span class="nav-icon"><i class="fas fa-users-cog"></i></span> ${t('المجموعات المخصصة', 'Custom Groups')}
                 </button>
-                <button class="nav-item" onclick="showPage('page-schedules', this)">
-                    <span class="nav-icon"><i class="fas fa-clock"></i></span> ${t('الجدولة والمزامنة', 'Schedules & Sync')}
-                </button>
+
                 <button class="nav-item" onclick="showPage('page-global-qa', this)">
                     <span class="nav-icon"><i class="fas fa-comments"></i></span> ${t('أسئلة وأجوبة عامة', 'Global Q&A')}
                 </button>
@@ -525,6 +523,36 @@ module.exports = function renderDashboard(req, db, config) {
                             </div>
                         </div>
                     </div>
+                    
+                    <!-- Admin Sync Schedule -->
+                    <div class="card purple">
+                        <div class="card-header">
+                            <h3 style="color:var(--purple);"><i class="fas fa-user-shield"></i> ${t('مزامنة المشرفين', 'Admin Whitelist Sync')}</h3>
+                        </div>
+                        <p style="font-size:14px;color:var(--text-muted);margin-bottom:18px;line-height:1.8;">${t('يفحص البوت المجموعات المخصصة ويضيف مشرفيها إلى القائمة البيضاء المخصصة تلقائياً. يجب تفعيل خيار “مزامنة المشرفين” لكل مجموعة من صفحة المجموعات المخصصة.', 'Scans custom groups with Admin Sync enabled and adds their admins to the group custom whitelist automatically. Toggle per group in Custom Groups page.')}</p>
+                        <div class="toggle-row purple" style="margin-bottom:18px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="adminSyncEnabled" ${config.adminSyncEnabled ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label purple">${t('تفعيل المزامنة التلقائية', 'Enable Auto Sync')}<small>${t('تشغيل دوري تلقائي دون تدخل', 'Runs on a timer without intervention')}</small></div>
+                            </div>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('الفاصل الزمني', 'Interval')}</label>
+                            <select id="adminSyncIntervalHours">
+                                <option value="1" ${(config.adminSyncIntervalHours || 1) === 1 ? 'selected' : ''}>${t('كل ساعة', 'Every hour')}</option>
+                                <option value="24" ${(config.adminSyncIntervalHours || 1) === 24 ? 'selected' : ''}>${t('كل 24 ساعة (يومي)', 'Every 24 hours (daily)')}</option>
+                                <option value="168" ${(config.adminSyncIntervalHours || 1) === 168 ? 'selected' : ''}>${t('كل أسبوع', 'Every week')}</option>
+                                <option value="720" ${(config.adminSyncIntervalHours || 1) === 720 ? 'selected' : ''}>${t('كل شهر', 'Every month')}</option>
+                            </select>
+                        </div>
+                        <button type="button" class="btn" style="width:100%;justify-content:center;background:var(--purple-dim);border-color:rgba(209,140,255,0.4);color:var(--purple);" onclick="runAdminSync()">
+                            <i class="fas fa-sync"></i> ${t('مزامنة يدوية الآن', 'Sync Manually Now')}
+                        </button>
+                        <div style="margin-top:10px;font-size:12px;color:var(--text-muted);line-height:1.7;">
+                            <i class="fas fa-info-circle"></i> ${t('لتفعيل المزامنة لمجموعة بعينها، افتح صفحة المجموعات المخصصة وفعّل خيار “مزامنة المشرفين”.', 'To enable sync for a specific group, open Custom Groups and enable "Admin Sync" per group.')}
+                        </div>
+                    </div>
+
                     </div>
 
 
@@ -806,69 +834,7 @@ module.exports = function renderDashboard(req, db, config) {
             </div>
             </div>
 
-            <!-- ═══════════════════ Schedules & Sync page ═══════════════════ -->
-            <div class="page" id="page-schedules">
-                <div class="page-header">
-                    <h2><i class="fas fa-clock"></i> ${t('الجدولة والمزامنة', 'Schedules & Sync')}</h2>
-                    <p>${t('تحكم في الطرد التلقائي ومزامنة المشرفين', 'Control automated purge and admin whitelist sync')}</p>
-                </div>
-                <div class="card-grid">
 
-                    <!-- Purge Schedule -->
-                    <div class="card warning">
-                        <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('جدولة الطرد التلقائي', 'Auto-Purge Schedule')}</h3></div>
-                        <p style="font-size:14px;color:var(--text-muted);margin-bottom:18px;line-height:1.8;">${t('يطرد البوت كل محظور من جميع المجموعات تلقائياً بوفق جدول زمني محدد.', 'Automatically kick all blacklisted members from all groups on schedule.')}</p>
-                        <div class="toggle-row warning" style="margin-bottom:18px;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="purgeScheduleEnabled2" ${config.purgeScheduleEnabled ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label warning">${t('تفعيل الطرد المجدول', 'Enable Scheduled Purge')}<small>${t('يعمل تلقائياً دون تدخل', 'Runs automatically without intervention')}</small></div>
-                            </div>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('الفاصل الزمني', 'Interval')}</label>
-                            <select id="purgeScheduleIntervalHours2">
-                                <option value="1" ${(config.purgeScheduleIntervalHours || 24) === 1 ? 'selected' : ''}>${t('كل ساعة', 'Every hour')}</option>
-                                <option value="24" ${(config.purgeScheduleIntervalHours || 24) === 24 ? 'selected' : ''}>${t('كل 24 ساعة (يومي)', 'Every 24 hours (daily)')}</option>
-                                <option value="168" ${(config.purgeScheduleIntervalHours || 24) === 168 ? 'selected' : ''}>${t('كل أسبوع', 'Every week')}</option>
-                                <option value="720" ${(config.purgeScheduleIntervalHours || 24) === 720 ? 'selected' : ''}>${t('كل شهر', 'Every month')}</option>
-                            </select>
-                        </div>
-                        <button type="button" class="btn btn-warning" style="width:100%;justify-content:center;" onclick="purgeBlacklisted()">
-                            <i class="fas fa-gavel"></i> ${t('تشغيل يدوي الآن', 'Run Manually Now')}
-                        </button>
-                    </div>
-
-                    <!-- Admin Sync Schedule -->
-                    <div class="card purple">
-                        <div class="card-header">
-                            <h3 style="color:var(--purple);"><i class="fas fa-user-shield"></i> ${t('مزامنة المشرفين', 'Admin Whitelist Sync')}</h3>
-                        </div>
-                        <p style="font-size:14px;color:var(--text-muted);margin-bottom:18px;line-height:1.8;">${t('يفحص البوت المجموعات المخصصة ويضيف مشرفيها إلى القائمة البيضاء المخصصة تلقائياً. يجب تفعيل خيار “مزامنة المشرفين” لكل مجموعة من صفحة المجموعات المخصصة.', 'Scans custom groups with Admin Sync enabled and adds their admins to the group custom whitelist automatically. Toggle per group in Custom Groups page.')}</p>
-                        <div class="toggle-row purple" style="margin-bottom:18px;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="adminSyncEnabled" ${config.adminSyncEnabled ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label purple">${t('تفعيل المزامنة التلقائية', 'Enable Auto Sync')}<small>${t('تشغيل دوري تلقائي دون تدخل', 'Runs on a timer without intervention')}</small></div>
-                            </div>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('الفاصل الزمني', 'Interval')}</label>
-                            <select id="adminSyncIntervalHours">
-                                <option value="1" ${(config.adminSyncIntervalHours || 1) === 1 ? 'selected' : ''}>${t('كل ساعة', 'Every hour')}</option>
-                                <option value="24" ${(config.adminSyncIntervalHours || 1) === 24 ? 'selected' : ''}>${t('كل 24 ساعة (يومي)', 'Every 24 hours (daily)')}</option>
-                                <option value="168" ${(config.adminSyncIntervalHours || 1) === 168 ? 'selected' : ''}>${t('كل أسبوع', 'Every week')}</option>
-                                <option value="720" ${(config.adminSyncIntervalHours || 1) === 720 ? 'selected' : ''}>${t('كل شهر', 'Every month')}</option>
-                            </select>
-                        </div>
-                        <button type="button" class="btn" style="width:100%;justify-content:center;background:var(--purple-dim);border-color:rgba(209,140,255,0.4);color:var(--purple);" onclick="runAdminSync()">
-                            <i class="fas fa-sync"></i> ${t('مزامنة يدوية الآن', 'Sync Manually Now')}
-                        </button>
-                        <div style="margin-top:10px;font-size:12px;color:var(--text-muted);line-height:1.7;">
-                            <i class="fas fa-info-circle"></i> ${t('لتفعيل المزامنة لمجموعة بعينها، افتح صفحة المجموعات المخصصة وفعّل خيار “مزامنة المشرفين”.', 'To enable sync for a specific group, open Custom Groups and enable "Admin Sync" per group.')}
-                        </div>
-                    </div>
-
-                </div>
-            </div>
 
             <!-- ═══════════════════ Global Q&A page ═══════════════════ -->
             <div class="page" id="page-global-qa">

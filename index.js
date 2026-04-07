@@ -3446,7 +3446,7 @@ client.on('group_membership_request', async (notification) => {
 
 // ── Admin auto-sync: extract as named function ────────────────────────────────
 async function runAdminSync() {
-    if (!client.info || !client.info.wid) {
+    if (!client || !botStatus.includes("متصل")) {
         console.log('[مزامنة المشرفين] البوت غير متصل، تخطي الدورة.');
         return;
     }
