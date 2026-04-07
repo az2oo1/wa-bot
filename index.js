@@ -283,6 +283,8 @@ function loadConfigFromDB() {
     let newConfig = {
         enableWordFilter: true, enableAIFilter: false, enableAIMedia: false,
         autoAction: false, enableBlacklist: true, enableWhitelist: true, enableAntiSpam: false,
+        autoPurgeScheduleEnabled: false, autoPurgeIntervalMinutes: 60,
+        adminWhitelistSyncEnabled: false, adminWhitelistSyncIntervalMinutes: 60,
         enableJoinProfileScreening: false,
         safeMode: false,
         purgeScheduleEnabled: false, purgeScheduleIntervalHours: 24,
@@ -299,9 +301,9 @@ function loadConfigFromDB() {
 
     db.prepare('SELECT * FROM global_settings').all().forEach(row => {
         if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits', 'aiFilterTriggerWords', 'globalQA'].includes(row.key)) newConfig[row.key] = JSON.parse(row.value);
-        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled'].includes(row.key)) {
+        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled', 'autoPurgeScheduleEnabled', 'adminWhitelistSyncEnabled'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
-        } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours'].includes(row.key)) {
+        } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes'].includes(row.key)) {
             newConfig[row.key] = parseInt(row.value, 10);
         } else newConfig[row.key] = row.value;
     });
@@ -363,6 +365,10 @@ function saveConfigToDB(conf) {
         setGlobal.run('enableBlacklist', conf.enableBlacklist ? '1' : '0');
         setGlobal.run('enableWhitelist', conf.enableWhitelist ? '1' : '0');
         setGlobal.run('enableAntiSpam', conf.enableAntiSpam ? '1' : '0');
+        setGlobal.run('autoPurgeScheduleEnabled', conf.autoPurgeScheduleEnabled ? '1' : '0');
+        setGlobal.run('autoPurgeIntervalMinutes', String(Math.max(1, parseInt(conf.autoPurgeIntervalMinutes, 10) || 60)));
+        setGlobal.run('adminWhitelistSyncEnabled', conf.adminWhitelistSyncEnabled ? '1' : '0');
+        setGlobal.run('adminWhitelistSyncIntervalMinutes', String(Math.max(1, parseInt(conf.adminWhitelistSyncIntervalMinutes, 10) || 60)));
         setGlobal.run('enableJoinProfileScreening', conf.enableJoinProfileScreening ? '1' : '0');
         setGlobal.run('safeMode', conf.safeMode ? '1' : '0');
         setGlobal.run('purgeScheduleEnabled', conf.purgeScheduleEnabled ? '1' : '0');
@@ -711,6 +717,11 @@ ensureLegacyBootstrapCredentialChangeFlag();
 if (db.prepare('SELECT count(*) as count FROM global_settings').get().count === 0) saveConfigToDB(loadConfigFromDB());
 let config = loadConfigFromDB();
 
+let autoPurgeTimer = null;
+let adminWhitelistSyncTimer = null;
+let isAutoPurgeRunning = false;
+let isAdminWhitelistSyncRunning = false;
+
 const app = express();
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -1024,131 +1035,238 @@ app.post('/api/whitelist/remove', requireAuthApi, requirePermission('security:ma
     res.sendStatus(200);
 });
 
-app.post('/api/blacklist/purge', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+function getScheduleIntervalMs(minutesValue, fallbackMinutes = 60) {
+    const parsed = parseInt(minutesValue, 10);
+    const safeMinutes = Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMinutes;
+    return safeMinutes * 60 * 1000;
+}
+
+async function runGlobalBlacklistPurge() {
     if (!client.info || !client.info.wid) {
-        return res.status(400).json({ error: 'البوت غير متصل حالياً، يرجى الانتظار. / Bot disconnected, please wait.' });
+        const err = new Error('البوت غير متصل حالياً، يرجى الانتظار. / Bot disconnected, please wait.');
+        err.statusCode = 400;
+        throw err;
     }
-    try {
-        console.log(`[تنظيف] بدأت عملية المسح الشامل للمجموعات...`);
-        const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
-        const blacklistArr = blacklistRows.map(r => r.number);
-        const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
-        const blockedExtensionsArr = blockedExtensionsRows.map(r => r.ext);
 
+    console.log('[تنظيف] بدأت عملية المسح الشامل للمجموعات...');
+    const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
+    const blacklistArr = blacklistRows.map(r => r.number);
+    const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+    const blockedExtensionsArr = blockedExtensionsRows.map(r => r.ext);
 
-        const chats = await client.getChats();
-        const botId = client.info.wid._serialized;
-        let kickedCount = 0;
-        let rejectedCount = 0;
+    if (blacklistArr.length === 0 && blockedExtensionsArr.length === 0) {
+        return { kickedCount: 0, rejectedCount: 0, message: 'القائمة السوداء فارغة. / Blacklist is empty.' };
+    }
 
-        for (const chat of chats) {
-            if (chat.isGroup) {
-                const botData = chat.participants.find(p => p.id._serialized === botId);
-                const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
-                if (botIsAdmin) {
-                    const usersToKick = chat.participants
-                        .map(p => p.id._serialized)
-                        .filter(id => {
-                            const cleanId = id.replace(/:[0-9]+/, '');
-                            const finalCleanId = cleanId.replace('@c.us', '');
-                            const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
-                            return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(id);
-                        });
-                    if (usersToKick.length > 0) {
+    const chats = await client.getChats();
+    const botId = client.info.wid._serialized;
+    let kickedCount = 0;
+    let rejectedCount = 0;
+
+    for (const chat of chats) {
+        if (!chat.isGroup) continue;
+
+        const botData = chat.participants.find(p => p.id._serialized === botId);
+        const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
+        if (!botIsAdmin) continue;
+
+        const usersToKick = chat.participants
+            .map(p => p.id._serialized)
+            .filter(id => {
+                const cleanId = id.replace(/:[0-9]+/, '');
+                const finalCleanId = cleanId.replace('@c.us', '');
+                const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(id);
+            });
+
+        if (usersToKick.length > 0) {
+            try {
+                await chat.removeParticipants(usersToKick);
+                kickedCount += usersToKick.length;
+                console.log(`[أمان] تم طرد ${usersToKick.length} محظورين من: ${chat.name}`);
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            } catch (e) { }
+        }
+
+        try {
+            const pendingReqs = await chat.getGroupMembershipRequests();
+            if (pendingReqs && pendingReqs.length > 0) {
+                const usersToReject = [];
+                for (const req of pendingReqs) {
+                    const rawId = typeof req.id === 'string' ? req.id : (req.id._serialized || (req.id.user && req.id.server ? `${req.id.user}@${req.id.server}` : null));
+                    if (!rawId) continue;
+
+                    let cleanId = rawId.replace(/:[0-9]+/, '');
+                    if (cleanId.includes('@lid')) {
                         try {
-                            await chat.removeParticipants(usersToKick);
-                            kickedCount += usersToKick.length;
-                            console.log(`[أمان] تم طرد ${usersToKick.length} محظورين من: ${chat.name}`);
-                            await new Promise(resolve => setTimeout(resolve, 1500));
-                        } catch (e) { }
+                            const contact = await client.getContactById(rawId);
+                            if (contact && contact.number) cleanId = `${contact.number}@c.us`;
+                        } catch (err) { }
                     }
 
-                    try {
-                        const pendingReqs = await chat.getGroupMembershipRequests();
-                        if (pendingReqs && pendingReqs.length > 0) {
-                            // Resolve per-group screening settings
-                            const groupId = chat.id._serialized;
-                            const groupConfig = config.groupsConfig[groupId];
-                            let isJoinProfileScreeningEnabled = config.enableJoinProfileScreening;
-                            let isWordFilterEnabled = config.enableWordFilter;
-                            let isAIFilterEnabled = config.enableAIFilter;
-                            let isBlacklistEnabled = config.enableBlacklist;
-                            let forbiddenWords = [...config.defaultWords];
-                            let aiTriggerWords = Array.isArray(config.aiFilterTriggerWords) && config.aiFilterTriggerWords.length > 0 ? config.aiFilterTriggerWords : ['نعم'];
-                            if (groupConfig) {
-                                if (typeof groupConfig.enableJoinProfileScreening !== 'undefined') isJoinProfileScreeningEnabled = groupConfig.enableJoinProfileScreening;
-                                if (typeof groupConfig.enableWordFilter !== 'undefined') isWordFilterEnabled = groupConfig.enableWordFilter;
-                                if (typeof groupConfig.enableAIFilter !== 'undefined') isAIFilterEnabled = groupConfig.enableAIFilter;
-                                if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabled = groupConfig.enableBlacklist;
-                                if (groupConfig.useDefaultWords === false) forbiddenWords = [];
-                                if (groupConfig.words && groupConfig.words.length > 0) forbiddenWords = [...forbiddenWords, ...groupConfig.words];
-                                if (Array.isArray(groupConfig.aiFilterTriggerWords) && groupConfig.aiFilterTriggerWords.length > 0) aiTriggerWords = groupConfig.aiFilterTriggerWords;
-                            }
-                            const canScreenProfiles = isJoinProfileScreeningEnabled && (isWordFilterEnabled || isAIFilterEnabled);
+                    const finalCleanId = cleanId.replace(/:[0-9]+/, '').replace('@c.us', '');
+                    const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                    if (isExtBlocked || blacklistArr.includes(finalCleanId) || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId)) {
+                        usersToReject.push(rawId);
+                    }
+                }
 
-                            let usersToReject = [];
-                            for (const req of pendingReqs) {
-                                let rawId = typeof req.id === 'string' ? req.id : (req.id._serialized || (req.id.user && req.id.server ? `${req.id.user}@${req.id.server}` : null));
-                                if (!rawId) continue;
-
-                                let cleanId = rawId.replace(/:[0-9]+/, '');
-                                if (cleanId.includes('@lid')) {
-                                    try {
-                                        const contact = await client.getContactById(rawId);
-                                        if (contact && contact.number) cleanId = `${contact.number}@c.us`;
-                                    } catch (err) { }
-                                }
-
-                                const finalCleanId = cleanId.replace(/:[0-9]+/, '').replace('@c.us', '');
-                                const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
-
-                                // 1. Blacklist / blocked-extensions check
-                                if (isExtBlocked || blacklistArr.includes(finalCleanId) || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId)) {
-                                    usersToReject.push(rawId);
-                                    continue;
-                                }
-
-                                // 2. Join Profile Screening check
-                                if (canScreenProfiles) {
-                                    try {
-                                        const profileResult = await evaluateJoinProfileViolation({
-                                            participantId: rawId,
-                                            cleanUserId: cleanId,
-                                            groupName: chat.name,
-                                            isWordFilterEnabled,
-                                            isAIFilterEnabled,
-                                            forbiddenWords,
-                                            aiTriggerWords
-                                        });
-                                        if (profileResult.isViolating) {
-                                            usersToReject.push(rawId);
-                                            if (isBlacklistEnabled) {
-                                                try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId); } catch (e) { }
-                                            }
-                                            console.log(`[تنظيف] رفض طلب انضمام (فحص الملف الشخصي) - ${cleanId} في ${chat.name}: ${profileResult.reason}`);
-                                        }
-                                    } catch (e) { }
-                                }
-                            }
-
-                            if (usersToReject.length > 0) {
-                                await chat.rejectGroupMembershipRequests({ requesterIds: usersToReject });
-                                rejectedCount += usersToReject.length;
-                                console.log(`[أمان] تم رفض ${usersToReject.length} طلبات انضمام في: ${chat.name}`);
-                                await new Promise(resolve => setTimeout(resolve, 1500));
-                            }
-                        }
-                    } catch (e) { console.error(`[خطأ] فشل رفض طلبات الانضمام في ${chat.name}:`, e.message); }
+                if (usersToReject.length > 0) {
+                    await chat.rejectGroupMembershipRequests({ requesterIds: usersToReject });
+                    rejectedCount += usersToReject.length;
+                    console.log(`[أمان] تم رفض ${usersToReject.length} طلبات انضمام لمحظورين في: ${chat.name}`);
+                    await new Promise(resolve => setTimeout(resolve, 1500));
                 }
             }
+        } catch (e) {
+            console.error(`[خطأ] فشل رفض طلبات الانضمام في ${chat.name}:`, e.message);
         }
-        console.log(`[تنظيف] انتهت عملية المسح. طرد ${kickedCount} شخص ورفض ${rejectedCount} طلبات.`);
-        res.json({ message: `تمت عملية المسح بنجاح! تم طرد (${kickedCount}) محظور ورفض (${rejectedCount}) طلب. / Purge complete! Kicked (${kickedCount}), rejected (${rejectedCount}).` });
+    }
+
+    console.log(`[تنظيف] انتهت عملية المسح. طرد ${kickedCount} شخص ورفض ${rejectedCount} طلبات.`);
+    return {
+        kickedCount,
+        rejectedCount,
+        message: `تمت عملية المسح بنجاح! تم طرد (${kickedCount}) محظور ورفض (${rejectedCount}) طلب. / Purge complete! Kicked (${kickedCount}), rejected (${rejectedCount}).`
+    };
+}
+
+async function runAdminWhitelistSync() {
+    if (!client.info || !client.info.wid) {
+        const err = new Error('البوت غير متصل حالياً، يرجى الانتظار. / Bot disconnected, please wait.');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    const chats = await client.getChats();
+    const botId = client.info.wid._serialized;
+    const adminIds = new Set();
+
+    for (const chat of chats) {
+        if (!chat.isGroup) continue;
+        const botData = chat.participants.find(p => p.id._serialized === botId);
+        const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
+        if (!botIsAdmin) continue;
+
+        for (const participant of chat.participants) {
+            if (!participant || !participant.id || !participant.id._serialized) continue;
+            if (!(participant.isAdmin || participant.isSuperAdmin)) continue;
+
+            const normalized = participant.id._serialized.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+            if (!normalized || normalized === botId || normalized === botId.replace(/:[0-9]+/, '')) continue;
+            adminIds.add(normalized);
+        }
+    }
+
+    let added = 0;
+    const insert = db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)');
+    for (const adminId of adminIds) {
+        const info = insert.run(adminId);
+        if (info && info.changes > 0) added += 1;
+    }
+
+    console.log(`[أمان] مزامنة قائمة الإدارة البيضاء: تمت معالجة ${adminIds.size} مشرف، تمت إضافة ${added} جديد.`);
+    return {
+        scannedAdmins: adminIds.size,
+        added,
+        message: `تمت مزامنة مشرفي المجموعات مع القائمة البيضاء. / Admin whitelist sync complete. Total admins: ${adminIds.size}, added: ${added}.`
+    };
+}
+
+function refreshSchedulers() {
+    if (autoPurgeTimer) {
+        clearInterval(autoPurgeTimer);
+        autoPurgeTimer = null;
+    }
+    if (adminWhitelistSyncTimer) {
+        clearInterval(adminWhitelistSyncTimer);
+        adminWhitelistSyncTimer = null;
+    }
+
+    if (config.autoPurgeScheduleEnabled) {
+        const intervalMs = getScheduleIntervalMs(config.autoPurgeIntervalMinutes, 60);
+        autoPurgeTimer = setInterval(async () => {
+            if (isAutoPurgeRunning) return;
+            isAutoPurgeRunning = true;
+            try {
+                await runGlobalBlacklistPurge();
+            } catch (err) {
+                console.error('[خطأ] فشل تنفيذ Auto-Purge المجدول:', err.message || err);
+            } finally {
+                isAutoPurgeRunning = false;
+            }
+        }, intervalMs);
+        autoPurgeTimer.unref();
+        console.log(`[تنظيف] تم تفعيل Auto-Purge كل ${Math.floor(intervalMs / 60000)} دقيقة.`);
+    }
+
+    if (config.adminWhitelistSyncEnabled) {
+        const intervalMs = getScheduleIntervalMs(config.adminWhitelistSyncIntervalMinutes, 60);
+        adminWhitelistSyncTimer = setInterval(async () => {
+            if (isAdminWhitelistSyncRunning) return;
+            isAdminWhitelistSyncRunning = true;
+            try {
+                await runAdminWhitelistSync();
+            } catch (err) {
+                console.error('[خطأ] فشل تنفيذ Admin Whitelist Sync المجدول:', err.message || err);
+            } finally {
+                isAdminWhitelistSyncRunning = false;
+            }
+        }, intervalMs);
+        adminWhitelistSyncTimer.unref();
+        console.log(`[أمان] تم تفعيل Admin Whitelist Sync كل ${Math.floor(intervalMs / 60000)} دقيقة.`);
+    }
+}
+
+app.post('/api/blacklist/purge', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    try {
+        const result = await runGlobalBlacklistPurge();
+        res.json({ message: result.message, kickedCount: result.kickedCount, rejectedCount: result.rejectedCount });
     } catch (error) {
         console.error('[خطأ]', error);
-        res.status(500).json({ error: 'حدث خطأ في السيرفر أثناء عملية المسح. / Server error during purge.' });
+        res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'حدث خطأ في السيرفر أثناء عملية المسح. / Server error during purge.' });
     }
 });
+
+app.post('/api/whitelist/sync-admins', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    try {
+        const result = await runAdminWhitelistSync();
+        const whitelist = db.prepare('SELECT number FROM whitelist ORDER BY number').all().map(r => r.number);
+        res.json({ ...result, whitelist });
+    } catch (error) {
+        console.error('[خطأ] فشل مزامنة مشرفي المجموعات للقائمة البيضاء:', error.message || error);
+        res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'حدث خطأ في مزامنة مشرفي المجموعات. / Server error during admin whitelist sync.' });
+    }
+});
+
+app.get('/api/schedules', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    res.json({
+        autoPurgeScheduleEnabled: Boolean(config.autoPurgeScheduleEnabled),
+        autoPurgeIntervalMinutes: Math.max(1, parseInt(config.autoPurgeIntervalMinutes, 10) || 60),
+        adminWhitelistSyncEnabled: Boolean(config.adminWhitelistSyncEnabled),
+        adminWhitelistSyncIntervalMinutes: Math.max(1, parseInt(config.adminWhitelistSyncIntervalMinutes, 10) || 60)
+    });
+});
+
+app.post('/api/schedules', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    const autoPurgeScheduleEnabled = req.body && (req.body.autoPurgeScheduleEnabled === true || req.body.autoPurgeScheduleEnabled === 'true');
+    const autoPurgeIntervalMinutes = Math.max(1, parseInt(req.body && req.body.autoPurgeIntervalMinutes, 10) || 60);
+    const adminWhitelistSyncEnabled = req.body && (req.body.adminWhitelistSyncEnabled === true || req.body.adminWhitelistSyncEnabled === 'true');
+    const adminWhitelistSyncIntervalMinutes = Math.max(1, parseInt(req.body && req.body.adminWhitelistSyncIntervalMinutes, 10) || 60);
+
+    config.autoPurgeScheduleEnabled = autoPurgeScheduleEnabled;
+    config.autoPurgeIntervalMinutes = autoPurgeIntervalMinutes;
+    config.adminWhitelistSyncEnabled = adminWhitelistSyncEnabled;
+    config.adminWhitelistSyncIntervalMinutes = adminWhitelistSyncIntervalMinutes;
+
+    saveConfigToDB(config);
+    config = loadConfigFromDB();
+    refreshSchedulers();
+
+    res.json({ success: true, autoPurgeScheduleEnabled, autoPurgeIntervalMinutes, adminWhitelistSyncEnabled, adminWhitelistSyncIntervalMinutes });
+});
+
+refreshSchedulers();
 
 app.get('/api/status', requireAuthApi, requirePermission('dashboard:read'), (req, res) => {
     const l = req.query.lang === 'en' ? 'en' : 'ar';
@@ -1213,6 +1331,7 @@ app.post('/save', requireAuthApi, (req, res) => {
         config = loadConfigFromDB();
         setupPurgeSchedule();
         setupAdminSyncSchedule();
+        refreshSchedulers();
         console.log('[فحص] تم حفظ الإعدادات بنجاح.');
         res.sendStatus(200);
     } catch (e) {

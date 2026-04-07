@@ -462,6 +462,28 @@ module.exports = function renderDashboard(req, db, config) {
                             <i class="fas fa-gavel"></i> ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
                         </button>
                     </div>
+
+                    <div class="card warning purge-card">
+                        <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-clock"></i> ${t('جدولة الطرد الشامل', 'Auto-Purge Schedule')}</h3></div>
+                        <div class="field-row" style="align-items:end; margin-bottom:10px;">
+                            <div class="field-group" style="margin-bottom:0;">
+                                <label class="field-label">${t('الفاصل بالدقائق', 'Interval (minutes)')}</label>
+                                <input type="number" id="autoPurgeIntervalMinutes" min="1" step="1" value="60">
+                            </div>
+                            <button type="button" id="saveAutoPurgeScheduleBtn" class="btn btn-warning" onclick="saveAutoPurgeSchedule()" style="height:44px;">
+                                <i class="fas fa-save"></i> ${t('حفظ', 'Save')}
+                            </button>
+                        </div>
+                        <div class="toggle-row warning" style="margin-bottom:12px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="autoPurgeScheduleEnabled"><span class="slider"></span></label>
+                                <div class="toggle-label warning">${t('تفعيل الجدولة التلقائية', 'Enable automatic schedule')}</div>
+                            </div>
+                        </div>
+                        <button type="button" id="runAutoPurgeScheduleBtn" class="btn btn-warning" style="width:100%; justify-content:center;" onclick="runAutoPurgeNow()">
+                            <i class="fas fa-play"></i> ${t('تشغيل الطرد الآن', 'Run Auto-Purge Now')}
+                        </button>
+                    </div>
                     </div>
 
                     <div class="blacklist-column">
@@ -504,6 +526,29 @@ module.exports = function renderDashboard(req, db, config) {
                                 </div>
                             </div>
                         </div>
+                    </div>
+
+                    <div class="card info" style="border-color:rgba(64,196,255,0.4);">
+                        <div class="card-header"><h3 style="color:var(--blue);"><i class="fas fa-user-shield"></i> ${t('مزامنة مشرفي المجموعات', 'Admin Whitelist Sync')}</h3></div>
+                        <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px; line-height:1.8;">${t('يضيف جميع مشرفي المجموعات (التي يديرها البوت) إلى القائمة البيضاء تلقائياً.', 'Automatically adds admins from bot-managed groups to the whitelist.')}</p>
+                        <div class="field-row" style="align-items:end; margin-bottom:10px;">
+                            <div class="field-group" style="margin-bottom:0;">
+                                <label class="field-label">${t('الفاصل بالدقائق', 'Interval (minutes)')}</label>
+                                <input type="number" id="adminWhitelistSyncIntervalMinutes" min="1" step="1" value="60">
+                            </div>
+                            <button type="button" id="saveAdminWhitelistSyncScheduleBtn" class="btn btn-blue" onclick="saveAdminWhitelistSyncSchedule()" style="height:44px;">
+                                <i class="fas fa-save"></i> ${t('حفظ', 'Save')}
+                            </button>
+                        </div>
+                        <div class="toggle-row blue" style="margin-bottom:12px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="adminWhitelistSyncEnabled"><span class="slider"></span></label>
+                                <div class="toggle-label blue">${t('تفعيل الجدولة التلقائية', 'Enable automatic schedule')}</div>
+                            </div>
+                        </div>
+                        <button type="button" id="runAdminWhitelistSyncBtn" class="btn btn-blue" style="width:100%; justify-content:center;" onclick="runAdminWhitelistSyncNow()">
+                            <i class="fas fa-play"></i> ${t('تشغيل المزامنة الآن', 'Run Sync Now')}
+                        </button>
                     </div>
                     </div>
 
@@ -1493,6 +1538,11 @@ module.exports = function renderDashboard(req, db, config) {
                 'logging_out': '<i class="fas fa-spinner fa-spin"></i> ${t("جاري تسجيل الخروج...", "Logging out...")}',
                 'purge_warn': '⚠️ ${t("تحذير: هذا الخيار سيجعل البوت يبحث في جميع المجموعات، وسيطرد أي شخص موجود في القائمة السوداء فوراً. متأكد؟", "Warning: The bot will scan all groups and instantly kick anyone in the blacklist. Sure?")}',
                 'purging': '<i class="fas fa-spinner fa-spin"></i> ${t("جاري المسح والطرد من المجموعات...", "Scanning and purging...")}',
+                'saving_schedule': '<i class="fas fa-spinner fa-spin"></i> ${t("جاري حفظ الجدولة...", "Saving schedule...")}',
+                'running_sync': '<i class="fas fa-spinner fa-spin"></i> ${t("جاري التنفيذ...", "Running...")}',
+                'schedule_saved': '${t("✅ تم حفظ الجدولة بنجاح", "✅ Schedule saved successfully")}',
+                'schedule_load_fail': '${t("❌ تعذر تحميل إعدادات الجدولة", "❌ Failed to load schedule settings")}',
+                'sync_success': '${t("✅ تمت المزامنة بنجاح", "✅ Sync completed successfully")}',
                 'conn_err': '${t("حدث خطأ في الاتصال بالخادم.", "Connection error.")}',
                 'save_success': '<i class="fas fa-check-circle"></i> ${t("تم الحفظ في قاعدة البيانات بنجاح!", "Saved to database successfully!")}',
                 'save_fail': '<i class="fas fa-times-circle"></i> ${t("فشل الحفظ، تحقق من السيرفر", "Save failed, check server")}',
@@ -3101,6 +3151,131 @@ module.exports = function renderDashboard(req, db, config) {
                 btn.disabled = false;
             }
 
+            async function loadScheduleSettings() {
+                try {
+                    const res = await fetch('/api/schedules', { cache: 'no-store' });
+                    if (!res.ok) return;
+                    const data = await res.json();
+
+                    const autoToggle = document.getElementById('autoPurgeScheduleEnabled');
+                    const autoInterval = document.getElementById('autoPurgeIntervalMinutes');
+                    const adminToggle = document.getElementById('adminWhitelistSyncEnabled');
+                    const adminInterval = document.getElementById('adminWhitelistSyncIntervalMinutes');
+
+                    if (autoToggle) autoToggle.checked = Boolean(data.autoPurgeScheduleEnabled);
+                    if (autoInterval) autoInterval.value = Math.max(1, parseInt(data.autoPurgeIntervalMinutes, 10) || 60);
+                    if (adminToggle) adminToggle.checked = Boolean(data.adminWhitelistSyncEnabled);
+                    if (adminInterval) adminInterval.value = Math.max(1, parseInt(data.adminWhitelistSyncIntervalMinutes, 10) || 60);
+                } catch (e) {
+                    showToast(dict.schedule_load_fail);
+                }
+            }
+
+            async function saveScheduleSettings() {
+                const autoToggle = document.getElementById('autoPurgeScheduleEnabled');
+                const autoInterval = document.getElementById('autoPurgeIntervalMinutes');
+                const adminToggle = document.getElementById('adminWhitelistSyncEnabled');
+                const adminInterval = document.getElementById('adminWhitelistSyncIntervalMinutes');
+
+                const payload = {
+                    autoPurgeScheduleEnabled: autoToggle ? autoToggle.checked : false,
+                    autoPurgeIntervalMinutes: Math.max(1, parseInt(autoInterval ? autoInterval.value : '60', 10) || 60),
+                    adminWhitelistSyncEnabled: adminToggle ? adminToggle.checked : false,
+                    adminWhitelistSyncIntervalMinutes: Math.max(1, parseInt(adminInterval ? adminInterval.value : '60', 10) || 60)
+                };
+
+                const res = await fetch('/api/schedules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!res.ok) {
+                    const errData = await res.json().catch(() => ({}));
+                    throw new Error(errData.error || dict.conn_err.replace(/<[^>]*>?/gm, ''));
+                }
+
+                await loadScheduleSettings();
+            }
+
+            async function saveAutoPurgeSchedule() {
+                const btn = document.getElementById('saveAutoPurgeScheduleBtn');
+                if (!btn) return;
+                const original = btn.innerHTML;
+                btn.innerHTML = dict.saving_schedule;
+                btn.disabled = true;
+                try {
+                    await saveScheduleSettings();
+                    showToast(dict.schedule_saved);
+                } catch (e) {
+                    showToast('❌ ' + (e.message || dict.conn_err.replace(/<[^>]*>?/gm, '')));
+                }
+                btn.innerHTML = original;
+                btn.disabled = false;
+            }
+
+            async function saveAdminWhitelistSyncSchedule() {
+                const btn = document.getElementById('saveAdminWhitelistSyncScheduleBtn');
+                if (!btn) return;
+                const original = btn.innerHTML;
+                btn.innerHTML = dict.saving_schedule;
+                btn.disabled = true;
+                try {
+                    await saveScheduleSettings();
+                    showToast(dict.schedule_saved);
+                } catch (e) {
+                    showToast('❌ ' + (e.message || dict.conn_err.replace(/<[^>]*>?/gm, '')));
+                }
+                btn.innerHTML = original;
+                btn.disabled = false;
+            }
+
+            async function runAutoPurgeNow() {
+                const btn = document.getElementById('runAutoPurgeScheduleBtn');
+                if (!btn) return;
+                const original = btn.innerHTML;
+                btn.innerHTML = dict.running_sync;
+                btn.disabled = true;
+                try {
+                    const res = await fetch('/api/blacklist/purge', { method: 'POST' });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok || data.error) {
+                        showToast('❌ ' + (data.error || dict.conn_err.replace(/<[^>]*>?/gm, '')));
+                    } else {
+                        showToast('✅ ' + (data.message || 'OK'));
+                    }
+                } catch (e) {
+                    showToast(dict.conn_err.replace(/<[^>]*>?/gm, ''));
+                }
+                btn.innerHTML = original;
+                btn.disabled = false;
+            }
+
+            async function runAdminWhitelistSyncNow() {
+                const btn = document.getElementById('runAdminWhitelistSyncBtn');
+                if (!btn) return;
+                const original = btn.innerHTML;
+                btn.innerHTML = dict.running_sync;
+                btn.disabled = true;
+                try {
+                    const res = await fetch('/api/whitelist/sync-admins', { method: 'POST' });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok || data.error) {
+                        showToast('❌ ' + (data.error || dict.conn_err.replace(/<[^>]*>?/gm, '')));
+                    } else {
+                        showToast(data.message || dict.sync_success);
+                        if (Array.isArray(data.whitelist)) {
+                            whitelistArr = data.whitelist;
+                            renderWhitelist();
+                        }
+                    }
+                } catch (e) {
+                    showToast(dict.conn_err.replace(/<[^>]*>?/gm, ''));
+                }
+                btn.innerHTML = original;
+                btn.disabled = false;
+            }
+
             function renderDefaultWords() {
                 const container = document.getElementById('defaultWordsContainer');
                 container.innerHTML = '';
@@ -3657,6 +3832,7 @@ module.exports = function renderDashboard(req, db, config) {
             renderWhitelist();
             renderDefaultWords();
             renderAITriggerWords();
+            loadScheduleSettings();
             loadKnownGroups();
             enforceFirstLoginChange();
 
@@ -3816,6 +3992,10 @@ module.exports = function renderDashboard(req, db, config) {
                     blockedAction: document.getElementById('globalBlockedAction').value,
                     enableBlacklist: document.getElementById('enableBlacklist').checked,
                     enableWhitelist: document.getElementById('enableWhitelist').checked,
+                    autoPurgeScheduleEnabled: document.getElementById('autoPurgeScheduleEnabled') ? document.getElementById('autoPurgeScheduleEnabled').checked : false,
+                    autoPurgeIntervalMinutes: document.getElementById('autoPurgeIntervalMinutes') ? (parseInt(document.getElementById('autoPurgeIntervalMinutes').value, 10) || 60) : 60,
+                    adminWhitelistSyncEnabled: document.getElementById('adminWhitelistSyncEnabled') ? document.getElementById('adminWhitelistSyncEnabled').checked : false,
+                    adminWhitelistSyncIntervalMinutes: document.getElementById('adminWhitelistSyncIntervalMinutes') ? (parseInt(document.getElementById('adminWhitelistSyncIntervalMinutes').value, 10) || 60) : 60,
                     enableJoinProfileScreening: document.getElementById('enableJoinProfileScreening').checked,
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
                     enableAIFilter: document.getElementById('enableAIFilter').checked,
