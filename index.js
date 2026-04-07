@@ -3386,67 +3386,9 @@ setInterval(() => {
     screenPendingMembershipRequests().catch(() => { });
 }, 30000);
 
-// ── Real-time join request screening ────────────────────────────────────────
-// Fires immediately when a new membership request arrives (no 30s wait)
-client.on('group_membership_request', async (notification) => {
-    try {
-        const groupId = notification.chatId || (notification.id && notification.id.remote);
-        const rawRequesterId = notification.author || (notification.id && notification.id.participant);
-        if (!groupId || !rawRequesterId) return;
-
-        const groupConfig = config.groupsConfig[groupId];
-
-        let isBlacklistEnabled = config.enableBlacklist;
-        if (groupConfig && typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabled = groupConfig.enableBlacklist;
-        if (!isBlacklistEnabled) return;
-
-        let cleanId = rawRequesterId.replace(/:[0-9]+/, '');
-        if (cleanId.includes('@lid')) {
-            try {
-                const contact = await client.getContactById(rawRequesterId);
-                if (contact && contact.number) cleanId = `${contact.number}@c.us`;
-                else cleanId = cleanId.replace('@lid', '@c.us');
-            } catch (e) { cleanId = cleanId.replace('@lid', '@c.us'); }
-        }
-
-        const numberOnly = cleanId.replace('@c.us', '');
-        const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
-        const blacklistArr = blacklistRows.map(r => r.number);
-        const blockedExtRows = db.prepare('SELECT ext FROM blocked_extensions').all();
-        const blockedExtArr = blockedExtRows.map(r => r.ext);
-
-        const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
-        const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanId) : false;
-        const isExtBlocked = blockedExtArr.some(ext => numberOnly.startsWith(ext));
-        const inGlobalBl = blacklistArr.includes(cleanId) || blacklistArr.includes(`${numberOnly}@c.us`);
-
-        if ((useGlobalBl && (inGlobalBl || isExtBlocked)) || inCustomBl) {
-            try {
-                const chat = await client.getChatById(groupId);
-                await chat.rejectGroupMembershipRequests({ requesterIds: [rawRequesterId] });
-                console.log(`[طلبات] رفض فوري لطلب انضمام محظور (${cleanId}) في: ${chat.name}`);
-
-                // Notify admin group
-                const targetAdminGroup = (groupConfig && groupConfig.adminGroup && groupConfig.adminGroup.trim())
-                    ? groupConfig.adminGroup.trim()
-                    : config.defaultAdminGroup;
-                if (targetAdminGroup) {
-                    const adminLang = (groupConfig && groupConfig.adminLanguage && groupConfig.adminLanguage !== 'default')
-                        ? groupConfig.adminLanguage
-                        : config.defaultAdminLanguage;
-                    const reportText = adminLang === 'en'
-                        ? `🛡️ *Real-time Block*\nJoin request from blacklisted number rejected instantly in "${chat.name}".\nNumber: @${numberOnly}`
-                        : `🛡️ *حظر فوري*\nتم رفض طلب انضمام من رقم محظور فوراً في "${chat.name}".\nالرقم: @${numberOnly}`;
-                    try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanId] }); } catch (e) { }
-                }
-            } catch (e) { }
-        }
-    } catch (e) { }
-});
-
 // ── Admin auto-sync: extract as named function ────────────────────────────────
 async function runAdminSync() {
-    if (!client || !botStatus.includes("متصل")) {
+    if (!client.info || !client.info.wid) {
         console.log('[مزامنة المشرفين] البوت غير متصل، تخطي الدورة.');
         return;
     }
