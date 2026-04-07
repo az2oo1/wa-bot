@@ -278,7 +278,7 @@ module.exports = function renderDashboard(req, db, config) {
         <nav class="sidebar" id="sidebar">
             <div class="sidebar-logo">
                 <div class="logo-icon"><img src="/public/logo.png?v=2" alt="${t('شعار البوت', 'Bot Logo')}" style="width:100%;height:100%;object-fit:cover;border-radius:14px;display:block;" onerror="if(!this.dataset.retry){this.dataset.retry='1';this.src='public/logo.png?v=2';return;}this.style.display='none';this.nextElementSibling.style.display='flex';"><i class="fas fa-robot" style="display:none;align-items:center;justify-content:center;width:100%;height:100%;font-size:22px;color:#fff;"></i></div>
-                <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V6.5.1', 'Dashboard V6.5.1')}</small></div>
+                <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V6.6', 'Dashboard V6.6')}</small></div>
             </div>
 
             <div class="sidebar-nav-scroll">
@@ -306,6 +306,12 @@ module.exports = function renderDashboard(req, db, config) {
                 </button>
                 <button class="nav-item" onclick="showPage('page-groups', this)">
                     <span class="nav-icon"><i class="fas fa-users-cog"></i></span> ${t('المجموعات المخصصة', 'Custom Groups')}
+                </button>
+                <button class="nav-item" onclick="showPage('page-schedules', this)">
+                    <span class="nav-icon"><i class="fas fa-clock"></i></span> ${t('الجدولة والمزامنة', 'Schedules & Sync')}
+                </button>
+                <button class="nav-item" onclick="showPage('page-global-qa', this)">
+                    <span class="nav-icon"><i class="fas fa-comments"></i></span> ${t('أسئلة وأجوبة عامة', 'Global Q&A')}
                 </button>
 
                 <div class="nav-section">${t('أدوات', 'Tools')}</div>
@@ -456,11 +462,25 @@ module.exports = function renderDashboard(req, db, config) {
                     </div>
 
                     <div class="card warning purge-card">
-                        <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
-                        <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
-                        <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; justify-content:center; padding:15px; font-size:16px;" onclick="purgeBlacklisted()">
+                        <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('الطرد الشامل', 'Global Purge')}</h3></div>
+                        <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('يبحث البوت في كل المجموعات ويطرد فوراً كل من في القائمة السوداء.', 'Bot scans all groups and instantly kicks everyone in the blacklist.')}</p>
+                        <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; justify-content:center; padding:14px; font-size:15px;" onclick="purgeBlacklisted()">
                             <i class="fas fa-gavel"></i> ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
                         </button>
+                        <div style="margin-top:16px; padding-top:16px; border-top:1px dashed rgba(255,171,64,0.3);">
+                            <div style="font-size:12px; color:var(--text-muted); margin-bottom:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px;">${t('جدولة الطرد التلقائي', 'Auto-Purge Schedule')}</div>
+                            <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+                                <label class="switch"><input type="checkbox" id="purgeScheduleEnabled" ${config.purgeScheduleEnabled ? 'checked' : ''}><span class="slider"></span></label>
+                                <span style="font-size:14px; color:var(--text)">${t('تفعيل الطرد المجدول', 'Enable Scheduled Purge')}</span>
+                            </div>
+                            <label class="field-label">${t('الفاصل الزمني', 'Interval')}</label>
+                            <select id="purgeScheduleIntervalHours" style="margin-bottom:0;">
+                                <option value="1" ${(config.purgeScheduleIntervalHours || 24) === 1 ? 'selected' : ''}>${t('كل ساعة', 'Every hour')}</option>
+                                <option value="24" ${(config.purgeScheduleIntervalHours || 24) === 24 ? 'selected' : ''}>${t('كل 24 ساعة (يومي)', 'Every 24 hours (daily)')}</option>
+                                <option value="168" ${(config.purgeScheduleIntervalHours || 24) === 168 ? 'selected' : ''}>${t('كل أسبوع', 'Every week')}</option>
+                                <option value="720" ${(config.purgeScheduleIntervalHours || 24) === 720 ? 'selected' : ''}>${t('كل شهر', 'Every month')}</option>
+                            </select>
+                        </div>
                     </div>
                     </div>
 
@@ -783,6 +803,95 @@ module.exports = function renderDashboard(req, db, config) {
                     <div id="groupDetailBody"></div>
                 </div>
 
+            </div>
+            </div>
+
+            <!-- ═══════════════════ Schedules & Sync page ═══════════════════ -->
+            <div class="page" id="page-schedules">
+                <div class="page-header">
+                    <h2><i class="fas fa-clock"></i> ${t('الجدولة والمزامنة', 'Schedules & Sync')}</h2>
+                    <p>${t('تحكم في الطرد التلقائي ومزامنة المشرفين', 'Control automated purge and admin whitelist sync')}</p>
+                </div>
+                <div class="card-grid">
+
+                    <!-- Purge Schedule -->
+                    <div class="card warning">
+                        <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('جدولة الطرد التلقائي', 'Auto-Purge Schedule')}</h3></div>
+                        <p style="font-size:14px;color:var(--text-muted);margin-bottom:18px;line-height:1.8;">${t('يطرد البوت كل محظور من جميع المجموعات تلقائياً بوفق جدول زمني محدد.', 'Automatically kick all blacklisted members from all groups on schedule.')}</p>
+                        <div class="toggle-row warning" style="margin-bottom:18px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="purgeScheduleEnabled2" ${config.purgeScheduleEnabled ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label warning">${t('تفعيل الطرد المجدول', 'Enable Scheduled Purge')}<small>${t('يعمل تلقائياً دون تدخل', 'Runs automatically without intervention')}</small></div>
+                            </div>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('الفاصل الزمني', 'Interval')}</label>
+                            <select id="purgeScheduleIntervalHours2">
+                                <option value="1" ${(config.purgeScheduleIntervalHours || 24) === 1 ? 'selected' : ''}>${t('كل ساعة', 'Every hour')}</option>
+                                <option value="24" ${(config.purgeScheduleIntervalHours || 24) === 24 ? 'selected' : ''}>${t('كل 24 ساعة (يومي)', 'Every 24 hours (daily)')}</option>
+                                <option value="168" ${(config.purgeScheduleIntervalHours || 24) === 168 ? 'selected' : ''}>${t('كل أسبوع', 'Every week')}</option>
+                                <option value="720" ${(config.purgeScheduleIntervalHours || 24) === 720 ? 'selected' : ''}>${t('كل شهر', 'Every month')}</option>
+                            </select>
+                        </div>
+                        <button type="button" class="btn btn-warning" style="width:100%;justify-content:center;" onclick="purgeBlacklisted()">
+                            <i class="fas fa-gavel"></i> ${t('تشغيل يدوي الآن', 'Run Manually Now')}
+                        </button>
+                    </div>
+
+                    <!-- Admin Sync Schedule -->
+                    <div class="card purple">
+                        <div class="card-header">
+                            <h3 style="color:var(--purple);"><i class="fas fa-user-shield"></i> ${t('مزامنة المشرفين', 'Admin Whitelist Sync')}</h3>
+                        </div>
+                        <p style="font-size:14px;color:var(--text-muted);margin-bottom:18px;line-height:1.8;">${t('يفحص البوت المجموعات المخصصة ويضيف مشرفيها إلى القائمة البيضاء المخصصة تلقائياً. يجب تفعيل خيار “مزامنة المشرفين” لكل مجموعة من صفحة المجموعات المخصصة.', 'Scans custom groups with Admin Sync enabled and adds their admins to the group custom whitelist automatically. Toggle per group in Custom Groups page.')}</p>
+                        <div class="toggle-row purple" style="margin-bottom:18px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="adminSyncEnabled" ${config.adminSyncEnabled ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label purple">${t('تفعيل المزامنة التلقائية', 'Enable Auto Sync')}<small>${t('تشغيل دوري تلقائي دون تدخل', 'Runs on a timer without intervention')}</small></div>
+                            </div>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('الفاصل الزمني', 'Interval')}</label>
+                            <select id="adminSyncIntervalHours">
+                                <option value="1" ${(config.adminSyncIntervalHours || 1) === 1 ? 'selected' : ''}>${t('كل ساعة', 'Every hour')}</option>
+                                <option value="24" ${(config.adminSyncIntervalHours || 1) === 24 ? 'selected' : ''}>${t('كل 24 ساعة (يومي)', 'Every 24 hours (daily)')}</option>
+                                <option value="168" ${(config.adminSyncIntervalHours || 1) === 168 ? 'selected' : ''}>${t('كل أسبوع', 'Every week')}</option>
+                                <option value="720" ${(config.adminSyncIntervalHours || 1) === 720 ? 'selected' : ''}>${t('كل شهر', 'Every month')}</option>
+                            </select>
+                        </div>
+                        <button type="button" class="btn" style="width:100%;justify-content:center;background:var(--purple-dim);border-color:rgba(209,140,255,0.4);color:var(--purple);" onclick="runAdminSync()">
+                            <i class="fas fa-sync"></i> ${t('مزامنة يدوية الآن', 'Sync Manually Now')}
+                        </button>
+                        <div style="margin-top:10px;font-size:12px;color:var(--text-muted);line-height:1.7;">
+                            <i class="fas fa-info-circle"></i> ${t('لتفعيل المزامنة لمجموعة بعينها، افتح صفحة المجموعات المخصصة وفعّل خيار “مزامنة المشرفين”.', 'To enable sync for a specific group, open Custom Groups and enable "Admin Sync" per group.')}
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- ═══════════════════ Global Q&A page ═══════════════════ -->
+            <div class="page" id="page-global-qa">
+                <div class="page-header">
+                    <h2><i class="fas fa-comments"></i> ${t('أسئلة وأجوبة عالمية', 'Global Q&A')}</h2>
+                    <p>${t('أجوبة تلقائية تسري على جميع المجموعات — لها الأولوية بعد أسئلة وأجوبة المجموعة', 'Automatic replies for all groups — runs if the group Q&A didn\'t match')}</p>
+                </div>
+                <div class="card success" style="max-width:720px;">
+                    <div class="toggle-row green" style="margin-bottom:20px;">
+                        <div class="toggle-left">
+                            <label class="switch"><input type="checkbox" id="globalQAEnabled" ${config.globalQAEnabled ? 'checked' : ''}><span class="slider"></span></label>
+                            <div class="toggle-label green">${t('تفعيل الأسئلة والأجوبة العالمية', 'Enable Global Q&A')}<small>${t('تسري على كل المجموعات في حال عدم تطابق أسئلة المجموعة', 'Applies to all groups when group Q&A has no match')}</small></div>
+                        </div>
+                    </div>
+                    <div id="globalQAList" style="margin-bottom:16px;"></div>
+                    <button type="button" class="btn btn-primary" onclick="addGlobalQAEntry()" style="width:100%;justify-content:center;">
+                        <i class="fas fa-plus"></i> ${t('إضافة سؤال / جواب', 'Add Q&A Entry')}
+                    </button>
+                    <div style="margin-top:14px;font-size:12px;color:var(--text-muted);line-height:1.8;">
+                        <i class="fas fa-info-circle"></i>
+                        ${t('يمكنك استخدام: {user} لاسم المرسل، {date} للتاريخ الحالي', 'You can use: {user} for sender name, {date} for current date')}
+                    </div>
+                </div>
             </div>
 
             <div class="page" id="page-import-export">
@@ -1114,7 +1223,7 @@ module.exports = function renderDashboard(req, db, config) {
                         <p class="hero-description">${t('نظام إدارة مجموعات واتساب متقدم مع الذكاء الاصطناعي المحلي.', 'Advanced WhatsApp group management with local AI intelligence.')}</p>
                         <div class="badge-container">
                             <span class="status-badge accent"><i class="fas fa-check-circle"></i> ${t('نشط', 'Active')}</span>
-                            <span class="status-badge blue"><i class="fas fa-code-branch"></i> v6.5.1</span>
+                            <span class="status-badge blue"><i class="fas fa-code-branch"></i> v6.6</span>
                             <span class="status-badge"><i class="fab fa-osi"></i> ${t('مفتوح المصدر', 'Open Source')}</span>
                         </div>
                         <div style="margin-top: 28px;">
@@ -3783,6 +3892,63 @@ module.exports = function renderDashboard(req, db, config) {
                 }
             }
 
+
+            // ── Admin sync manual trigger ──────────────────────────────────
+            async function runAdminSync() {
+                try {
+                    const res = await fetch('/api/admin-sync/run', { method: 'POST' });
+                    const data = await res.json();
+                    if (res.ok) showToast('✅ ' + (data.message || (currentLang==='en' ? 'Admin sync completed.' : 'تمت المزامنة بنجاح.')));
+                    else showToast('❌ ' + (data.error || (currentLang==='en' ? 'Sync failed.' : 'فشلت المزامنة.')));
+                } catch(e) { showToast('❌ ' + e.message); }
+            }
+
+            // ── Global Q&A management ──────────────────────────────────────
+            window._globalQAArr = ${JSON.stringify(config.globalQA || [])};
+
+            function renderGlobalQAList() {
+                const container = document.getElementById('globalQAList');
+                if (!container) return;
+                if (!window._globalQAArr.length) {
+                    container.innerHTML = '<div style="color:var(--text-muted);font-size:14px;padding:16px;text-align:center;border:1.5px dashed var(--card-border);border-radius:10px;">' +
+                        (currentLang==='en' ? 'No Q&A entries yet. Click Add to create one.' : 'لا توجد أسئلة وأجوبة بعد. اضغط إضافة لإنشاء واحد.') + '</div>';
+                    return;
+                }
+                container.innerHTML = window._globalQAArr.map((entry, idx) => \`
+                <div style="border:1.5px solid var(--card-border);border-radius:10px;padding:14px;margin-bottom:12px;background:var(--input-bg);">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                        <span style="font-size:13px;font-weight:700;color:var(--text-muted);">#\${idx+1}</span>
+                        <button type="button" class="btn btn-danger btn-sm" onclick="removeGlobalQA(\${idx})"><i class="fas fa-trash"></i></button>
+                    </div>
+                    <label class="field-label">\${currentLang==='en' ? 'Questions (one per line)' : 'الأسئلة (سؤال في كل سطر)'}</label>
+                    <textarea rows="2" style="font-size:13px;margin-bottom:8px;" onchange="updateGlobalQA(\${idx},'questions',this.value)">\${(entry.questions||[]).join('\\n')}</textarea>
+                    <label class="field-label">\${currentLang==='en' ? 'Answer' : 'الجواب'}</label>
+                    <textarea rows="3" style="font-size:13px;" onchange="updateGlobalQA(\${idx},'answer',this.value)">\${entry.answer||''}</textarea>
+                </div>\`).join('');
+            }
+
+            function addGlobalQAEntry() {
+                window._globalQAArr.push({ questions: [], answer: '' });
+                renderGlobalQAList();
+            }
+
+            function removeGlobalQA(idx) {
+                window._globalQAArr.splice(idx, 1);
+                renderGlobalQAList();
+            }
+
+            function updateGlobalQA(idx, field, val) {
+                if (field === 'questions') {
+                    window._globalQAArr[idx].questions = val.split('\\n').map(s => s.trim()).filter(Boolean);
+                } else {
+                    window._globalQAArr[idx][field] = val;
+                }
+            }
+
+            // Render on page load if the tab is visible
+            renderGlobalQAList();
+            // ──────────────────────────────────────────────────────────────
+
             async function saveConfig() {
                 let finalGroupsObj = {};
                 groupsArr.forEach(g => { 
@@ -3828,6 +3994,16 @@ module.exports = function renderDashboard(req, db, config) {
                     defaultAdminGroup: defAdmin,
                     defaultAdminLanguage: defAdminLang,
                     defaultWords: defaultWordsArr,
+                    // Scheduling
+                    purgeScheduleEnabled: !!(document.getElementById('purgeScheduleEnabled2') || document.getElementById('purgeScheduleEnabled'))
+                        ? (document.getElementById('purgeScheduleEnabled2') || document.getElementById('purgeScheduleEnabled')).checked
+                        : false,
+                    purgeScheduleIntervalHours: parseInt((document.getElementById('purgeScheduleIntervalHours2') || document.getElementById('purgeScheduleIntervalHours') || {}).value || 24),
+                    adminSyncEnabled: document.getElementById('adminSyncEnabled') ? document.getElementById('adminSyncEnabled').checked : false,
+                    adminSyncIntervalHours: parseInt((document.getElementById('adminSyncIntervalHours') || {}).value || 1),
+                    // Global Q&A
+                    globalQAEnabled: document.getElementById('globalQAEnabled') ? document.getElementById('globalQAEnabled').checked : false,
+                    globalQA: window._globalQAArr || [],
                     groupsConfig: finalGroupsObj
                 };
                 

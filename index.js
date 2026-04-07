@@ -739,11 +739,11 @@ function addConnectionLog(status, details = '') {
 }
 
 app.get('/login', (req, res) => {
-        const lang = req.headers.cookie && req.headers.cookie.includes('bot_lang=en') ? 'en' : 'ar';
-        const dir = lang === 'en' ? 'ltr' : 'rtl';
-        const t = (ar, en) => lang === 'en' ? en : ar;
+    const lang = req.headers.cookie && req.headers.cookie.includes('bot_lang=en') ? 'en' : 'ar';
+    const dir = lang === 'en' ? 'ltr' : 'rtl';
+    const t = (ar, en) => lang === 'en' ? en : ar;
     const showDefaultHint = shouldShowDefaultLoginHint();
-        const html = `<!doctype html>
+    const html = `<!doctype html>
 <html lang="${lang}" dir="${dir}">
 <head>
     <meta charset="utf-8">
@@ -875,45 +875,45 @@ app.get('/login', (req, res) => {
     </script>
 </body>
 </html>`;
-        res.send(html);
+    res.send(html);
 });
 
 app.post('/auth/login', (req, res) => {
-        const username = sanitizeUsername(req.body.username);
-        const password = String(req.body.password || '');
+    const username = sanitizeUsername(req.body.username);
+    const password = String(req.body.password || '');
 
-        if (!username || !password) {
-                return res.status(400).json({ error: 'Username and password are required' });
-        }
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Username and password are required' });
+    }
 
-        const user = getUserByUsername(username);
-        if (!user || user.is_active !== 1 || !verifyPassword(password, user.password_hash)) {
-                return res.status(401).json({ error: 'Invalid credentials' });
-        }
+    const user = getUserByUsername(username);
+    if (!user || user.is_active !== 1 || !verifyPassword(password, user.password_hash)) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
-        const rememberMe = req.body && (req.body.rememberMe === true || req.body.rememberMe === 'true');
-        const ttlMs = rememberMe ? REMEMBER_ME_TTL_MS : SESSION_TTL_MS;
-        const token = createSession(user.id, ttlMs);
-        setSessionCookie(res, token, ttlMs);
-        return res.json({ success: true, rememberMe, mustChangeCredentials: isDefaultCredentialChangeRequired(user.id) });
+    const rememberMe = req.body && (req.body.rememberMe === true || req.body.rememberMe === 'true');
+    const ttlMs = rememberMe ? REMEMBER_ME_TTL_MS : SESSION_TTL_MS;
+    const token = createSession(user.id, ttlMs);
+    setSessionCookie(res, token, ttlMs);
+    return res.json({ success: true, rememberMe, mustChangeCredentials: isDefaultCredentialChangeRequired(user.id) });
 });
 
 app.post('/auth/logout', requireAuthApi, (req, res) => {
-        destroySession(req, res);
-        return res.sendStatus(200);
+    destroySession(req, res);
+    return res.sendStatus(200);
 });
 
 app.get('/auth/me', requireAuthApi, (req, res) => {
-        const allowedSet = getAllowedGroupIds(req.authUser);
-        res.json({
-                id: req.authUser.id,
-                username: req.authUser.username,
-                displayName: req.authUser.display_name,
-                isSuperadmin: req.authUser.is_superadmin === 1,
-                permissions: req.authPermissions,
+    const allowedSet = getAllowedGroupIds(req.authUser);
+    res.json({
+        id: req.authUser.id,
+        username: req.authUser.username,
+        displayName: req.authUser.display_name,
+        isSuperadmin: req.authUser.is_superadmin === 1,
+        permissions: req.authPermissions,
         allowedGroupIds: allowedSet ? Array.from(allowedSet) : null,
         mustChangeCredentials: isDefaultCredentialChangeRequired(req.authUser.id)
-        });
+    });
 });
 
 app.post('/auth/first-login-change', requireAuthApi, (req, res) => {
@@ -957,9 +957,9 @@ app.get('/', requireAuthPage, requirePermission('dashboard:read'), (req, res) =>
 
 app.get('/api/groups', requireAuthApi, requirePermission('groups:view'), (req, res) => {
     try {
-                let groups = db.prepare('SELECT * FROM whatsapp_groups').all();
-                const allowedSet = getAllowedGroupIds(req.authUser);
-                if (allowedSet) groups = groups.filter(g => allowedSet.has(g.id));
+        let groups = db.prepare('SELECT * FROM whatsapp_groups').all();
+        const allowedSet = getAllowedGroupIds(req.authUser);
+        if (allowedSet) groups = groups.filter(g => allowedSet.has(g.id));
         res.json(groups);
     } catch (e) { res.json([]); }
 });
@@ -1249,7 +1249,7 @@ app.post('/api/media/copy/:fromGroupId/:toGroupId', requireAuthApi, requirePermi
     const toPath = path.join(toDir, filename);
 
     if (!fs.existsSync(fromPath)) return res.status(404).json({ error: 'Source file not found' });
-    
+
     try {
         if (!fs.existsSync(toDir)) fs.mkdirSync(toDir, { recursive: true });
         fs.copyFileSync(fromPath, toPath);
@@ -1361,7 +1361,7 @@ app.post('/api/export', requireAuthApi, requirePermission('import-export:manage'
 app.post('/api/import', requireAuthApi, requirePermission('import-export:manage'), (req, res) => {
     try {
         const { dataset, selected } = req.body;
-        
+
         if (!dataset || !selected) {
             return res.status(400).json({ error: 'Invalid import data' });
         }
@@ -1770,7 +1770,7 @@ function setupPurgeSchedule() {
     }
     const hours = Math.max(1, config.purgeScheduleIntervalHours || 24);
     const ms = hours * 60 * 60 * 1000;
-    purgeScheduleTimer = setInterval(() => runGlobalPurge().catch(() => {}), ms);
+    purgeScheduleTimer = setInterval(() => runGlobalPurge().catch(() => { }), ms);
     if (purgeScheduleTimer.unref) purgeScheduleTimer.unref();
     console.log(`[تنظيف مجدول] تم جدولة المسح التلقائي كل ${hours} ساعة.`);
 }
@@ -1839,7 +1839,7 @@ const client = new Client({
         dataPath: authDataPath,
         clientId: process.env.WA_CLIENT_ID || 'main'
     }),
-    puppeteer: { 
+    puppeteer: {
         ...(resolvedBrowserExecutablePath ? { executablePath: resolvedBrowserExecutablePath } : {}),
         headless: true,
         timeout: 60000,
@@ -1877,29 +1877,29 @@ client.on('ready', async () => {
     addConnectionLog('جاهز', 'البوت جاهز الآن والعميل مصرح');
     isInitializing = false;
     lastConnectionTimestamp = Date.now();
-    
+
     if (initializationTimeout) {
         clearTimeout(initializationTimeout);
         initializationTimeout = null;
     }
-    
+
     try {
         console.log('[معلومة] بدء مزامنة المجموعات من قاعدة البيانات...');
         const chats = await client.getChats();
         addConnectionLog('مزامنة مجموعات', `تم جلب ${chats.length} مجموعة`);
-        
+
         console.log('[معلومة] بدء تحديث قاعدة البيانات...');
         syncTx(chats);
-        
+
         const syncDuration = Date.now() - readyStartTime;
         const totalInitTime = initializationStartTime ? Date.now() - initializationStartTime : 0;
-        
+
         console.log('[معلومة] تمت مزامنة ' + chats.length + ' مجموعة بنجاح.', {
             syncDurationMs: syncDuration,
             totalInitDurationMs: totalInitTime,
             timestamp: new Date().toISOString()
         });
-        
+
         botStatus = '<i class="fas fa-check-circle"></i> متصل وجاهز للعمل';
         botStatusKind = 'connected';
         addConnectionLog('متصل', `متصل وجاهز - ${chats.length} مجموعة`);
@@ -1910,7 +1910,7 @@ client.on('ready', async () => {
     } catch (error) {
         const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
         const errorStack = error && error.stack ? error.stack : 'No stack trace';
-        
+
         addConnectionLog('خطأ في المزامنة', errorMsg);
         console.error('[خطأ] فشل مزامنة المجموعات:', {
             message: errorMsg,
@@ -1927,12 +1927,12 @@ client.on('authenticated', () => {
     botStatus = '<i class="fas fa-sync fa-spin"></i> تم تسجيل الدخول بنجاح، جاري جلب البيانات...';
     botStatusKind = 'syncing';
     currentQR = '';
-    
+
     if (initializationTimeout) {
         clearTimeout(initializationTimeout);
         initializationTimeout = null;
     }
-    
+
     console.log('[معلومة] تم التحقق من الهوية بنجاح', {
         authenticatedAt: new Date().toISOString(),
         timeSinceInitialization: initializationStartTime ? `${Date.now() - initializationStartTime}ms` : 'N/A'
@@ -1943,7 +1943,7 @@ client.on('authenticated', () => {
 client.on('page_created', (page) => {
     addConnectionLog('صفحة تم إنشاؤها', 'صفحة WhatsApp Web تم إنشاؤها بنجاح');
     lastConnectionTimestamp = Date.now();
-    
+
     page.on('error', (error) => {
         const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
         const errorStack = error && error.stack ? error.stack : 'No stack trace';
@@ -1954,12 +1954,12 @@ client.on('page_created', (page) => {
             timestamp: new Date().toISOString()
         });
     });
-    
+
     page.on('close', () => {
         addConnectionLog('صفحة مغلقة', 'تم إغلاق صفحة WhatsApp Web');
         console.log('[معلومة] تم إغلاق صفحة WhatsApp Web');
     });
-    
+
     page.on('framenavigated', () => {
         addConnectionLog('انتقال إطار', 'تم التنقل إلى إطار جديد');
     });
@@ -1984,34 +1984,34 @@ client.on('qr', (qr) => {
 client.on('disconnected', async (reason) => {
     const disconnectReason = reason || 'Unknown reason';
     addConnectionLog('قطع الاتصال', disconnectReason);
-    
+
     botStatus = '<i class="fas fa-sign-out-alt"></i> تم تسجيل الخروج من الحساب...';
     botStatusKind = 'disconnected';
     currentQR = '';
     isInitializing = false;
-    
+
     console.error('[تنبيه] توقع البوت، السبب:', {
         reason: disconnectReason,
         timestampOfDisconnect: new Date().toISOString(),
         connectionDurationMs: lastConnectionTimestamp ? Date.now() - lastConnectionTimestamp : 'N/A'
     });
-    
+
     if (initializationTimeout) {
         clearTimeout(initializationTimeout);
         initializationTimeout = null;
     }
-    
-    try { 
+
+    try {
         console.log('[معلومة] تنظيف موارد العميل...');
-        await client.destroy(); 
-    } catch (e) { 
+        await client.destroy();
+    } catch (e) {
         console.error('[خطأ] خطأ أثناء تنظيف العميل:', e.message);
     }
-    
+
     console.log('[معلومة] سيتم إعادة تهيئة الاتصال بعد 3 ثوانٍ...');
-    setTimeout(() => { 
+    setTimeout(() => {
         console.log('[معلومة] بدء إعادة تهيئة الاتصال...');
-        initializeClientWithRetry(); 
+        initializeClientWithRetry();
     }, 3000);
 });
 
@@ -2022,14 +2022,14 @@ client.on('error', (error) => {
     const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
     const errorStack = error && error.stack ? error.stack : 'No stack trace';
     const errorName = error && error.name ? error.name : 'GenericError';
-    
+
     console.error('[خطأ حرج] خطأ عام في العميل:', {
         errorName,
         message: errorMsg,
         stack: errorStack,
         timestamp: new Date().toISOString()
     });
-    
+
     addConnectionLog('خطأ حرج', `${errorName}: ${errorMsg}`);
 });
 
@@ -2058,14 +2058,14 @@ client.on('call', (call) => {
 process.on('unhandledRejection', (reason, promise) => {
     const reasonMsg = reason ? (reason.message || reason.toString()) : 'Unknown rejection';
     const reasonStack = reason && reason.stack ? reason.stack : 'No stack trace';
-    
+
     console.error('[خطأ] رفض غير معالج:', {
         reason: reasonMsg,
         stack: reasonStack,
         promise: promise.toString(),
         timestamp: new Date().toISOString()
     });
-    
+
     addConnectionLog('رفض غير معالج', reasonMsg);
     if (!isInitializing && botStatus.includes('متصل')) {
         botStatus = '<i class="fas fa-exclamation-triangle"></i> حدث خطأ غير متوقع';
@@ -2078,14 +2078,14 @@ process.on('uncaughtException', (error) => {
     const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
     const errorStack = error && error.stack ? error.stack : 'No stack trace';
     const errorName = error && error.name ? error.name : 'Unknown';
-    
+
     console.error('[خطأ حرج] استثناء غير معالج:', {
         errorName,
         message: errorMsg,
         stack: errorStack,
         timestamp: new Date().toISOString()
     });
-    
+
     addConnectionLog('استثناء حرج', `${errorName}: ${errorMsg}`);
 });
 
@@ -2419,7 +2419,7 @@ client.on('message', async msg => {
                     }
 
                     // Keep single-target aliases for /report compatibility
-                    const targetRawId  = targetList.length > 0 ? targetList[0].rawId  : null;
+                    const targetRawId = targetList.length > 0 ? targetList[0].rawId : null;
                     const targetCleanId = targetList.length > 0 ? targetList[0].cleanId : null;
                     // ──────────────────────────────────────────────────────
 
@@ -2944,7 +2944,7 @@ client.on('message', async msg => {
                             // Replace {date}
                             const gnow = new Date();
                             gFinalAnswer = gFinalAnswer.replace(/{date}/g,
-                                `${String(gnow.getDate()).padStart(2,'0')}/${String(gnow.getMonth()+1).padStart(2,'0')}/${gnow.getFullYear()}`);
+                                `${String(gnow.getDate()).padStart(2, '0')}/${String(gnow.getMonth() + 1).padStart(2, '0')}/${gnow.getFullYear()}`);
                             // Replace {user}
                             const gcontact = await msg.getContact();
                             const guserName = gcontact ? (gcontact.name || gcontact.number) : cleanAuthorId.split('@')[0];
@@ -3125,25 +3125,25 @@ client.on('vote_update', async vote => {
 // Initialize client with retry logic and detailed logging
 async function initializeClientWithRetry(retryCount = 0, maxRetries = 5) {
     const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 30000); // Exponential backoff, max 30s
-    
+
     if (retryCount > 0) {
         console.log(`[معلومة] المحاولة ${retryCount} لتهيئة الاتصال...`);
         addConnectionLog(`اعادة محاولة #${retryCount}`, `انتظر ${retryDelay}ms قبل اعادة المحاولة`);
         await new Promise(resolve => setTimeout(resolve, retryDelay));
     }
-    
+
     try {
         if (retryCount === 0) {
             console.log('[معلومة] جاري بدء البوت...');
             addConnectionLog('بدء البوت', 'محاولة اولى للتهيئة');
             initializationStartTime = Date.now();
         }
-        
+
         isInitializing = true;
         botStatusKind = 'initializing';
         console.log(`[معلومة] مرحلة 1: اوضاي التهيئة...`);
         addConnectionLog('التهيئة الجارية', 'مرحلة 1/3: التهيئة');
-        
+
         // Set initialization timeout to detect hangs
         initializationTimeout = setTimeout(() => {
             console.error('[خطأ] استنزاف وقت التهيئة (timeout)!');
@@ -3152,30 +3152,30 @@ async function initializeClientWithRetry(retryCount = 0, maxRetries = 5) {
             botStatus = '<i class="fas fa-exclamation-triangle"></i> خطأ: انقضى وقت التهيئة';
             botStatusKind = 'error';
         }, 60000); // 60 second timeout
-        
+
         await client.initialize();
-        
+
         // Clear timeout if initialization completes successfully
         if (initializationTimeout) {
             clearTimeout(initializationTimeout);
             initializationTimeout = null;
         }
-        
+
         console.log('[معلومة] تمت تهيئة البوت بنجاح في المحاولة ' + (retryCount + 1));
         addConnectionLog('تهيئة ناجحة', `تمت التهيئة في المحاولة ${retryCount + 1}`);
-        
+
     } catch (error) {
         isInitializing = false;
-        
+
         if (initializationTimeout) {
             clearTimeout(initializationTimeout);
             initializationTimeout = null;
         }
-        
+
         const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
         const errorStack = error && error.stack ? error.stack : 'No stack trace available';
         const errorName = error && error.name ? error.name : 'Unknown';
-        
+
         console.error(`[خطأ] فشلت تهيئة البوت مرة ${retryCount + 1}:`, {
             errorName,
             message: errorMsg,
@@ -3185,14 +3185,14 @@ async function initializeClientWithRetry(retryCount = 0, maxRetries = 5) {
             timestamp: new Date().toISOString(),
             elapsedMs: initializationStartTime ? Date.now() - initializationStartTime : 'N/A'
         });
-        
+
         addConnectionLog(`خطأ #${retryCount + 1}`, `${errorName}: ${errorMsg}`);
-        
+
         if (retryCount < maxRetries) {
             console.log(`[معلومة] سيتم إعادة المحاولة (رقم ${retryCount + 2} من ${maxRetries + 1})`);
             botStatus = `<i class="fas fa-spin fa-spinner"></i> خطأ - اعادة محاولة (${retryCount + 1}/${maxRetries})`;
             botStatusKind = 'retrying';
-            
+
             // Retry with exponential backoff
             return initializeClientWithRetry(retryCount + 1, maxRetries);
         } else {
@@ -3386,6 +3386,64 @@ setInterval(() => {
     screenPendingMembershipRequests().catch(() => { });
 }, 30000);
 
+// ── Real-time join request screening ────────────────────────────────────────
+// Fires immediately when a new membership request arrives (no 30s wait)
+client.on('group_membership_request', async (notification) => {
+    try {
+        const groupId = notification.chatId || (notification.id && notification.id.remote);
+        const rawRequesterId = notification.author || (notification.id && notification.id.participant);
+        if (!groupId || !rawRequesterId) return;
+
+        const groupConfig = config.groupsConfig[groupId];
+
+        let isBlacklistEnabled = config.enableBlacklist;
+        if (groupConfig && typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabled = groupConfig.enableBlacklist;
+        if (!isBlacklistEnabled) return;
+
+        let cleanId = rawRequesterId.replace(/:[0-9]+/, '');
+        if (cleanId.includes('@lid')) {
+            try {
+                const contact = await client.getContactById(rawRequesterId);
+                if (contact && contact.number) cleanId = `${contact.number}@c.us`;
+                else cleanId = cleanId.replace('@lid', '@c.us');
+            } catch (e) { cleanId = cleanId.replace('@lid', '@c.us'); }
+        }
+
+        const numberOnly = cleanId.replace('@c.us', '');
+        const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
+        const blacklistArr = blacklistRows.map(r => r.number);
+        const blockedExtRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+        const blockedExtArr = blockedExtRows.map(r => r.ext);
+
+        const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
+        const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanId) : false;
+        const isExtBlocked = blockedExtArr.some(ext => numberOnly.startsWith(ext));
+        const inGlobalBl = blacklistArr.includes(cleanId) || blacklistArr.includes(`${numberOnly}@c.us`);
+
+        if ((useGlobalBl && (inGlobalBl || isExtBlocked)) || inCustomBl) {
+            try {
+                const chat = await client.getChatById(groupId);
+                await chat.rejectGroupMembershipRequests({ requesterIds: [rawRequesterId] });
+                console.log(`[طلبات] رفض فوري لطلب انضمام محظور (${cleanId}) في: ${chat.name}`);
+
+                // Notify admin group
+                const targetAdminGroup = (groupConfig && groupConfig.adminGroup && groupConfig.adminGroup.trim())
+                    ? groupConfig.adminGroup.trim()
+                    : config.defaultAdminGroup;
+                if (targetAdminGroup) {
+                    const adminLang = (groupConfig && groupConfig.adminLanguage && groupConfig.adminLanguage !== 'default')
+                        ? groupConfig.adminLanguage
+                        : config.defaultAdminLanguage;
+                    const reportText = adminLang === 'en'
+                        ? `🛡️ *Real-time Block*\nJoin request from blacklisted number rejected instantly in "${chat.name}".\nNumber: @${numberOnly}`
+                        : `🛡️ *حظر فوري*\nتم رفض طلب انضمام من رقم محظور فوراً في "${chat.name}".\nالرقم: @${numberOnly}`;
+                    try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanId] }); } catch (e) { }
+                }
+            } catch (e) { }
+        }
+    } catch (e) { }
+});
+
 // ── Admin auto-sync: extract as named function ────────────────────────────────
 async function runAdminSync() {
     if (!client.info || !client.info.wid) {
@@ -3433,7 +3491,7 @@ function setupAdminSyncSchedule() {
         Math.abs(cur - rawHours) < Math.abs(prev - rawHours) ? cur : prev
     );
     const ms = hours * 60 * 60 * 1000;
-    adminSyncTimer = setInterval(() => runAdminSync().catch(() => {}), ms);
+    adminSyncTimer = setInterval(() => runAdminSync().catch(() => { }), ms);
     if (adminSyncTimer.unref) adminSyncTimer.unref();
     console.log(`[مزامنة المشرفين] تم جدولة المزامنة كل ${hours} ساعة.`);
 }
