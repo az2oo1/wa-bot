@@ -304,6 +304,9 @@ module.exports = function renderDashboard(req, db, config) {
                 <button class="nav-item" onclick="showPage('page-ai', this)">
                     <span class="nav-icon"><i class="fas fa-brain"></i></span> ${t('الذكاء الاصطناعي', 'AI Moderator')}
                 </button>
+                <button class="nav-item" onclick="showPage('page-global-qa', this)">
+                    <span class="nav-icon"><i class="fas fa-comments"></i></span> ${t('الأسئلة العامة', 'Global Q&A')}
+                </button>
                 <button class="nav-item" onclick="showPage('page-groups', this)">
                     <span class="nav-icon"><i class="fas fa-users-cog"></i></span> ${t('المجموعات المخصصة', 'Custom Groups')}
                 </button>
@@ -794,6 +797,45 @@ module.exports = function renderDashboard(req, db, config) {
                             </div>
                             <div id="aiTriggerWordsContainer" class="chip-container"></div>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="page" id="page-global-qa">
+                <div class="page-header">
+                    <h2><i class="fas fa-comments"></i> ${t('الأسئلة والأجوبة العامة', 'Global Q&A')}</h2>
+                    <p>${t('قاعدة أسئلة واحدة يمكن تطبيقها على كل المجموعات أو المجموعات المخصصة التي تختارها', 'One Q&A knowledge base that can be applied to all groups or selected custom groups')}</p>
+                </div>
+
+                <div class="card info" style="max-width:900px;">
+                    <div class="toggle-row blue" style="margin-bottom:0;border-radius:10px;">
+                        <div class="toggle-left">
+                            <label class="switch"><input type="checkbox" id="globalQAEnabled" ${config.globalQAEnabled ? 'checked' : ''}><span class="slider"></span></label>
+                            <div class="toggle-label blue">${t('تفعيل Q&A العام', 'Enable Global Q&A')}<small>${t('عند التفعيل: يعمل للمجموعات غير المخصصة تلقائياً، ويمكن تفعيله للمجموعات المخصصة من إعداداتها', 'When enabled: applies to non-custom groups automatically, and to custom groups when opted in')}</small></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-grid" style="align-items:start;">
+                    <div class="card" style="margin-bottom:0;">
+                        <div class="card-header"><h3><i class="fas fa-plus-circle"></i> ${t('إضافة / تعديل زوج سؤال وجواب', 'Add / Edit Q&A Pair')}</h3></div>
+                        <label class="field-label">${t('أضف صيغ السؤال', 'Add Question Variants')}</label>
+                        <div class="field-group" style="margin-bottom:10px;">
+                            <input type="text" id="globalQAQuestionInput" placeholder="${t('أدخل صيغة سؤال...', 'Enter a question variant...')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addGlobalQAQuestion();}">
+                            <button type="button" class="btn btn-primary btn-full" style="margin-top:10px;" onclick="addGlobalQAQuestion()"><i class="fas fa-plus"></i> ${t('إضافة صيغة', 'Add Variant')}</button>
+                        </div>
+                        <div class="chip-container" id="globalQAQuestionsContainer" style="min-height:40px;"></div>
+
+                        <label class="field-label" style="margin-top:14px;">${t('الإجابة', 'Answer')}</label>
+                        <div class="field-group" style="margin-bottom:10px;">
+                            <textarea id="globalQAAnswerInput" rows="4" placeholder="${t('استخدم {date} و {user} داخل النص إن أردت', 'You can use {date} and {user} placeholders')}" style="margin-bottom:10px;"></textarea>
+                            <button type="button" id="saveGlobalQABtn" class="btn btn-full" onclick="saveGlobalQA()" style="background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700;"><i class="fas fa-save"></i> ${t('حفظ زوج س و ج', 'Save Q&A Pair')}</button>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-bottom:0;">
+                        <div class="card-header"><h3><i class="fas fa-list"></i> ${t('الأزواج المحفوظة', 'Saved Pairs')}</h3></div>
+                        <div id="globalQAList"></div>
                     </div>
                 </div>
             </div>
@@ -1857,6 +1899,7 @@ module.exports = function renderDashboard(req, db, config) {
                 'page-spam': '${t("مكافحة الإزعاج", "Anti-Spam")}',
                 'page-media': '${t("فلتر الوسائط", "Media Filter")}',
                 'page-ai': '${t("الذكاء الاصطناعي", "AI Moderator")}',
+                'page-global-qa': '${t("الأسئلة العامة", "Global Q&A")}',
                 'page-groups': '${t("المجموعات المخصصة", "Custom Groups")}',
                 'page-import-export': '${t("استيراد/تصدير", "Import/Export")}',
                 'page-users': '${t("إدارة المستخدمين", "User Management")}',
@@ -2459,6 +2502,9 @@ module.exports = function renderDashboard(req, db, config) {
 
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
             let aiFilterTriggerWordsArr = ${JSON.stringify(config.aiFilterTriggerWords || ['نعم'])};
+            let globalQAArr = ${JSON.stringify(config.globalQA || [])};
+            let globalQAEditingIndex = null;
+            let globalQAQuestionsDraft = [];
             let blacklistArr = ${JSON.stringify(blacklistArr)}; 
             let blockedExtensionsArr = ${JSON.stringify(blockedExtensionsArr)}; 
             let whitelistArr = ${JSON.stringify(whitelistArr)}; 
@@ -2481,6 +2527,7 @@ module.exports = function renderDashboard(req, db, config) {
                 enableWhitelist: groupsConfigObj[key].enableWhitelist !== false,
                 useGlobalBlacklist: groupsConfigObj[key].useGlobalBlacklist !== false,
                 useGlobalWhitelist: groupsConfigObj[key].useGlobalWhitelist !== false,
+                useGlobalQA: groupsConfigObj[key].useGlobalQA === true,
                 customBlacklist: groupsConfigObj[key].customBlacklist || [],
                 customWhitelist: groupsConfigObj[key].customWhitelist || [],
                 enableAntiSpam: groupsConfigObj[key].enableAntiSpam || false,
@@ -2785,6 +2832,12 @@ module.exports = function renderDashboard(req, db, config) {
                                 <div class="toggle-left">
                                     <label class="switch"><input type="checkbox" \${group.enableQAFeature?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'qa',this.checked)"><span class="slider"></span></label>
                                     <div class="toggle-label blue">\${currentLang==='en'?'Enable Q&A Feature':'تفعيل ميزة الأسئلة والأجوبة'}<small>\${currentLang==='en'?'Auto-respond to predefined questions with dynamic fields':'الإجابة التلقائية على الأسئلة المحددة مع حقول ديناميكية'}</small></div>
+                                </div>
+                            </div>
+                            <div class="toggle-row" style="margin-top:12px; margin-bottom:0; border-color:rgba(64,196,255,0.25); background:rgba(64,196,255,0.05);">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" \${group.useGlobalQA?'checked':''} onchange="updateGroupToggle(\${groupIndex},'useGlobalQA',this.checked)"><span class="slider"></span></label>
+                                    <div class="toggle-label">\${currentLang==='en'?'Apply Global Q&A in this group':'تطبيق Q&A العام في هذه المجموعة'}<small>\${currentLang==='en'?'Uses entries from the Global Q&A page when no custom Q&A match is found':'يستخدم الأزواج الموجودة في صفحة Q&A العامة عند عدم تطابق س و ج المخصص'}</small></div>
                                 </div>
                             </div>
                             <div id="group_qa_panel_\${groupIndex}" style="overflow-y:auto;max-height:\${group.enableQAFeature?'600px':'0px'};opacity:\${group.enableQAFeature?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableQAFeature?'20px':'0px'};padding-right:8px;">
@@ -3328,6 +3381,126 @@ module.exports = function renderDashboard(req, db, config) {
                 renderAITriggerWords();
             }
 
+            function renderGlobalQAQuestionsDraft() {
+                const container = document.getElementById('globalQAQuestionsContainer');
+                if (!container) return;
+                if (!globalQAQuestionsDraft.length) {
+                    container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">' +
+                        (currentLang === 'en' ? 'No question variants added yet.' : 'لم يتم إضافة صيغ أسئلة بعد.') +
+                        '</div>';
+                    return;
+                }
+                container.innerHTML = globalQAQuestionsDraft.map((q, idx) =>
+                    '<div class="chip">' + q + ' <span class="chip-remove" onclick="removeGlobalQAQuestion(' + idx + ')">&times;</span></div>'
+                ).join('');
+            }
+
+            function addGlobalQAQuestion() {
+                const input = document.getElementById('globalQAQuestionInput');
+                if (!input) return;
+                const q = String(input.value || '').trim().toLowerCase();
+                if (!q) return;
+                if (!globalQAQuestionsDraft.includes(q)) globalQAQuestionsDraft.push(q);
+                input.value = '';
+                renderGlobalQAQuestionsDraft();
+            }
+
+            function removeGlobalQAQuestion(index) {
+                globalQAQuestionsDraft.splice(index, 1);
+                renderGlobalQAQuestionsDraft();
+            }
+
+            function renderGlobalQAList() {
+                const list = document.getElementById('globalQAList');
+                if (!list) return;
+                if (!Array.isArray(globalQAArr) || globalQAArr.length === 0) {
+                    list.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:10px;border:1px dashed var(--card-border);border-radius:8px;">' +
+                        (currentLang === 'en' ? 'No global Q&A entries yet.' : 'لا توجد أزواج Q&A عامة بعد.') +
+                        '</div>';
+                    return;
+                }
+
+                list.innerHTML = globalQAArr.map((qa, idx) => {
+                    const questions = Array.isArray(qa.questions) ? qa.questions : (qa.question ? [qa.question] : []);
+                    const answer = String(qa.answer || '');
+                    return '<div class="group-card" style="margin-bottom:10px;">' +
+                        '<div class="group-card-header" style="padding:12px;">' +
+                        '<div class="group-card-title" style="font-size:13px;">' +
+                        '<i class="fas fa-question-circle" style="color:var(--blue);"></i> ' +
+                        (currentLang === 'en' ? 'Triggers' : 'المحفزات') + ' (' + questions.length + ')' +
+                        '</div>' +
+                        '<div style="display:flex;gap:8px;">' +
+                        '<button type="button" class="icon-btn" onclick="editGlobalQA(' + idx + ')" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="' + (currentLang==='en'?'Edit':'تعديل') + '"><i class="fas fa-pen"></i></button>' +
+                        '<button type="button" class="icon-btn" onclick="removeGlobalQA(' + idx + ')" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);" title="' + (currentLang==='en'?'Delete':'حذف') + '"><i class="fas fa-trash"></i></button>' +
+                        '</div>' +
+                        '</div>' +
+                        '<div class="group-card-body" style="padding:12px;">' +
+                        '<div class="chip-container" style="gap:4px;max-height:70px;overflow-y:auto;">' +
+                        questions.map(q => '<div class="chip" style="font-size:11px;padding:2px 8px;">' + q + '</div>').join('') +
+                        '</div>' +
+                        '<div style="margin-top:10px;color:var(--text-muted);font-size:13px;background:rgba(255,255,255,0.02);padding:10px;border-radius:8px;">' +
+                        (answer || '<em style="opacity:.6;">(empty)</em>') +
+                        '</div>' +
+                        '</div>' +
+                        '</div>';
+                }).join('');
+            }
+
+            function resetGlobalQAForm() {
+                globalQAEditingIndex = null;
+                globalQAQuestionsDraft = [];
+                const answerEl = document.getElementById('globalQAAnswerInput');
+                const saveBtn = document.getElementById('saveGlobalQABtn');
+                if (answerEl) answerEl.value = '';
+                if (saveBtn) {
+                    saveBtn.innerHTML = '<i class="fas fa-save"></i> ' + (currentLang === 'en' ? 'Save Q&A Pair' : 'حفظ زوج س و ج');
+                    saveBtn.style.background = 'var(--accent-dim)';
+                    saveBtn.style.color = 'var(--accent)';
+                }
+                renderGlobalQAQuestionsDraft();
+            }
+
+            function editGlobalQA(index) {
+                const qa = globalQAArr[index];
+                if (!qa) return;
+                globalQAEditingIndex = index;
+                globalQAQuestionsDraft = Array.isArray(qa.questions) ? [...qa.questions] : (qa.question ? [qa.question] : []);
+                const answerEl = document.getElementById('globalQAAnswerInput');
+                const saveBtn = document.getElementById('saveGlobalQABtn');
+                if (answerEl) answerEl.value = qa.answer || '';
+                if (saveBtn) {
+                    saveBtn.innerHTML = '<i class="fas fa-check"></i> ' + (currentLang === 'en' ? 'Update Q&A Pair' : 'تحديث زوج س و ج');
+                    saveBtn.style.background = 'var(--orange)';
+                    saveBtn.style.color = '#000';
+                }
+                renderGlobalQAQuestionsDraft();
+            }
+
+            function removeGlobalQA(index) {
+                if (!Array.isArray(globalQAArr)) return;
+                globalQAArr.splice(index, 1);
+                if (globalQAEditingIndex === index) resetGlobalQAForm();
+                if (globalQAEditingIndex !== null && globalQAEditingIndex > index) globalQAEditingIndex -= 1;
+                renderGlobalQAList();
+            }
+
+            function saveGlobalQA() {
+                const answerEl = document.getElementById('globalQAAnswerInput');
+                const answer = String(answerEl ? answerEl.value : '').trim();
+                if (!globalQAQuestionsDraft.length || !answer) {
+                    showToast(currentLang === 'en' ? 'Please add question variants and answer first' : 'يرجى إضافة صيغ السؤال والإجابة أولاً');
+                    return;
+                }
+                const entry = { questions: [...globalQAQuestionsDraft], answer };
+                if (globalQAEditingIndex !== null && globalQAEditingIndex >= 0 && globalQAEditingIndex < globalQAArr.length) {
+                    globalQAArr[globalQAEditingIndex] = entry;
+                } else {
+                    globalQAArr.push(entry);
+                }
+                resetGlobalQAForm();
+                renderGlobalQAList();
+            }
+
             function toggleGroupPanel(groupIndex, type, enabled) {
                 const panelMap = { spam: 'spam', welcome: 'welcome', words: 'words', qa: 'qa', panic: 'panic', blacklist: 'blacklist', whitelist: 'whitelist' };
                 const fieldMap = { spam: 'enableAntiSpam', welcome: 'enableWelcomeMessage', words: 'enableWordFilter', qa: 'enableQAFeature', panic: 'enablePanicMode', blacklist: 'enableBlacklist', whitelist: 'enableWhitelist' };
@@ -3372,6 +3545,7 @@ module.exports = function renderDashboard(req, db, config) {
                     spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
                     spamLimits: {text:7, image:3, video:2, audio:3, document:3, sticker:3},
                     enablePanicMode: false, panicMessageLimit: 10, panicTimeWindow: 5, panicLockoutDuration: 10, panicAlertTarget: 'both', panicAlertMessage: '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}',
+                    useGlobalQA: false,
                     enableQAFeature: false, qaList: [], eventDate: '', eventDates: [], qaLanguage: 'ar', currentQAQuestions: [], currentQAAnswer: '', editingQAIndex: null
                 });
                 openGroupDetail(groupsArr.length - 1);
@@ -3832,6 +4006,8 @@ module.exports = function renderDashboard(req, db, config) {
             renderWhitelist();
             renderDefaultWords();
             renderAITriggerWords();
+            renderGlobalQAQuestionsDraft();
+            renderGlobalQAList();
             loadScheduleSettings();
             loadKnownGroups();
             enforceFirstLoginChange();
@@ -3880,12 +4056,25 @@ module.exports = function renderDashboard(req, db, config) {
                     });
 
                     if (!res.ok) {
-                        showToast(currentLang==='en' ? '❌ Export failed' : '❌ فشل التصدير');
+                        let reason = '';
+                        try {
+                            const errData = await res.json();
+                            reason = errData && errData.error ? String(errData.error) : '';
+                        } catch (_) {
+                            try {
+                                reason = (await res.text() || '').trim();
+                            } catch (_) {}
+                        }
+                        const prefix = currentLang==='en' ? '❌ Export failed' : '❌ فشل التصدير';
+                        showToast(reason ? (prefix + ': ' + reason) : prefix);
                         return;
                     }
 
-                    const data = await res.json();
-                    const json = JSON.stringify(data, null, 2);
+                    const json = await res.text();
+                    if (!json || !json.trim()) {
+                        throw new Error(currentLang==='en' ? 'Empty export response' : 'استجابة تصدير فارغة');
+                    }
+
                     const blob = new Blob([json], { type: 'application/json' });
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
@@ -4008,6 +4197,8 @@ module.exports = function renderDashboard(req, db, config) {
                     defaultAdminGroup: defAdmin,
                     defaultAdminLanguage: defAdminLang,
                     defaultWords: defaultWordsArr,
+                    globalQAEnabled: document.getElementById('globalQAEnabled') ? document.getElementById('globalQAEnabled').checked : false,
+                    globalQA: globalQAArr,
                     groupsConfig: finalGroupsObj
                 };
                 

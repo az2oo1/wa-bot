@@ -218,7 +218,8 @@ db.exec(`
         spam_duplicate_limit INTEGER, spam_flood_limit INTEGER, spam_action TEXT,
         enable_welcome_message INTEGER, welcome_message_text TEXT, custom_words TEXT,
         custom_ai_trigger_words TEXT,
-        enable_join_profile_screening INTEGER
+        enable_join_profile_screening INTEGER,
+        use_global_qa INTEGER DEFAULT 0
     );
 `);
 
@@ -271,6 +272,7 @@ const colsToAdd = [
     'panic_lockout_duration INTEGER', 'panic_alert_target TEXT', 'panic_alert_message TEXT',
     'enable_whitelist INTEGER', 'custom_blacklist TEXT', 'custom_whitelist TEXT',
     'use_global_blacklist INTEGER', 'use_global_whitelist INTEGER',
+    'use_global_qa INTEGER DEFAULT 0',
     'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT', 'qa_language TEXT', 'qa_event_dates TEXT',
     'admin_language TEXT', 'custom_ai_trigger_words TEXT', 'enable_join_profile_screening INTEGER',
     'enable_admin_sync INTEGER DEFAULT 0', 'enable_commands INTEGER DEFAULT 1'
@@ -318,6 +320,7 @@ function loadConfigFromDB() {
             enableAIMedia: g.enable_ai_media === 1, autoAction: g.auto_action === 1,
             enableBlacklist: g.enable_blacklist === 1, enableWhitelist: g.enable_whitelist !== 0,
             useGlobalBlacklist: g.use_global_blacklist !== 0, useGlobalWhitelist: g.use_global_whitelist !== 0,
+            useGlobalQA: g.use_global_qa === 1,
             customBlacklist: JSON.parse(g.custom_blacklist || '[]'), customWhitelist: JSON.parse(g.custom_whitelist || '[]'),
             enableAntiSpam: g.enable_anti_spam === 1, spamDuplicateLimit: g.spam_duplicate_limit,
             spamFloodLimit: g.spam_flood_limit, spamAction: g.spam_action,
@@ -399,10 +402,10 @@ function saveConfigToDB(conf) {
                 spam_action, enable_welcome_message, welcome_message_text, custom_words,
                 blocked_types, blocked_action, spam_types, spam_limits,
                 enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
-                panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist,
+                panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist, use_global_qa,
                 enable_qa_feature, custom_qa, qa_event_date, qa_language, qa_event_dates, custom_ai_trigger_words, enable_join_profile_screening,
                 enable_admin_sync, enable_commands
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
@@ -417,6 +420,7 @@ function saveConfigToDB(conf) {
                 gData.panicLockoutDuration, gData.panicAlertTarget, gData.panicAlertMessage,
                 JSON.stringify(gData.customBlacklist || []), JSON.stringify(gData.customWhitelist || []),
                 gData.useGlobalBlacklist ? 1 : 0, gData.useGlobalWhitelist ? 1 : 0,
+                gData.useGlobalQA ? 1 : 0,
                 gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || '', gData.qaLanguage || 'ar', JSON.stringify(gData.eventDates || []), JSON.stringify(gData.aiFilterTriggerWords || []), gData.enableJoinProfileScreening ? 1 : 0,
                 gData.enableAdminSync ? 1 : 0, gData.enableCommands !== false ? 1 : 0
             );
@@ -1443,7 +1447,9 @@ app.delete('/api/media/delete/:groupId/:filename', requireAuthApi, requirePermis
 // Export dataset with selected options
 app.post('/api/export', requireAuthApi, requirePermission('import-export:manage'), (req, res) => {
     try {
-        const selected = req.body.selected || {};
+        const selected = (req.body && typeof req.body === 'object' && req.body.selected && typeof req.body.selected === 'object')
+            ? req.body.selected
+            : {};
         const dataset = {};
 
         if (selected.global_settings) {
@@ -1469,18 +1475,22 @@ app.post('/api/export', requireAuthApi, requirePermission('import-export:manage'
         }
         if (selected.media) {
             const mediaData = {};
-            const mediaDir = require('path').join(__dirname, 'media');
+            const mediaDir = path.join(process.cwd(), 'media');
             if (fs.existsSync(mediaDir)) {
                 const groups = fs.readdirSync(mediaDir);
                 for (const group of groups) {
-                    const groupPath = require('path').join(mediaDir, group);
+                    const groupPath = path.join(mediaDir, group);
                     if (fs.statSync(groupPath).isDirectory()) {
                         const files = fs.readdirSync(groupPath);
                         for (const file of files) {
-                            const filePath = require('path').join(groupPath, file);
+                            const filePath = path.join(groupPath, file);
                             if (fs.statSync(filePath).isFile()) {
-                                const b64 = fs.readFileSync(filePath, { encoding: 'base64' });
-                                mediaData[group + '/' + file] = b64;
+                                try {
+                                    const b64 = fs.readFileSync(filePath, { encoding: 'base64' });
+                                    mediaData[group + '/' + file] = b64;
+                                } catch (readErr) {
+                                    console.error('[تصدير] تعذر قراءة ملف وسائط أثناء التصدير:', filePath, readErr.message || readErr);
+                                }
                             }
                         }
                     }
@@ -1495,6 +1505,7 @@ app.post('/api/export', requireAuthApi, requirePermission('import-export:manage'
             data: dataset
         };
 
+        res.set('Cache-Control', 'no-store');
         res.json(exportData);
     } catch (error) {
         console.error('[خطأ] فشل التصدير:', error);
@@ -1561,9 +1572,9 @@ app.post('/api/import', requireAuthApi, requirePermission('import-export:manage'
                         blocked_types, blocked_action, spam_types, spam_limits,
                         enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
                         panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, 
-                        use_global_blacklist, use_global_whitelist, enable_qa_feature, custom_qa, qa_event_date, 
+                        use_global_blacklist, use_global_whitelist, use_global_qa, enable_qa_feature, custom_qa, qa_event_date, 
                         qa_language, qa_event_dates, custom_ai_trigger_words, enable_join_profile_screening
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 `);
                 for (const row of dataset.custom_groups) {
                     stmt.run(
@@ -1575,7 +1586,7 @@ app.post('/api/import', requireAuthApi, requirePermission('import-export:manage'
                         row.enable_panic_mode, row.panic_message_limit, row.panic_time_window,
                         row.panic_lockout_duration, row.panic_alert_target, row.panic_alert_message,
                         row.custom_blacklist, row.custom_whitelist, row.use_global_blacklist,
-                        row.use_global_whitelist, row.enable_qa_feature, row.custom_qa, row.qa_event_date,
+                        row.use_global_whitelist, row.use_global_qa || 0, row.enable_qa_feature, row.custom_qa, row.qa_event_date,
                         row.qa_language, row.qa_event_dates, row.custom_ai_trigger_words || '[]', row.enable_join_profile_screening || 0
                     );
                 }
@@ -3077,7 +3088,8 @@ client.on('message', async msg => {
             }
 
             // ── Global Q&A Check (runs if group Q&A did not match) ────────────
-            if (!isQAMatched && config.globalQAEnabled && Array.isArray(config.globalQA) && config.globalQA.length > 0 && msg.body && internalMsgType === 'text') {
+            const shouldApplyGlobalQA = !groupConfig || groupConfig.useGlobalQA === true;
+            if (!isQAMatched && shouldApplyGlobalQA && config.globalQAEnabled && Array.isArray(config.globalQA) && config.globalQA.length > 0 && msg.body && internalMsgType === 'text') {
                 const messageText = msg.body.toLowerCase().trim();
                 for (const gqa of config.globalQA) {
                     const gQuestions = gqa.questions || (gqa.question ? [gqa.question] : []);
