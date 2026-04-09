@@ -647,8 +647,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         <div><i class="fas fa-info-circle" style="color:var(--blue);"></i> <strong style="color:var(--text);">${t('يؤثر على:', 'Covers:')}</strong> ${t('الطرد، الحذف، التصويت، الإبلاغ، رسائل الترحيب', 'Kicks, deletes, polls, reports, welcome messages')}</div>
                     </div>
                 </div>
-                </div>
 
+                </div>
 
                 <div class="card-grid">
                     <div class="card">
@@ -695,7 +695,13 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             </div>
                         </div>
                     </div>
-                                <button id="logoutBtn" type="button" class="btn btn-danger" onclick="logoutBot()" style="display:${initialLogoutDisplay};"><i class="fas fa-link-slash"></i> ${t('قطع اتصال واتساب', 'Disconnect WhatsApp')}</button>
+
+                    <div class="card" style="margin-bottom:0;">
+                        <div class="card-header"><h3><i class="fas fa-link-slash"></i> ${t('قطع الاتصال', 'Disconnect')}</h3></div>
+                        <button id="logoutBtn" type="button" class="btn btn-danger" onclick="logoutBot()" style="width:100%;justify-content:center;display:${initialLogoutDisplay};"><i class="fas fa-link-slash"></i> ${t('قطع اتصال واتساب', 'Disconnect WhatsApp')}</button>
+                    </div>
+                </div>
+
             </div>
 
             <div class="page" id="page-spam">
