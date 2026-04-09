@@ -55,14 +55,20 @@ pause
 exit
 
 :CHECK_PACKAGES
-:: 2. التحقق من وجود المكتبات
-if exist node_modules\ (
-    echo [OK] Dependencies are ready.
-    goto RUN_BOT
-) else (
+:: 2. التحقق من وجود المكتبات المطلوبة فعليا
+if not exist node_modules\ (
     echo [INFO] Installing required packages...
     call npm install
     goto RUN_BOT
+)
+
+echo [INFO] Verifying dependencies...
+call npm ls multer --depth=0 >nul 2>&1
+if %errorLevel% neq 0 (
+    echo [WARN] Missing or incomplete dependencies detected. Running npm install...
+    call npm install
+) else (
+    echo [OK] Dependencies are ready.
 )
 
 :RUN_BOT

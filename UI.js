@@ -876,10 +876,10 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             </div>
                         </div>
 
-                        <label class="field-label">${t('أضف صيغ السؤال', 'Add Question Variants')}</label>
+                        <label class="field-label">${t('أضف صيغ السؤال', 'Add Questions for This Answer')}</label>
                         <div class="field-group" style="margin-bottom:10px;">
                             <input type="text" id="globalQAQuestionInput" placeholder="${t('أدخل صيغة سؤال...', 'Enter a question variant...')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addGlobalQAQuestion();}">
-                            <button type="button" class="btn btn-primary btn-full" style="margin-top:10px;" onclick="addGlobalQAQuestion()"><i class="fas fa-plus"></i> ${t('إضافة صيغة', 'Add Variant')}</button>
+                            <button type="button" class="btn btn-primary btn-full" style="margin-top:10px;background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700;" onclick="addGlobalQAQuestion()"><i class="fas fa-plus"></i> ${t('إضافة صيغة', 'Add Variant')}</button>
                             <div class="chip-container" id="globalQAQuestionsContainer" style="min-height:40px;"></div>
                         </div>
 
@@ -2802,9 +2802,10 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     { id: 'panic',   icon: 'fa-radiation',  label: currentLang==='en'?'Panic':'طوارئ' },
                     { id: 'lists',   icon: 'fa-list',       label: currentLang==='en'?'Lists':'القوائم' },
                 ];
-                const tabButtons = tabs.map((tab, i) =>
-                    \`<button type="button" class="group-tab \${tab.id===activeTab?'active':''}" onclick="switchGroupTab(\${groupIndex},'\${tab.id}',this)\${tab.id==='qa'?';loadGroupMedia('+groupIndex+')':\'\'}"\><i class="fas \${tab.icon}"></i> \${tab.label}</button>\`
-                ).join('');
+                const tabButtons = tabs.map((tab) => {
+                    const extraAction = tab.id === 'qa' ? ';loadGroupMedia(' + groupIndex + ')' : '';
+                    return '<button type="button" class="group-tab ' + (tab.id === activeTab ? 'active' : '') + '" onclick=\\'switchGroupTab(' + groupIndex + ', "' + tab.id + '", this)' + extraAction + '\\'><i class="fas ' + tab.icon + '"></i> ' + tab.label + '</button>';
+                }).join('');
 
                 container.innerHTML = \`
                     <div class="field-row" style="margin-bottom:20px;">
@@ -2944,11 +2945,11 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                                         return \`<div class="field-row" style="margin-bottom:10px; background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; border: 1px solid var(--card-border); align-items: flex-end; gap: 12px;">
                                             <div class="field-group" style="margin-bottom:0; flex: 1.5;">
                                                 <label class="field-label" style="font-size:10px;">\${currentLang==='en'?'Label (e.g. Exam)':'العنوان (مثل: اختبار)'}</label>
-                                                <input type="text" value="\${ed.label || ''}" placeholder="..." onchange="updateEventDate(\${groupIndex}, \${edIdx}, 'label', this.value)">
+                                                <input type="text" value="\${ed.label || ''}" placeholder="..." onchange="updateEventDate(\${groupIndex}, \${edIdx}, \\'label\\', this.value)">
                                             </div>
                                             <div class="field-group" style="margin-bottom:0; flex: 1.5;">
                                                 <label class="field-label" style="font-size:10px;">\${currentLang==='en'?'Date':'التاريخ'}</label>
-                                                <input type="date" value="\${ed.date || ''}" onchange="updateEventDate(\${groupIndex}, \${edIdx}, 'date', this.value)" style="color-scheme: dark;">
+                                                <input type="date" value="\${ed.date || ''}" onchange="updateEventDate(\${groupIndex}, \${edIdx}, \\'date\\', this.value)" style="color-scheme: dark;">
                                             </div>
                                             <button type="button" class="icon-btn" onclick="removeEventDate(\${groupIndex}, \${edIdx})" style="border-color:rgba(255,82,82,0.3);color:var(--red);" title="\${currentLang==='en'?'Delete event':'حذف الحدث'}"><i class="fas fa-trash"></i></button>
                                         </div>\`;
@@ -3504,11 +3505,11 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     return '<div class="field-row" style="margin-bottom:10px; background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; border: 1px solid var(--card-border); align-items: flex-end; gap: 12px;">' +
                         '<div class="field-group" style="margin-bottom:0; flex: 1.5;">' +
                             '<label class="field-label" style="font-size:10px;">' + (currentLang === 'en' ? 'Label (e.g. Exam)' : 'العنوان (مثل: اختبار)') + '</label>' +
-                            '<input type="text" value="' + (ed.label || '') + '" placeholder="..." onchange="updateGlobalQAEventDate(' + edIdx + ', \'label\', this.value)">' +
+                            '<input type="text" value="' + (ed.label || '') + '" placeholder="..." onchange="updateGlobalQAEventDate(' + edIdx + ', \\'label\\', this.value)">' +
                         '</div>' +
                         '<div class="field-group" style="margin-bottom:0; flex: 1.5;">' +
                             '<label class="field-label" style="font-size:10px;">' + (currentLang === 'en' ? 'Date' : 'التاريخ') + '</label>' +
-                            '<input type="date" value="' + (ed.date || '') + '" onchange="updateGlobalQAEventDate(' + edIdx + ', \'date\', this.value)" style="color-scheme: dark;">' +
+                            '<input type="date" value="' + (ed.date || '') + '" onchange="updateGlobalQAEventDate(' + edIdx + ', \\'date\\', this.value)" style="color-scheme: dark;">' +
                         '</div>' +
                         '<button type="button" class="icon-btn" onclick="removeGlobalQAEventDate(' + edIdx + ')" style="border-color:rgba(255,82,82,0.3);color:var(--red);" title="' + (currentLang === 'en' ? 'Delete event' : 'حذف الحدث') + '"><i class="fas fa-trash"></i></button>' +
                     '</div>';
@@ -3586,11 +3587,11 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             '<div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + f.name + '">' + f.name + '</div>' +
                             '<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">' + kb + ' KB</div>' +
                             '<div style="display:flex;gap:4px;">' +
-                                '<button type="button" onclick="selectGlobalQAMedia(\'' + f.name + '\')" style="flex:1;font-size:11px;padding:4px;background:' + (isSelected ? 'rgba(100,220,150,0.15)' : 'var(--input-bg)') + ';color:' + (isSelected ? '#64dc96' : 'var(--text-muted)') + ';border:1px solid ' + (isSelected ? 'rgba(100,220,150,0.4)' : 'var(--card-border)') + ';border-radius:5px;cursor:pointer;">' +
+                                '<button type="button" onclick="selectGlobalQAMedia(\\'' + f.name + '\\')" style="flex:1;font-size:11px;padding:4px;background:' + (isSelected ? 'rgba(100,220,150,0.15)' : 'var(--input-bg)') + ';color:' + (isSelected ? '#64dc96' : 'var(--text-muted)') + ';border:1px solid ' + (isSelected ? 'rgba(100,220,150,0.4)' : 'var(--card-border)') + ';border-radius:5px;cursor:pointer;">' +
                                     '<i class="fas ' + (isSelected ? 'fa-check' : 'fa-link') + '"></i> ' + (isSelected ? (currentLang === 'en' ? 'Selected' : 'محدد') : (currentLang === 'en' ? 'Select' : 'اختر')) +
                                 '</button>' +
-                                '<button type="button" onclick="deleteGlobalQAMedia(\'' + f.name + '\')" style="padding:4px 6px;background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.3);border-radius:5px;cursor:pointer;font-size:11px;">' +
-                                    <i class="fas fa-trash"></i>
+                                '<button type="button" onclick="deleteGlobalQAMedia(\\'' + f.name + '\\')" style="padding:4px 6px;background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.3);border-radius:5px;cursor:pointer;font-size:11px;">' +
+                                    '<i class="fas fa-trash"></i>' +
                                 '</button>' +
                             '</div>' +
                         '</div>' +
@@ -3654,24 +3655,26 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     return '<div class="group-card" style="margin-bottom:10px;">' +
                         '<div class="group-card-header" style="padding:12px;">' +
                         '<div class="group-card-title" style="font-size:13px;">' +
-                        '<i class="fas fa-question-circle" style="color:var(--blue);"></i> ' +
+                        '<i class="fas fa-bolt" style="color:var(--accent);"></i> ' +
                         (currentLang === 'en' ? 'Triggers' : 'المحفزات') + ' (' + questions.length + ')' +
                         '</div>' +
                         '<div style="display:flex;gap:8px;">' +
                         '<button type="button" class="icon-btn" onclick="copyGlobalQA(' + idx + ')" style="background:rgba(255,160,0,0.1);color:#ffa000;border-color:rgba(255,160,0,0.3);" title="' + (currentLang==='en'?'Copy':'نسخ') + '"><i class="fas fa-copy"></i></button>' +
-                        '<button type="button" class="icon-btn" onclick="editGlobalQA(' + idx + ')" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="' + (currentLang==='en'?'Edit':'تعديل') + '"><i class="fas fa-pen"></i></button>' +
-                        '<button type="button" class="icon-btn" onclick="removeGlobalQA(' + idx + ')" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);" title="' + (currentLang==='en'?'Delete':'حذف') + '"><i class="fas fa-trash"></i></button>' +
+                        '<button type="button" class="icon-btn" onclick="editGlobalQA(' + idx + ')" style="background:rgba(64,196,255,0.1);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="' + (currentLang==='en'?'Edit':'تعديل') + '"><i class="fas fa-pen"></i></button>' +
+                        '<button type="button" class="icon-btn" onclick="removeGlobalQA(' + idx + ')" style="background:rgba(255,82,82,0.1);color:var(--red);border-color:rgba(255,82,82,0.3);" title="' + (currentLang==='en'?'Delete':'حذف') + '"><i class="fas fa-trash"></i></button>' +
                         '</div>' +
                         '</div>' +
-                        '<div class="group-card-body" style="padding:12px;">' +
-                        '<div class="chip-container" style="gap:4px;max-height:70px;overflow-y:auto;">' +
-                        questions.map(q => '<div class="chip" style="font-size:11px;padding:2px 8px;">' + q + '</div>').join('') +
+                        '<div class="group-card-body" style="padding:14px; flex:1; display:flex; flex-direction:column;">' +
+                        '<div style="margin-bottom:12px;">' +
+                        '<div class="chip-container" style="gap:4px; max-height:60px; overflow-y:auto; padding-right:4px;">' +
+                        questions.map(q => '<div class="chip" style="background:var(--input-bg); color:var(--text); border:1px solid var(--card-border); font-size:11px; padding:2px 8px;"><i class="fas fa-search" style="color:var(--text-muted); font-size:10px;"></i> ' + q + '</div>').join('') +
                         '</div>' +
+                        '</div>' +
+                        '<div style="color:var(--text-muted); font-size:13px; line-height:1.5; flex:1; background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; border-left:3px solid var(--card-border);">' +
+                        ((answer.substring(0, 150) + (answer && answer.length > 150 ? '...' : '')) || '<em style="opacity:0.5;">(empty)</em>') +
+                        '</div>' +
+                        (qa.mediaFile ? '<div style="margin-top:12px;display:flex;align-items:center;gap:6px;font-size:11px;color:#64dc96; background:rgba(100,220,150,0.05); padding:6px 10px; border-radius:6px; border:1px dashed rgba(100,220,150,0.3);"><i class="fas fa-paperclip"></i> ' + qa.mediaFile + '</div>' : '') +
                         (eventDates.length > 0 ? '<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--blue); background:rgba(64,196,255,0.05); padding:6px 10px; border-radius:6px; border:1px dashed rgba(64,196,255,0.3);"><i class="fas fa-calendar-alt"></i> ' + eventDates.length + ' ' + (currentLang==='en'?'Event(s)':'حدث/أحداث') + '</div>' : '') +
-                        (qa.mediaFile ? '<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:11px;color:#64dc96; background:rgba(100,220,150,0.05); padding:6px 10px; border-radius:6px; border:1px dashed rgba(100,220,150,0.3);"><i class="fas fa-paperclip"></i> ' + qa.mediaFile + '</div>' : '') +
-                        '<div style="margin-top:10px;color:var(--text-muted);font-size:13px;background:rgba(255,255,255,0.02);padding:10px;border-radius:8px;">' +
-                        (answer || '<em style="opacity:.6;">(empty)</em>') +
-                        '</div>' +
                         '</div>' +
                         '</div>';
                 }).join('');
@@ -4113,10 +4116,10 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             <div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="\${f.name}">\${f.name}</div>
                             <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">\${kb} KB</div>
                             <div style="display:flex;gap:4px;">
-                                <button type="button" onclick="selectQAMedia(\${groupIndex},'\${f.name}')" style="flex:1;font-size:11px;padding:4px;background:\${isSelected ? 'rgba(100,220,150,0.15)' : 'var(--input-bg)'};color:\${isSelected ? '#64dc96' : 'var(--text-muted)'};border:1px solid \${isSelected ? 'rgba(100,220,150,0.4)' : 'var(--card-border)'};border-radius:5px;cursor:pointer;">
+                                <button type="button" onclick="selectQAMedia(\${groupIndex},\\'\${f.name}\\')" style="flex:1;font-size:11px;padding:4px;background:\${isSelected ? 'rgba(100,220,150,0.15)' : 'var(--input-bg)'};color:\${isSelected ? '#64dc96' : 'var(--text-muted)'};border:1px solid \${isSelected ? 'rgba(100,220,150,0.4)' : 'var(--card-border)'};border-radius:5px;cursor:pointer;">
                                     <i class="fas \${isSelected ? 'fa-check' : 'fa-link'}"></i> \${isSelected ? (currentLang==='en'?'Selected':'محدد') : (currentLang==='en'?'Select':'اختر')}
                                 </button>
-                                <button type="button" onclick="deleteGroupMedia(\${groupIndex},'\${f.name}')" style="padding:4px 6px;background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.3);border-radius:5px;cursor:pointer;font-size:11px;">
+                                <button type="button" onclick="deleteGroupMedia(\${groupIndex},\\'\${f.name}\\')" style="padding:4px 6px;background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.3);border-radius:5px;cursor:pointer;font-size:11px;">
                                     <i class="fas fa-trash"></i>
                                 </button>
                             </div>

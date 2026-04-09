@@ -38,16 +38,22 @@ fi
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 
-# فحص مجلد المكتبات
-if [ -d "node_modules" ]; then
-    echo "[OK] node_modules found. Skipping npm install."
-else
+# فحص المكتبات المطلوبة فعلياً
+if [ ! -d "node_modules" ]; then
     echo "[INFO] C++ build tools & prerequisites..."
     sudo apt-get update >/dev/null 2>&1
     sudo apt-get install -y python3 make g++ build-essential >/dev/null 2>&1
     
     echo "[INFO] Installing npm packages..."
     npm install
+else
+    echo "[INFO] Verifying dependencies..."
+    if npm ls multer --depth=0 >/dev/null 2>&1; then
+        echo "[OK] Dependencies are ready."
+    else
+        echo "[WARN] Missing or incomplete dependencies detected. Running npm install..."
+        npm install
+    fi
 fi
 
 # التشغيل
