@@ -1,6 +1,7 @@
 module.exports = function renderDashboard(req, db, config) {
     let lang = 'ar';
     if (req.headers.cookie && req.headers.cookie.includes('bot_lang=en')) lang = 'en';
+    const currentLang = lang;
     const t = (ar, en) => lang === 'en' ? en : ar;
     const dir = lang === 'en' ? 'ltr' : 'rtl';
     const mediaTypesMeta = [
