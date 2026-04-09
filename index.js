@@ -2044,6 +2044,11 @@ client.on('ready', async () => {
     isInitializing = false;
     lastConnectionTimestamp = Date.now();
 
+    // Mark connection as ready immediately; group sync is best-effort and should not block UI status.
+    botStatus = '<i class="fas fa-check-circle"></i> متصل وجاهز للعمل';
+    botStatusKind = 'connected';
+    addConnectionLog('متصل', 'جاهز للعمل (قبل مزامنة المجموعات)');
+
     if (initializationTimeout) {
         clearTimeout(initializationTimeout);
         initializationTimeout = null;
@@ -2065,10 +2070,7 @@ client.on('ready', async () => {
             totalInitDurationMs: totalInitTime,
             timestamp: new Date().toISOString()
         });
-
-        botStatus = '<i class="fas fa-check-circle"></i> متصل وجاهز للعمل';
-        botStatusKind = 'connected';
-        addConnectionLog('متصل', `متصل وجاهز - ${chats.length} مجموعة`);
+        addConnectionLog('مزامنة ناجحة', `متصل وجاهز - ${chats.length} مجموعة`);
 
         // Start scheduled purge and admin sync if configured
         setupPurgeSchedule();
@@ -2084,6 +2086,13 @@ client.on('ready', async () => {
             timestamp: new Date().toISOString(),
             timeSinceReady: Date.now() - readyStartTime
         });
+
+        // Keep status connected because the WA session is already ready.
+        addConnectionLog('متصل بدون مزامنة كاملة', 'تم الحفاظ على حالة الاتصال رغم فشل مزامنة المجموعات');
+
+        // Still start schedulers while connected even if sync failed.
+        setupPurgeSchedule();
+        setupAdminSyncSchedule();
     }
 });
 
