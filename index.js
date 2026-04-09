@@ -1298,10 +1298,9 @@ app.post('/api/schedules', requireAuthApi, requirePermission('security:manage'),
 
 refreshSchedulers();
 
-app.get('/api/status', requireAuthApi, requirePermission('dashboard:read'), (req, res) => {
-    const l = req.query.lang === 'en' ? 'en' : 'ar';
+function getDashboardStatusSnapshot(lang) {
     let translatedStatus = botStatus;
-    if (l === 'en') {
+    if (lang === 'en') {
         translatedStatus = translatedStatus
             .replace('جاري تهيئة النظام وبدء التشغيل...', 'Initializing system and starting...')
             .replace('بانتظار مسح رمز الاستجابة السريعة (QR Code)...', 'Waiting for QR Code scan...')
@@ -1310,8 +1309,19 @@ app.get('/api/status', requireAuthApi, requirePermission('dashboard:read'), (req
             .replace('تم تسجيل الخروج من الحساب...', 'Logged out of account...')
             .replace('جاري إنهاء الجلسة...', 'Terminating session...');
     }
-    const statusText = String(translatedStatus).replace(/<[^>]*>/g, '').trim();
-    res.json({ qr: currentQR, status: translatedStatus, statusText, statusKind: botStatusKind });
+
+    return {
+        status: translatedStatus,
+        statusText: String(translatedStatus).replace(/<[^>]*>/g, '').trim(),
+        statusKind: botStatusKind,
+        qr: currentQR
+    };
+}
+
+app.get('/api/status', requireAuthApi, requirePermission('dashboard:read'), (req, res) => {
+    const l = req.query.lang === 'en' ? 'en' : 'ar';
+    const snapshot = getDashboardStatusSnapshot(l);
+    res.json(snapshot);
 });
 
 app.get('/api/logs', requireAuthApi, requirePermission('logs:view'), (req, res) => res.json(logsHistory));

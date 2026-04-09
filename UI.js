@@ -1,9 +1,35 @@
-module.exports = function renderDashboard(req, db, config) {
+module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
     let lang = 'ar';
     if (req.headers.cookie && req.headers.cookie.includes('bot_lang=en')) lang = 'en';
     const currentLang = lang;
     const t = (ar, en) => lang === 'en' ? en : ar;
     const dir = lang === 'en' ? 'ltr' : 'rtl';
+    const escapeHtml = (value) => String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    const getStatusIconClass = (kind) => {
+        if (kind === 'connected') return 'fas fa-check-circle';
+        if (kind === 'waiting_qr') return 'fas fa-qrcode';
+        if (kind === 'syncing' || kind === 'initializing' || kind === 'retrying' || kind === 'terminating') return 'fas fa-spinner fa-spin';
+        if (kind === 'error') return 'fas fa-exclamation-triangle';
+        if (kind === 'disconnected') return 'fas fa-sign-out-alt';
+        return 'fas fa-info-circle';
+    };
+    const getStatusDotClass = (kind) => {
+        if (kind === 'connected') return 'status-dot online';
+        if (kind === 'waiting_qr') return 'status-dot waiting';
+        return 'status-dot';
+    };
+    const initialStatusKind = runtimeStatus.statusKind || 'initializing';
+    const initialStatusText = escapeHtml(
+        runtimeStatus.statusText || (lang === 'en' ? 'Initializing system...' : 'جاري تهيئة النظام وبدء التشغيل...')
+    );
+    const initialStatusIconClass = getStatusIconClass(initialStatusKind);
+    const initialStatusDotClass = getStatusDotClass(initialStatusKind);
+    const initialLogoutDisplay = initialStatusKind === 'connected' ? 'block' : 'none';
     const mediaTypesMeta = [
         { id: 'text', icon: '<i class="fas fa-file-alt"></i>', name: t('نصوص', 'Text') },
         { id: 'image', icon: '<i class="fas fa-image"></i>', name: t('صور', 'Images') },
@@ -353,8 +379,8 @@ module.exports = function renderDashboard(req, db, config) {
                     </div>
 
                     <div class="status-pill">
-                        <div class="status-dot" id="statusDot"></div>
-                        <span id="status-text"><i id="status-text-icon" class="fas fa-spinner fa-spin"></i> <span id="status-text-label">${t('جاري تهيئة النظام وبدء التشغيل...', 'Initializing system...')}</span></span>
+                        <div class="${initialStatusDotClass}" id="statusDot"></div>
+                        <span id="status-text"><i id="status-text-icon" class="${initialStatusIconClass}"></i> <span id="status-text-label">${initialStatusText}</span></span>
                     </div>
                 </div>
             </div>
@@ -664,12 +690,12 @@ module.exports = function renderDashboard(req, db, config) {
                         </div>
                         <div style="margin-top:20px; padding:16px; background:var(--input-bg); border-radius:10px; border:1px solid var(--card-border);">
                             <div style="font-size:13px; color:var(--text-muted); line-height:2;">
-                                <div><i class="fas fa-circle text-danger" style="color:var(--red); font-size: 10px; margin-inline-end: 5px;"></i> <strong style="color:var(--text);">${t('مفعّل:', 'Enabled:')}</strong> ${t('حذف فوري + طرد تلقائي', 'Instant delete + auto kick')}</div>
+                                <div><i class="fas fa-robot"></i> <strong style="color:var(--text);">${t('البوت:', 'Bot:')}</strong> <span id="status-text-detail" style="color:var(--accent);">${initialStatusText}</span> <i id="status-text-detail-check" class="fas fa-check" style="color:var(--accent);display:${initialStatusKind === 'connected' ? 'inline-block' : 'none'};"></i></div>
                                 <div><i class="fas fa-circle text-warning" style="color:var(--orange); font-size: 10px; margin-inline-end: 5px;"></i> <strong style="color:var(--text);">${t('معطّل:', 'Disabled:')}</strong> ${t('حذف + تصويت للإدارة', 'Delete + admin poll')}</div>
                             </div>
                         </div>
                     </div>
-                </div>
+                                <button id="logoutBtn" type="button" class="btn btn-danger" onclick="logoutBot()" style="display:${initialLogoutDisplay};"><i class="fas fa-link-slash"></i> ${t('قطع اتصال واتساب', 'Disconnect WhatsApp')}</button>
             </div>
 
             <div class="page" id="page-spam">
