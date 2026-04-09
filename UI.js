@@ -690,12 +690,12 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         </div>
                         <div style="margin-top:20px; padding:16px; background:var(--input-bg); border-radius:10px; border:1px solid var(--card-border);">
                             <div style="font-size:13px; color:var(--text-muted); line-height:2;">
-                                <div><i class="fas fa-circle text-danger" style="color:var(--red); font-size: 10px; margin-inline-end: 5px;"></i> <strong style="color:var(--text);">${t('مفعّل:', 'Enabled:')}</strong> ${t('حذف فوري + طرد تلقائي', 'Instant delete + auto kick')}</div>
+                                <div><i class="fas fa-robot"></i> <strong style="color:var(--text);">${t('البوت:', 'Bot:')}</strong> <span id="status-text-detail" style="color:var(--accent);">${initialStatusText}</span> <i id="status-text-detail-check" class="fas fa-check" style="color:var(--accent);display:${initialStatusKind === 'connected' ? 'inline-block' : 'none'};"></i></div>
                                 <div><i class="fas fa-circle text-warning" style="color:var(--orange); font-size: 10px; margin-inline-end: 5px;"></i> <strong style="color:var(--text);">${t('معطّل:', 'Disabled:')}</strong> ${t('حذف + تصويت للإدارة', 'Delete + admin poll')}</div>
                             </div>
                         </div>
                     </div>
-                </div>
+                                <button id="logoutBtn" type="button" class="btn btn-danger" onclick="logoutBot()" style="display:${initialLogoutDisplay};"><i class="fas fa-link-slash"></i> ${t('قطع اتصال واتساب', 'Disconnect WhatsApp')}</button>
             </div>
 
             <div class="page" id="page-spam">
@@ -4297,7 +4297,19 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 if (logoutBtn) logoutBtn.style.display = kind === 'connected' ? 'block' : 'none';
             }
 
-            async function pollDashboardStatus() {
+            renderBlacklist();
+            renderWhitelist();
+            renderDefaultWords();
+            renderAITriggerWords();
+            renderGlobalQAQuestionsDraft();
+            renderGlobalQAEventDatesForm();
+            renderGlobalQAList();
+            loadGlobalQAMedia();
+            loadScheduleSettings();
+            loadKnownGroups();
+            enforceFirstLoginChange();
+
+            setInterval(async () => {
                 try {
                     let res = await fetch('/api/status?lang=' + currentLang, { cache: 'no-store' });
                     if (res.status === 401) {
@@ -4319,23 +4331,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         if(qrPlaceholder) qrPlaceholder.style.display = 'block';
                     }
                 } catch(e) {}
-            }
-
-            // Start status polling first so UI state keeps updating even if a later init call fails.
-            pollDashboardStatus();
-            setInterval(pollDashboardStatus, 2000);
-
-            renderBlacklist();
-            renderWhitelist();
-            renderDefaultWords();
-            renderAITriggerWords();
-            renderGlobalQAQuestionsDraft();
-            renderGlobalQAEventDatesForm();
-            renderGlobalQAList();
-            loadGlobalQAMedia();
-            loadScheduleSettings();
-            loadKnownGroups();
-            enforceFirstLoginChange();
+            }, 2000);
 
             async function exportData() {
                 const selected = {

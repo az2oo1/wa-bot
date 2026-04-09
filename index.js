@@ -966,9 +966,7 @@ app.post('/auth/first-login-change', requireAuthApi, (req, res) => {
 });
 
 app.get('/', requireAuthPage, requirePermission('dashboard:read'), (req, res) => {
-    const lang = req.query.lang === 'en' || (req.headers.cookie && req.headers.cookie.includes('bot_lang=en')) ? 'en' : 'ar';
-    const runtimeStatus = getDashboardStatusSnapshot(lang);
-    const html = renderDashboard(req, db, config, runtimeStatus);
+    const html = renderDashboard(req, db, config);
     res.send(html);
 });
 
@@ -2045,8 +2043,6 @@ client.on('ready', async () => {
     addConnectionLog('جاهز', 'البوت جاهز الآن والعميل مصرح');
     isInitializing = false;
     lastConnectionTimestamp = Date.now();
-    botStatus = '<i class="fas fa-check-circle"></i> متصل وجاهز للعمل';
-    botStatusKind = 'connected';
 
     if (initializationTimeout) {
         clearTimeout(initializationTimeout);
@@ -2070,6 +2066,8 @@ client.on('ready', async () => {
             timestamp: new Date().toISOString()
         });
 
+        botStatus = '<i class="fas fa-check-circle"></i> متصل وجاهز للعمل';
+        botStatusKind = 'connected';
         addConnectionLog('متصل', `متصل وجاهز - ${chats.length} مجموعة`);
 
         // Start scheduled purge and admin sync if configured
@@ -2086,10 +2084,6 @@ client.on('ready', async () => {
             timestamp: new Date().toISOString(),
             timeSinceReady: Date.now() - readyStartTime
         });
-
-        // Keep dashboard status connected because client is already ready.
-        setupPurgeSchedule();
-        setupAdminSyncSchedule();
     }
 });
 
