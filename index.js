@@ -1411,7 +1411,7 @@ app.post('/api/media/copy/:fromGroupId/:toGroupId', requireAuthApi, requirePermi
 // Upload a file for a group
 app.post('/api/media/upload/:groupId', requireAuthApi, requirePermission('media:manage'), upload.single('file'), (req, res) => {
     const allowedSet = getAllowedGroupIds(req.authUser);
-    if (allowedSet && !allowedSet.has(req.params.groupId)) return res.status(403).json({ error: 'Forbidden group' });
+    if (req.params.groupId !== 'global-qa' && allowedSet && !allowedSet.has(req.params.groupId)) return res.status(403).json({ error: 'Forbidden group' });
     if (!req.file) return res.status(400).json({ error: 'No file received' });
     res.json({ filename: req.file.filename, size: req.file.size });
 });
@@ -1419,7 +1419,7 @@ app.post('/api/media/upload/:groupId', requireAuthApi, requirePermission('media:
 // List files for a group
 app.get('/api/media/list/:groupId', requireAuthApi, requirePermission('media:manage'), (req, res) => {
     const allowedSet = getAllowedGroupIds(req.authUser);
-    if (allowedSet && !allowedSet.has(req.params.groupId)) return res.status(403).json({ error: 'Forbidden group' });
+    if (req.params.groupId !== 'global-qa' && allowedSet && !allowedSet.has(req.params.groupId)) return res.status(403).json({ error: 'Forbidden group' });
     const dir = path.join('./media', req.params.groupId);
     if (!fs.existsSync(dir)) return res.json([]);
     try {
@@ -1434,7 +1434,7 @@ app.get('/api/media/list/:groupId', requireAuthApi, requirePermission('media:man
 // Delete a file for a group
 app.delete('/api/media/delete/:groupId/:filename', requireAuthApi, requirePermission('media:manage'), (req, res) => {
     const allowedSet = getAllowedGroupIds(req.authUser);
-    if (allowedSet && !allowedSet.has(req.params.groupId)) return res.status(403).json({ error: 'Forbidden group' });
+    if (req.params.groupId !== 'global-qa' && allowedSet && !allowedSet.has(req.params.groupId)) return res.status(403).json({ error: 'Forbidden group' });
     const filePath = path.join('./media', req.params.groupId, req.params.filename);
     try {
         if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -3098,17 +3098,59 @@ client.on('message', async msg => {
                         isQAMatched = true;
                         try {
                             let gFinalAnswer = gqa.answer || '';
-                            // Replace {date}
                             const gnow = new Date();
+                            const gToday = new Date();
+                            gToday.setHours(0, 0, 0, 0);
+
+                            function formatGlobalQAEventDate(dateVal, language = 'ar') {
+                                if (!dateVal) return '';
+                                const eventDate = new Date(dateVal);
+                                eventDate.setHours(0, 0, 0, 0);
+                                const daysLeft = Math.ceil((eventDate - gToday) / (1000 * 60 * 60 * 24));
+                                const eventDateStr = `${String(eventDate.getDate()).padStart(2, '0')}/${String(eventDate.getMonth() + 1).padStart(2, '0')}/${eventDate.getFullYear()}`;
+                                if (language === 'ar') {
+                                    return daysLeft > 0 ? `${daysLeft} أيام متبقية - ${eventDateStr}` : (daysLeft === 0 ? `اليوم - ${eventDateStr}` : `منذ ${Math.abs(daysLeft)} أيام - ${eventDateStr}`);
+                                }
+                                return daysLeft > 0 ? `${daysLeft} days left - ${eventDateStr}` : (daysLeft === 0 ? `Today - ${eventDateStr}` : `${Math.abs(daysLeft)} days ago - ${eventDateStr}`);
+                            }
+
+                            const gqaLanguage = gqa.qaLanguage || 'ar';
                             gFinalAnswer = gFinalAnswer.replace(/{date}/g,
                                 `${String(gnow.getDate()).padStart(2, '0')}/${String(gnow.getMonth() + 1).padStart(2, '0')}/${gnow.getFullYear()}`);
-                            // Replace {user}
+
+                            const gEventDatesArray = Array.isArray(gqa.eventDates) && gqa.eventDates.length > 0 ? gqa.eventDates : [];
+                            const gEventDateLegacy = gqa.eventDate || '';
+                            if (gEventDateLegacy) {
+                                gFinalAnswer = gFinalAnswer.replace(/{eventdate}/g, formatGlobalQAEventDate(gEventDateLegacy, gqaLanguage));
+                            } else if (gEventDatesArray.length > 0) {
+                                gFinalAnswer = gFinalAnswer.replace(/{eventdate}/g, formatGlobalQAEventDate(gEventDatesArray[0].date, gqaLanguage));
+                            }
+                            if (gEventDatesArray.length > 0) {
+                                gEventDatesArray.forEach(ed => {
+                                    if (ed.label && ed.date) {
+                                        const regex = new RegExp(`{eventdate:${ed.label}}`, 'g');
+                                        gFinalAnswer = gFinalAnswer.replace(regex, formatGlobalQAEventDate(ed.date, gqaLanguage));
+                                    }
+                                });
+                            }
+
                             const gcontact = await msg.getContact();
                             const guserName = gcontact ? (gcontact.name || gcontact.number) : cleanAuthorId.split('@')[0];
                             gFinalAnswer = gFinalAnswer.replace(/{user}/g, guserName);
-                            if (gFinalAnswer) {
+
+                            if (gFinalAnswer || gqa.mediaFile) {
                                 await safeDelay();
-                                await chat.sendMessage(gFinalAnswer);
+                                if (gqa.mediaFile) {
+                                    const globalMediaPath = path.join(__dirname, 'media', 'global-qa', gqa.mediaFile);
+                                    if (fs.existsSync(globalMediaPath)) {
+                                        const media = MessageMedia.fromFilePath(globalMediaPath);
+                                        await chat.sendMessage(media, { caption: gFinalAnswer || undefined });
+                                    } else if (gFinalAnswer) {
+                                        await chat.sendMessage(gFinalAnswer);
+                                    }
+                                } else {
+                                    await chat.sendMessage(gFinalAnswer);
+                                }
                                 console.log(`[Q&A عالمي] رد على "${gMatched}" في "${chat.name}"`);
                             }
                         } catch (err) {

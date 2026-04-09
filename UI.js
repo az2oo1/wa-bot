@@ -819,22 +819,74 @@ module.exports = function renderDashboard(req, db, config) {
                 <div class="card-grid" style="align-items:start;">
                     <div class="card" style="margin-bottom:0;">
                         <div class="card-header"><h3><i class="fas fa-plus-circle"></i> ${t('إضافة / تعديل زوج سؤال وجواب', 'Add / Edit Q&A Pair')}</h3></div>
+
+                        <div class="sub-panel blue" style="margin-bottom:16px;">
+                            <h4 style="color:var(--blue);">${t('مرجع الحقول الديناميكية', 'Dynamic Fields Reference')}</h4>
+                            <div style="font-size:13px;color:var(--text-muted);line-height:1.8;">
+                                <div><strong style="color:var(--blue);">{eventdate}</strong> - ${t('الحدث الأساسي (الأول في القائمة)', 'Primary event/deadline (first in list)')}</div>
+                                <div><strong style="color:var(--blue);">{eventdate:Label}</strong> - ${t('حدث معين حسب العنوان', 'Specific event by label')}</div>
+                                <div><strong style="color:var(--blue);">{user}</strong> - ${t('اسم المرسل', 'Sender username')}</div>
+                            </div>
+                        </div>
+
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                            <label class="field-label" style="margin-bottom:0;">${t('إدارة الأحداث والمواعيد', 'Manage Events/Deadlines')}</label>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="addGlobalQAEventDate()"><i class="fas fa-plus"></i> ${t('إضافة حدث', 'Add Event')}</button>
+                        </div>
+                        <div id="globalQAEventDatesContainer" style="margin-bottom: 20px;"></div>
+
+                        <div class="field-row" style="margin-bottom:16px;">
+                            <div class="field-group" style="margin-bottom:0;">
+                                <label class="field-label" style="margin-bottom:4px;">${t('تاريخ الحدث القديم (لحقل {eventdate})', 'Legacy Event Date (for {eventdate})')}</label>
+                                <input type="date" id="globalQAEventDateInput" style="color-scheme: dark; font-family: var(--font);">
+                            </div>
+                            <div class="field-group" style="margin-bottom:0;">
+                                <label class="field-label" style="margin-bottom:4px;">${t('لغة عرض الأيام المتبقية', 'Days-Left Language')}</label>
+                                <select id="globalQALanguageInput">
+                                    <option value="ar">${t('العربية', 'Arabic')}</option>
+                                    <option value="en">English</option>
+                                </select>
+                            </div>
+                        </div>
+
                         <label class="field-label">${t('أضف صيغ السؤال', 'Add Question Variants')}</label>
                         <div class="field-group" style="margin-bottom:10px;">
                             <input type="text" id="globalQAQuestionInput" placeholder="${t('أدخل صيغة سؤال...', 'Enter a question variant...')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addGlobalQAQuestion();}">
                             <button type="button" class="btn btn-primary btn-full" style="margin-top:10px;" onclick="addGlobalQAQuestion()"><i class="fas fa-plus"></i> ${t('إضافة صيغة', 'Add Variant')}</button>
+                            <div class="chip-container" id="globalQAQuestionsContainer" style="min-height:40px;"></div>
                         </div>
-                        <div class="chip-container" id="globalQAQuestionsContainer" style="min-height:40px;"></div>
 
                         <label class="field-label" style="margin-top:14px;">${t('الإجابة', 'Answer')}</label>
                         <div class="field-group" style="margin-bottom:10px;">
-                            <textarea id="globalQAAnswerInput" rows="4" placeholder="${t('استخدم {date} و {user} داخل النص إن أردت', 'You can use {date} and {user} placeholders')}" style="margin-bottom:10px;"></textarea>
+                            <textarea id="globalQAAnswerInput" rows="4" placeholder="${t('استخدم {date} و {eventdate} و {user} داخل النص إن أردت', 'You can use {date}, {eventdate}, and {user} placeholders')}" style="margin-bottom:10px;" oninput="updateGlobalQACurrentAnswer(this.value)" onchange="updateGlobalQACurrentAnswer(this.value)"></textarea>
                             <button type="button" id="saveGlobalQABtn" class="btn btn-full" onclick="saveGlobalQA()" style="background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700;"><i class="fas fa-save"></i> ${t('حفظ زوج س و ج', 'Save Q&A Pair')}</button>
+                        </div>
+
+                        <div class="sub-panel" style="margin-bottom:16px;border-color:rgba(100,220,150,0.3);background:rgba(100,220,150,0.04);">
+                            <h4 style="color:#64dc96;margin-bottom:12px;"><i class="fas fa-paperclip"></i> ${t('إرفاق وسائط بهذه الإجابة', 'Attach Media to This Answer')}</h4>
+                            <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">${t('اختر ملفاً ليُرفق تلقائياً عند حفظ الزوج. سيرسل البوت الملف مع نص الإجابة كتعليق.', 'Select a file to automatically attach it when saving the Q&A pair. The bot will send the file + answer caption.')}</p>
+                            <div id="globalQA_media_selected" style="display:none;align-items:center;gap:10px;background:rgba(100,220,150,0.1);border:1px solid rgba(100,220,150,0.3);border-radius:8px;padding:10px 14px;margin-bottom:12px;">
+                                <i class="fas fa-paperclip" style="color:#64dc96;"></i>
+                                <span id="globalQA_media_selected_name" style="font-size:13px;color:#64dc96;flex:1;"></span>
+                                <button type="button" onclick="clearGlobalQAMedia()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;">×</button>
+                            </div>
+                            <div style="display:flex;gap:10px;margin-bottom:14px;">
+                                <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;background:var(--input-bg);border:1.5px dashed rgba(100,220,150,0.4);border-radius:10px;cursor:pointer;font-size:13px;color:var(--text-muted);transition:all 0.2s;" onmouseover="this.style.borderColor='#64dc96'" onmouseout="this.style.borderColor='rgba(100,220,150,0.4)'">
+                                    <i class="fas fa-cloud-upload-alt" style="color:#64dc96;font-size:18px;"></i>
+                                    <span>${currentLang==='en'?'Click to upload a file':'انقر لرفع ملف'}</span>
+                                    <input type="file" id="globalQA_file_input" style="display:none;" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar" onchange="uploadGlobalQAMedia(this)">
+                                </label>
+                            </div>
+                            <div id="globalQA_upload_status" style="display:none;font-size:12px;color:var(--text-muted);margin-bottom:10px;"></div>
+                            <div id="globalQA_media_grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;"></div>
                         </div>
                     </div>
 
                     <div class="card" style="margin-bottom:0;">
-                        <div class="card-header"><h3><i class="fas fa-list"></i> ${t('الأزواج المحفوظة', 'Saved Pairs')}</h3></div>
+                        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                            <h3><i class="fas fa-list"></i> ${t('الأزواج المحفوظة', 'Saved Pairs')}</h3>
+                            <button type="button" class="btn btn-ghost btn-sm" onclick="pasteGlobalQA()"><i class="fas fa-paste"></i> ${t('لصق س و ج', 'Paste Q&A')}</button>
+                        </div>
                         <div id="globalQAList"></div>
                     </div>
                 </div>
@@ -2505,6 +2557,12 @@ module.exports = function renderDashboard(req, db, config) {
             let globalQAArr = ${JSON.stringify(config.globalQA || [])};
             let globalQAEditingIndex = null;
             let globalQAQuestionsDraft = [];
+            let globalQAEventDatesDraft = [];
+            let globalQALegacyEventDate = '';
+            let globalQACurrentAnswer = '';
+            let globalQAPendingMediaFile = '';
+            let globalQALanguage = 'ar';
+            let globalQAMediaLoaded = false;
             let blacklistArr = ${JSON.stringify(blacklistArr)}; 
             let blockedExtensionsArr = ${JSON.stringify(blockedExtensionsArr)}; 
             let whitelistArr = ${JSON.stringify(whitelistArr)}; 
@@ -3410,6 +3468,148 @@ module.exports = function renderDashboard(req, db, config) {
                 renderGlobalQAQuestionsDraft();
             }
 
+            function renderGlobalQAEventDatesForm() {
+                const container = document.getElementById('globalQAEventDatesContainer');
+                const legacyInput = document.getElementById('globalQAEventDateInput');
+                const langInput = document.getElementById('globalQALanguageInput');
+                if (!container) return;
+                container.innerHTML = (globalQAEventDatesDraft || []).map(function(ed, edIdx) {
+                    return '<div class="field-row" style="margin-bottom:10px; background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; border: 1px solid var(--card-border); align-items: flex-end; gap: 12px;">' +
+                        '<div class="field-group" style="margin-bottom:0; flex: 1.5;">' +
+                            '<label class="field-label" style="font-size:10px;">' + (currentLang === 'en' ? 'Label (e.g. Exam)' : 'العنوان (مثل: اختبار)') + '</label>' +
+                            '<input type="text" value="' + (ed.label || '') + '" placeholder="..." onchange="updateGlobalQAEventDate(' + edIdx + ', \'label\', this.value)">' +
+                        '</div>' +
+                        '<div class="field-group" style="margin-bottom:0; flex: 1.5;">' +
+                            '<label class="field-label" style="font-size:10px;">' + (currentLang === 'en' ? 'Date' : 'التاريخ') + '</label>' +
+                            '<input type="date" value="' + (ed.date || '') + '" onchange="updateGlobalQAEventDate(' + edIdx + ', \'date\', this.value)" style="color-scheme: dark;">' +
+                        '</div>' +
+                        '<button type="button" class="icon-btn" onclick="removeGlobalQAEventDate(' + edIdx + ')" style="border-color:rgba(255,82,82,0.3);color:var(--red);" title="' + (currentLang === 'en' ? 'Delete event' : 'حذف الحدث') + '"><i class="fas fa-trash"></i></button>' +
+                    '</div>';
+                }).join('');
+                if (!globalQAEventDatesDraft.length) {
+                    container.innerHTML += '<div style="font-size:12px; color:var(--text-muted); padding:10px; text-align:center; border: 1px dashed var(--card-border); border-radius: 8px;">' + (currentLang === 'en' ? 'No extra events added yet.' : 'لم يتم إضافة أحداث إضافية بعد.') + '</div>';
+                }
+                if (legacyInput) legacyInput.value = globalQALegacyEventDate || '';
+                if (langInput) langInput.value = globalQALanguage || 'ar';
+            }
+
+            function addGlobalQAEventDate() {
+                globalQAEventDatesDraft.push({ label: '', date: '' });
+                renderGlobalQAEventDatesForm();
+            }
+
+            function removeGlobalQAEventDate(index) {
+                globalQAEventDatesDraft.splice(index, 1);
+                renderGlobalQAEventDatesForm();
+            }
+
+            function updateGlobalQAEventDate(index, field, value) {
+                if (!globalQAEventDatesDraft[index]) return;
+                globalQAEventDatesDraft[index][field] = value;
+            }
+
+            function updateGlobalQACurrentAnswer(value) {
+                globalQACurrentAnswer = String(value || '');
+            }
+
+            function setGlobalQAMediaSelection(mediaFile) {
+                globalQAPendingMediaFile = mediaFile || '';
+                const indicator = document.getElementById('globalQA_media_selected');
+                const nameEl = document.getElementById('globalQA_media_selected_name');
+                if (!indicator || !nameEl) return;
+                if (globalQAPendingMediaFile) {
+                    indicator.style.display = 'flex';
+                    nameEl.textContent = '📎 ' + globalQAPendingMediaFile;
+                } else {
+                    indicator.style.display = 'none';
+                    nameEl.textContent = '';
+                }
+            }
+
+            function loadGlobalQAMedia() {
+                fetch('/api/media/list/global-qa')
+                    .then(r => r.json())
+                    .then(files => renderGlobalQAMediaGrid(files))
+                    .catch(() => {});
+            }
+
+            function renderGlobalQAMediaGrid(files) {
+                const grid = document.getElementById('globalQA_media_grid');
+                if (!grid) return;
+                if (!files || files.length === 0) {
+                    grid.innerHTML = '<p style="font-size:12px;color:var(--text-muted);grid-column:1/-1;">' + (currentLang === 'en' ? 'No files uploaded yet.' : 'لا توجد ملفات محملة بعد.') + '</p>';
+                    return;
+                }
+                const imgExts = ['jpg','jpeg','png','gif','webp','bmp','svg'];
+                grid.innerHTML = files.map(function(f) {
+                    const ext = f.name.split('.').pop().toLowerCase();
+                    let preview;
+                    if (imgExts.includes(ext)) {
+                        preview = '<img src="/media/global-qa/' + encodeURIComponent(f.name) + '" style="width:100%;height:72px;object-fit:cover;border-radius:6px 6px 0 0;">';
+                    } else {
+                        const icons = { mp4:'fa-film', mov:'fa-film', webm:'fa-film', mkv:'fa-film', mp3:'fa-music', ogg:'fa-music', wav:'fa-music', pdf:'fa-file-pdf', doc:'fa-file-word', docx:'fa-file-word', zip:'fa-file-archive', rar:'fa-file-archive' };
+                        const icon = icons[ext] || 'fa-file';
+                        preview = '<div style="width:100%;height:72px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);border-radius:6px 6px 0 0;"><i class="fas ' + icon + '" style="font-size:28px;color:var(--text-muted);"></i></div>';
+                    }
+                    const kb = (f.size/1024).toFixed(1);
+                    const isSelected = globalQAPendingMediaFile === f.name;
+                    return '<div style="background:var(--card-bg);border:1.5px solid ' + (isSelected ? '#64dc96' : 'var(--card-border)') + ';border-radius:8px;overflow:hidden;">' +
+                        preview +
+                        '<div style="padding:6px 8px;">' +
+                            '<div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + f.name + '">' + f.name + '</div>' +
+                            '<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">' + kb + ' KB</div>' +
+                            '<div style="display:flex;gap:4px;">' +
+                                '<button type="button" onclick="selectGlobalQAMedia(\'' + f.name + '\')" style="flex:1;font-size:11px;padding:4px;background:' + (isSelected ? 'rgba(100,220,150,0.15)' : 'var(--input-bg)') + ';color:' + (isSelected ? '#64dc96' : 'var(--text-muted)') + ';border:1px solid ' + (isSelected ? 'rgba(100,220,150,0.4)' : 'var(--card-border)') + ';border-radius:5px;cursor:pointer;">' +
+                                    '<i class="fas ' + (isSelected ? 'fa-check' : 'fa-link') + '"></i> ' + (isSelected ? (currentLang === 'en' ? 'Selected' : 'محدد') : (currentLang === 'en' ? 'Select' : 'اختر')) +
+                                '</button>' +
+                                '<button type="button" onclick="deleteGlobalQAMedia(\'' + f.name + '\')" style="padding:4px 6px;background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.3);border-radius:5px;cursor:pointer;font-size:11px;">' +
+                                    <i class="fas fa-trash"></i>
+                                '</button>' +
+                            '</div>' +
+                        '</div>' +
+                    '</div>';
+                }).join('');
+            }
+
+            function uploadGlobalQAMedia(input) {
+                const file = input.files[0];
+                if (!file) return;
+                const statusEl = document.getElementById('globalQA_upload_status');
+                statusEl.style.display = 'block';
+                statusEl.textContent = currentLang==='en' ? '⏳ Uploading...' : '⏳ جاري الرفع...';
+                const fd = new FormData();
+                fd.append('file', file);
+                fetch('/api/media/upload/global-qa', { method:'POST', body:fd })
+                    .then(r => r.json())
+                    .then(data => {
+                        statusEl.textContent = currentLang==='en' ? '✅ Uploaded: ' + data.filename : '✅ تم الرفع: ' + data.filename;
+                        setTimeout(() => { statusEl.style.display='none'; }, 3000);
+                        loadGlobalQAMedia();
+                        input.value = '';
+                    })
+                    .catch(() => { statusEl.textContent = currentLang==='en' ? '❌ Upload failed' : '❌ فشل الرفع'; });
+            }
+
+            function selectGlobalQAMedia(filename) {
+                const wasSelected = globalQAPendingMediaFile === filename;
+                setGlobalQAMediaSelection(wasSelected ? '' : filename);
+                loadGlobalQAMedia();
+            }
+
+            function clearGlobalQAMedia() {
+                setGlobalQAMediaSelection('');
+                loadGlobalQAMedia();
+            }
+
+            function deleteGlobalQAMedia(filename) {
+                if (!window.confirm(currentLang === 'en' ? 'Delete ' + filename + '?' : 'حذف ' + filename + '؟')) return;
+                fetch('/api/media/delete/global-qa/' + encodeURIComponent(filename), { method:'DELETE' })
+                    .then(() => {
+                        if (globalQAPendingMediaFile === filename) clearGlobalQAMedia();
+                        loadGlobalQAMedia();
+                    });
+            }
+
             function renderGlobalQAList() {
                 const list = document.getElementById('globalQAList');
                 if (!list) return;
@@ -3423,6 +3623,7 @@ module.exports = function renderDashboard(req, db, config) {
                 list.innerHTML = globalQAArr.map((qa, idx) => {
                     const questions = Array.isArray(qa.questions) ? qa.questions : (qa.question ? [qa.question] : []);
                     const answer = String(qa.answer || '');
+                    const eventDates = Array.isArray(qa.eventDates) ? qa.eventDates : [];
                     return '<div class="group-card" style="margin-bottom:10px;">' +
                         '<div class="group-card-header" style="padding:12px;">' +
                         '<div class="group-card-title" style="font-size:13px;">' +
@@ -3430,6 +3631,7 @@ module.exports = function renderDashboard(req, db, config) {
                         (currentLang === 'en' ? 'Triggers' : 'المحفزات') + ' (' + questions.length + ')' +
                         '</div>' +
                         '<div style="display:flex;gap:8px;">' +
+                        '<button type="button" class="icon-btn" onclick="copyGlobalQA(' + idx + ')" style="background:rgba(255,160,0,0.1);color:#ffa000;border-color:rgba(255,160,0,0.3);" title="' + (currentLang==='en'?'Copy':'نسخ') + '"><i class="fas fa-copy"></i></button>' +
                         '<button type="button" class="icon-btn" onclick="editGlobalQA(' + idx + ')" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="' + (currentLang==='en'?'Edit':'تعديل') + '"><i class="fas fa-pen"></i></button>' +
                         '<button type="button" class="icon-btn" onclick="removeGlobalQA(' + idx + ')" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);" title="' + (currentLang==='en'?'Delete':'حذف') + '"><i class="fas fa-trash"></i></button>' +
                         '</div>' +
@@ -3438,6 +3640,8 @@ module.exports = function renderDashboard(req, db, config) {
                         '<div class="chip-container" style="gap:4px;max-height:70px;overflow-y:auto;">' +
                         questions.map(q => '<div class="chip" style="font-size:11px;padding:2px 8px;">' + q + '</div>').join('') +
                         '</div>' +
+                        (eventDates.length > 0 ? '<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--blue); background:rgba(64,196,255,0.05); padding:6px 10px; border-radius:6px; border:1px dashed rgba(64,196,255,0.3);"><i class="fas fa-calendar-alt"></i> ' + eventDates.length + ' ' + (currentLang==='en'?'Event(s)':'حدث/أحداث') + '</div>' : '') +
+                        (qa.mediaFile ? '<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:11px;color:#64dc96; background:rgba(100,220,150,0.05); padding:6px 10px; border-radius:6px; border:1px dashed rgba(100,220,150,0.3);"><i class="fas fa-paperclip"></i> ' + qa.mediaFile + '</div>' : '') +
                         '<div style="margin-top:10px;color:var(--text-muted);font-size:13px;background:rgba(255,255,255,0.02);padding:10px;border-radius:8px;">' +
                         (answer || '<em style="opacity:.6;">(empty)</em>') +
                         '</div>' +
@@ -3449,15 +3653,26 @@ module.exports = function renderDashboard(req, db, config) {
             function resetGlobalQAForm() {
                 globalQAEditingIndex = null;
                 globalQAQuestionsDraft = [];
+                globalQAEventDatesDraft = [];
+                globalQALegacyEventDate = '';
+                globalQACurrentAnswer = '';
+                globalQAPendingMediaFile = '';
+                globalQALanguage = 'ar';
                 const answerEl = document.getElementById('globalQAAnswerInput');
                 const saveBtn = document.getElementById('saveGlobalQABtn');
+                const legacyInput = document.getElementById('globalQAEventDateInput');
+                const langInput = document.getElementById('globalQALanguageInput');
                 if (answerEl) answerEl.value = '';
+                if (legacyInput) legacyInput.value = '';
+                if (langInput) langInput.value = 'ar';
                 if (saveBtn) {
                     saveBtn.innerHTML = '<i class="fas fa-save"></i> ' + (currentLang === 'en' ? 'Save Q&A Pair' : 'حفظ زوج س و ج');
                     saveBtn.style.background = 'var(--accent-dim)';
                     saveBtn.style.color = 'var(--accent)';
                 }
+                setGlobalQAMediaSelection('');
                 renderGlobalQAQuestionsDraft();
+                renderGlobalQAEventDatesForm();
             }
 
             function editGlobalQA(index) {
@@ -3465,15 +3680,52 @@ module.exports = function renderDashboard(req, db, config) {
                 if (!qa) return;
                 globalQAEditingIndex = index;
                 globalQAQuestionsDraft = Array.isArray(qa.questions) ? [...qa.questions] : (qa.question ? [qa.question] : []);
+                globalQAEventDatesDraft = JSON.parse(JSON.stringify(qa.eventDates || []));
+                globalQALegacyEventDate = qa.eventDate || '';
+                globalQACurrentAnswer = qa.answer || '';
+                globalQAPendingMediaFile = qa.mediaFile || '';
+                globalQALanguage = qa.qaLanguage || 'ar';
                 const answerEl = document.getElementById('globalQAAnswerInput');
                 const saveBtn = document.getElementById('saveGlobalQABtn');
+                const legacyInput = document.getElementById('globalQAEventDateInput');
+                const langInput = document.getElementById('globalQALanguageInput');
                 if (answerEl) answerEl.value = qa.answer || '';
+                if (legacyInput) legacyInput.value = globalQALegacyEventDate;
+                if (langInput) langInput.value = globalQALanguage;
                 if (saveBtn) {
                     saveBtn.innerHTML = '<i class="fas fa-check"></i> ' + (currentLang === 'en' ? 'Update Q&A Pair' : 'تحديث زوج س و ج');
                     saveBtn.style.background = 'var(--orange)';
                     saveBtn.style.color = '#000';
                 }
+                setGlobalQAMediaSelection(globalQAPendingMediaFile);
                 renderGlobalQAQuestionsDraft();
+                renderGlobalQAEventDatesForm();
+                loadGlobalQAMedia();
+            }
+
+            function copyGlobalQA(index) {
+                const qa = globalQAArr[index];
+                if (!qa) return;
+                localStorage.setItem('wa_bot_qa_clipboard', JSON.stringify({ qa: qa, sourceGroupId: 'global-qa' }));
+                showToast(currentLang === 'en' ? 'Q&A copied!' : 'تم نسخ سؤال وجواب!');
+            }
+
+            async function pasteGlobalQA() {
+                const clipDataStr = localStorage.getItem('wa_bot_qa_clipboard');
+                if (!clipDataStr) {
+                    showToast(currentLang === 'en' ? 'Nothing in clipboard.' : 'لا يوجد شيء في الحافظة.');
+                    return;
+                }
+                const clipData = JSON.parse(clipDataStr);
+                let qa = JSON.parse(JSON.stringify(clipData.qa));
+                if (qa.mediaFile && clipData.sourceGroupId && clipData.sourceGroupId !== 'global-qa') {
+                    try { await fetch('/api/media/copy/' + encodeURIComponent(clipData.sourceGroupId) + '/global-qa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: qa.mediaFile }) }); } catch(e){}
+                }
+                if (!Array.isArray(globalQAArr)) globalQAArr = [];
+                globalQAArr.push(qa);
+                renderGlobalQAList();
+                loadGlobalQAMedia();
+                showToast(currentLang === 'en' ? 'Q&A pasted!' : 'تم لصق سؤال وجواب!');
             }
 
             function removeGlobalQA(index) {
@@ -3486,17 +3738,33 @@ module.exports = function renderDashboard(req, db, config) {
 
             function saveGlobalQA() {
                 const answerEl = document.getElementById('globalQAAnswerInput');
+                const legacyInput = document.getElementById('globalQAEventDateInput');
+                const langInput = document.getElementById('globalQALanguageInput');
                 const answer = String(answerEl ? answerEl.value : '').trim();
-                if (!globalQAQuestionsDraft.length || !answer) {
+                globalQALegacyEventDate = legacyInput ? legacyInput.value : globalQALegacyEventDate;
+                globalQALanguage = langInput ? (langInput.value === 'en' ? 'en' : 'ar') : 'ar';
+                globalQACurrentAnswer = answer;
+
+                if (!globalQAQuestionsDraft.length || (!answer && !globalQAPendingMediaFile)) {
                     showToast(currentLang === 'en' ? 'Please add question variants and answer first' : 'يرجى إضافة صيغ السؤال والإجابة أولاً');
                     return;
                 }
-                const entry = { questions: [...globalQAQuestionsDraft], answer };
+
+                const entry = {
+                    questions: [...globalQAQuestionsDraft],
+                    answer: answer,
+                    eventDates: JSON.parse(JSON.stringify(globalQAEventDatesDraft || [])),
+                    eventDate: globalQALegacyEventDate,
+                    qaLanguage: globalQALanguage
+                };
+                if (globalQAPendingMediaFile) entry.mediaFile = globalQAPendingMediaFile;
+
                 if (globalQAEditingIndex !== null && globalQAEditingIndex >= 0 && globalQAEditingIndex < globalQAArr.length) {
                     globalQAArr[globalQAEditingIndex] = entry;
                 } else {
                     globalQAArr.push(entry);
                 }
+
                 resetGlobalQAForm();
                 renderGlobalQAList();
             }
@@ -4007,7 +4275,9 @@ module.exports = function renderDashboard(req, db, config) {
             renderDefaultWords();
             renderAITriggerWords();
             renderGlobalQAQuestionsDraft();
+            renderGlobalQAEventDatesForm();
             renderGlobalQAList();
+            loadGlobalQAMedia();
             loadScheduleSettings();
             loadKnownGroups();
             enforceFirstLoginChange();
