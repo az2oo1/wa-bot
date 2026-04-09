@@ -966,7 +966,9 @@ app.post('/auth/first-login-change', requireAuthApi, (req, res) => {
 });
 
 app.get('/', requireAuthPage, requirePermission('dashboard:read'), (req, res) => {
-    const html = renderDashboard(req, db, config);
+    const lang = req.query.lang === 'en' || (req.headers.cookie && req.headers.cookie.includes('bot_lang=en')) ? 'en' : 'ar';
+    const runtimeStatus = getDashboardStatusSnapshot(lang);
+    const html = renderDashboard(req, db, config, runtimeStatus);
     res.send(html);
 });
 

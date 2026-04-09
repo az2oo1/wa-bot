@@ -4297,19 +4297,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 if (logoutBtn) logoutBtn.style.display = kind === 'connected' ? 'block' : 'none';
             }
 
-            renderBlacklist();
-            renderWhitelist();
-            renderDefaultWords();
-            renderAITriggerWords();
-            renderGlobalQAQuestionsDraft();
-            renderGlobalQAEventDatesForm();
-            renderGlobalQAList();
-            loadGlobalQAMedia();
-            loadScheduleSettings();
-            loadKnownGroups();
-            enforceFirstLoginChange();
-
-            setInterval(async () => {
+            async function pollDashboardStatus() {
                 try {
                     let res = await fetch('/api/status?lang=' + currentLang, { cache: 'no-store' });
                     if (res.status === 401) {
@@ -4331,7 +4319,23 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         if(qrPlaceholder) qrPlaceholder.style.display = 'block';
                     }
                 } catch(e) {}
-            }, 2000);
+            }
+
+            // Start status polling first so UI state keeps updating even if a later init call fails.
+            pollDashboardStatus();
+            setInterval(pollDashboardStatus, 2000);
+
+            renderBlacklist();
+            renderWhitelist();
+            renderDefaultWords();
+            renderAITriggerWords();
+            renderGlobalQAQuestionsDraft();
+            renderGlobalQAEventDatesForm();
+            renderGlobalQAList();
+            loadGlobalQAMedia();
+            loadScheduleSettings();
+            loadKnownGroups();
+            enforceFirstLoginChange();
 
             async function exportData() {
                 const selected = {
