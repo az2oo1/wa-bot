@@ -920,7 +920,7 @@ module.exports = function renderDashboard(req, db, config) {
                                 </label>
                             </div>
                         </div>
-                        <button class="btn btn-primary btn-full" onclick="exportData()">
+                        <button type="button" class="btn btn-primary btn-full" onclick="exportData()">
                             <i class="fas fa-download"></i> ${t('تصدير الآن', 'Export Now')}
                         </button>
                     </div>
@@ -989,7 +989,7 @@ module.exports = function renderDashboard(req, db, config) {
                                 ${t('استيراد ملفات الوسائط (إن وجدت)', 'Import Media Files (if any)')}
                             </label>
                         </div>
-                        <button class="btn btn-primary btn-full" onclick="importData()" style="margin-top:14px;">
+                        <button type="button" class="btn btn-primary btn-full" onclick="importData()" style="margin-top:14px;">
                             <i class="fas fa-upload"></i> ${t('استيراد الآن', 'Import Now')}
                         </button>
                     </div>
