@@ -1,4545 +1,3657 @@
-module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
-    let lang = 'ar';
-    if (req.headers.cookie && req.headers.cookie.includes('bot_lang=en')) lang = 'en';
-    const currentLang = lang;
-    const t = (ar, en) => lang === 'en' ? en : ar;
-    const dir = lang === 'en' ? 'ltr' : 'rtl';
-    const escapeHtml = (value) => String(value == null ? '' : value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-    const getStatusIconClass = (kind) => {
-        if (kind === 'connected') return 'fas fa-check-circle';
-        if (kind === 'waiting_qr') return 'fas fa-qrcode';
-        if (kind === 'syncing' || kind === 'initializing' || kind === 'retrying' || kind === 'terminating') return 'fas fa-spinner fa-spin';
-        if (kind === 'error') return 'fas fa-exclamation-triangle';
-        if (kind === 'disconnected') return 'fas fa-sign-out-alt';
-        return 'fas fa-info-circle';
-    };
-    const getStatusDotClass = (kind) => {
-        if (kind === 'connected') return 'status-dot online';
-        if (kind === 'waiting_qr') return 'status-dot waiting';
-        return 'status-dot';
-    };
-    const initialStatusKind = runtimeStatus.statusKind || 'initializing';
-    const initialStatusText = escapeHtml(
-        runtimeStatus.statusText || (lang === 'en' ? 'Initializing system...' : 'جاري تهيئة النظام وبدء التشغيل...')
-    );
-    const initialStatusIconClass = getStatusIconClass(initialStatusKind);
-    const initialStatusDotClass = getStatusDotClass(initialStatusKind);
-    const initialLogoutDisplay = initialStatusKind === 'connected' ? 'block' : 'none';
-    const mediaTypesMeta = [
-        { id: 'text', icon: '<i class="fas fa-file-alt"></i>', name: t('نصوص', 'Text') },
-        { id: 'image', icon: '<i class="fas fa-image"></i>', name: t('صور', 'Images') },
-        { id: 'video', icon: '<i class="fas fa-video"></i>', name: t('فيديو', 'Videos') },
-        { id: 'audio', icon: '<i class="fas fa-music"></i>', name: t('صوتيات', 'Audio') },
-        { id: 'document', icon: '<i class="fas fa-file"></i>', name: t('ملفات', 'Documents') },
-        { id: 'sticker', icon: '<i class="fas fa-smile"></i>', name: t('ملصقات', 'Stickers') }
-    ];
-    const blacklistArr = db.prepare('SELECT number FROM blacklist').all().map(r => r.number);
-    const blockedExtensionsArr = db.prepare('SELECT ext FROM blocked_extensions').all().map(r => r.ext);
-    const whitelistArr = db.prepare('SELECT number FROM whitelist').all().map(r => r.number);
-
-    return `<!DOCTYPE html><html dir="${dir}" lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${t('لوحة تحكم المشرف الآلي', 'Auto Mod Dashboard')}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><style>*{box-sizing:border-box;margin:0;padding:0}:root{--bg:#080c10;--sidebar-bg:#0e1318;--card-bg:#131920;--card-border:#1e2830;--input-bg:#0a0f14;--input-border:#1e2830;--text:#dce8f5;--text-muted:#6b8099;--accent:#00c853;--accent-dim:rgba(0,200,83,0.1);--accent-hover:#00a846;--red:#ff5252;--red-dim:rgba(255,82,82,0.1);--orange:#ffab40;--orange-dim:rgba(255,171,64,0.1);--blue:#40c4ff;--blue-dim:rgba(64,196,255,0.1);--purple:#d18cff;--purple-dim:rgba(209,140,255,0.1);--modal-bg:rgba(0,0,0,0.8);--topbar-bg:rgba(8,12,16,0.92);--radius:12px;--font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:16px}html[lang="ar"]{--font:'IBM Plex Sans Arabic',sans-serif}html.light{--bg:#f0f4f8;--sidebar-bg:#fff;--card-bg:#fff;--card-border:#dde3eb;--input-bg:#f5f8fb;--input-border:#dde3eb;--text:#0f1923;--text-muted:#5a7289;--accent:#00a846;--accent-dim:rgba(0,168,70,0.1);--accent-hover:#008c3a;--red:#e53935;--red-dim:rgba(229,57,53,0.1);--orange:#f57c00;--orange-dim:rgba(245,124,0,0.1);--blue:#0288d1;--blue-dim:rgba(2,136,209,0.1);--purple:#7b1fa2;--purple-dim:rgba(123,31,162,0.1);--modal-bg:rgba(0,0,0,0.55);--topbar-bg:rgba(240,244,248,0.94)}html.light .nav-item:hover{background:rgba(0,0,0,0.05);color:var(--text)}html.light .toggle-row{background:rgba(0,0,0,0.03)}html.light .toggle-row.danger{background:rgba(229,57,53,0.06)}html.light .toggle-row.warning{background:rgba(245,124,0,0.06)}html.light .toggle-row.blue{background:rgba(2,136,209,0.06)}html.light .toggle-row.purple{background:rgba(123,31,162,0.06)}html.light .toggle-row.pink{background:rgba(194,24,91,0.06)}html.light .toggle-row.green{background:rgba(0,150,80,0.06)}html.light .slider{background:#d0dae4;border-color:#b8c8d8}html.light .slider:before{background:#8fa8bf}html.light input:checked+.slider{background:rgba(0,168,70,0.18);border-color:var(--accent)}html.light input:checked+.slider:before{background:var(--accent)}html.light .sub-panel{background:rgba(0,0,0,0.03)}html.light #terminalOutput{background:#1a1a2e}html.light .card.danger,html.light .card.info,html.light .card.purple,html.light .card.success,html.light .card.warning{background:linear-gradient(180deg,var(--accent-dim) 0,var(--card-bg) 60%)}html.light .card.danger{background:linear-gradient(180deg,rgba(229,57,53,0.04) 0,var(--card-bg) 60%)}html.light .card.warning{background:linear-gradient(180deg,rgba(245,124,0,0.04) 0,var(--card-bg) 60%)}html.light .card.info{background:linear-gradient(180deg,rgba(2,136,209,0.04) 0,var(--card-bg) 60%)}html.light .card.success{background:linear-gradient(180deg,rgba(0,168,70,0.04) 0,var(--card-bg) 60%)}html.light .card.purple{background:linear-gradient(180deg,rgba(123,31,162,0.04) 0,var(--card-bg) 60%)}html.light .btn-primary{box-shadow:none}html.light .qr-wrap{background:#e8edf3}html.light ::-webkit-scrollbar-track{background:var(--bg)}html.light ::-webkit-scrollbar-thumb{background:#c5d0db}html.light .group-list-card:hover{border-color:rgba(2,136,209,0.4)}.icon-btn{width:38px;height:38px;border-radius:10px;border:1.5px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:17px;transition:all .2s;flex-shrink:0}.icon-btn:hover{filter:brightness(1.14)}body,.card,.cb-label,.chip,.chip-container,.group-card,.group-list-card,.limit-item,.main,.modal-content,.nav-item,.qr-wrap,.sidebar,.sidebar-footer button,.status-pill,.sub-panel,.toggle-row,.topbar,input,select,textarea{transition:background .25s ease,border-color .25s ease,color .15s ease,box-shadow .25s ease}html{font-size:16px}body{font-family:var(--font);font-size:1rem;background:var(--bg);color:var(--text);min-height:100vh;display:flex;line-height:1.6}.sidebar{width:260px;height:100vh;background:var(--sidebar-bg);border-inline-end:1px solid var(--card-border);display:flex;flex-direction:column;position:fixed;inset-inline-start:0;top:0;z-index:100;transition:transform .3s}.sidebar-logo{padding:28px 22px 20px;border-bottom:1px solid var(--card-border);display:flex;align-items:center;gap:14px}.sidebar-nav-scroll{flex:1;overflow-y:auto;overflow-x:hidden;display:flex;flex-direction:column;min-height:0}.sidebar-nav-scroll{scrollbar-width:thin;scrollbar-color:var(--card-border) transparent}.sidebar-nav-scroll::-webkit-scrollbar{width:5px}.sidebar-nav-scroll::-webkit-scrollbar-track{background:transparent}.sidebar-nav-scroll::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:4px}.sidebar-nav-scroll::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}.logo-icon{width:60px;height:60px;border-radius:14px;background:transparent;display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;box-shadow:none;color:#fff}.logo-text{font-size:15px;font-weight:700;color:var(--text);line-height:1.3}.logo-text small{display:block;font-weight:400;color:var(--text-muted);font-size:12px;margin-top:2px}.nav-section{padding:18px 16px 8px;font-size:10px;font-weight:700;color:var(--text-muted);letter-spacing:1.5px;text-transform:uppercase}.nav-item{display:flex;align-items:center;gap:12px;padding:12px 18px;margin:2px 10px;border-radius:10px;cursor:pointer;color:var(--text-muted);font-size:15px;transition:all .2s;border:none;background:0 0;width:calc(100% - 20px);text-align:start;font-family:var(--font)}.nav-item:hover{background:rgba(255,255,255,0.06);color:var(--text)}.nav-item.active{background:var(--accent-dim);color:var(--accent);font-weight:600;border:1px solid rgba(0,230,118,0.2)}.nav-item .nav-icon{font-size:18px;width:24px;text-align:center;flex-shrink:0}.nav-item .nav-badge{margin-inline-start:auto;background:var(--red);color:#fff;font-size:11px;font-weight:700;padding:2px 8px;border-radius:20px;min-width:22px;text-align:center}.sidebar-footer{flex-shrink:0;padding:18px;border-top:1px solid var(--card-border);display:flex;gap:10px}.sidebar-footer button{flex:1;padding:11px 8px;border-radius:10px;border:1px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);cursor:pointer;font-size:14px;transition:all .2s;font-family:var(--font);font-weight:600}.sidebar-footer button:hover{border-color:var(--input-border);color:var(--text);background:var(--card-bg)}.sidebar-footer button[data-variant=danger]{border-color:rgba(229,57,53,0.45);color:var(--red);background:var(--red-dim)}.sidebar-footer button[data-variant=danger]:hover{filter:brightness(1.14)}.sidebar-footer button[data-variant=primary]{border-color:rgba(0,230,118,0.35);color:var(--accent);background:var(--accent-dim)}.sidebar-footer button[data-variant=primary]:hover{filter:brightness(1.14)}.main{margin-inline-start:260px;flex:1;display:flex;flex-direction:column;min-height:100vh;min-width:0}.topbar{position:sticky;top:0;z-index:50;background:var(--topbar-bg);backdrop-filter:blur(16px);border-bottom:1px solid var(--card-border);padding:0 40px;height:66px;display:flex;align-items:center;justify-content:space-between}.topbar-title{font-size:18px;font-weight:700;color:var(--text)}.topbar-right{display:flex;align-items:center;gap:14px}.status-pill{display:flex;align-items:center;gap:10px;background:var(--card-bg);border:1px solid var(--card-border);padding:8px 18px;border-radius:24px;font-size:14px;color:var(--text-muted)}.status-dot{width:9px;height:9px;border-radius:50%;background:var(--text-muted);flex-shrink:0}.status-dot.online{background:var(--accent);box-shadow:0 0 10px var(--accent);animation:pulse 2s infinite}.status-dot.waiting{background:var(--orange);box-shadow:0 0 8px var(--orange)}@keyframes pulse{0%,100%{opacity:1;box-shadow:0 0 10px var(--accent)}50%{opacity:.6;box-shadow:0 0 4px var(--accent)}}.page{display:none;padding:32px 40px;width:100%}.page.active{display:block}.page-header{margin-bottom:28px}.page-header h2{font-size:26px;font-weight:700;color:var(--text);letter-spacing:-.3px;display:flex;align-items:center;gap:10px}.page-header p{color:var(--text-muted);font-size:15px;margin-top:5px}.card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:var(--radius);padding:24px;margin-bottom:20px}.card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--card-border)}.card-header h3{font-size:17px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.card.danger{border-color:rgba(255,82,82,0.35);background:linear-gradient(180deg,rgba(255,82,82,0.04) 0,var(--card-bg) 60%)}.card.warning{border-color:rgba(255,171,64,0.35);background:linear-gradient(180deg,rgba(255,171,64,0.04) 0,var(--card-bg) 60%)}.card.info{border-color:rgba(64,196,255,0.35);background:linear-gradient(180deg,rgba(64,196,255,0.04) 0,var(--card-bg) 60%)}.card.purple{border-color:rgba(209,140,255,0.35);background:linear-gradient(180deg,rgba(209,140,255,0.04) 0,var(--card-bg) 60%)}.card.success{border-color:rgba(0,230,118,0.35);background:linear-gradient(180deg,rgba(0,230,118,0.04) 0,var(--card-bg) 60%)}label.field-label{display:block;font-size:12px;font-weight:700;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:.8px}input[type=number],input[type=text],input[type=password],select,textarea{width:100%;padding:12px 16px;background:var(--input-bg);border:1.5px solid var(--input-border);border-radius:10px;color:var(--text);font-size:15px;font-family:var(--font);transition:border-color .2s,box-shadow .2s;outline:0}input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(0,230,118,0.12)}textarea{resize:vertical}select option{background:var(--card-bg);color:var(--text)}.field-group{margin-bottom:20px}.field-row{display:flex;gap:14px}.field-row>*{flex:1}.input-with-btn{display:flex;gap:10px}.input-with-btn input{margin:0}.btn{padding:11px 22px;border-radius:10px;border:1.5px solid transparent;font-size:15px;font-weight:700;cursor:pointer;font-family:var(--font);transition:all .2s;display:inline-flex;align-items:center;gap:8px;white-space:nowrap;letter-spacing:.2px}.btn:hover,.sidebar-footer button:hover,.icon-btn:hover{filter:brightness(1.14)}.btn-primary{background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700}.btn-primary:hover{filter:brightness(1.14)}.btn-danger{background:var(--red-dim);color:var(--red);border-color:rgba(229,57,53,0.45)}.btn-danger:hover{filter:brightness(1.14)}.btn-warning{background:var(--orange);color:#000;border-color:transparent}.btn-warning:hover{filter:brightness(1.14)}.btn-ghost{background:0 0;border:1.5px solid var(--card-border);color:var(--text-muted)}.btn-ghost:hover{filter:brightness(1.14)}.btn-blue{background:var(--blue);color:#000;border-color:transparent}.btn-blue:hover{filter:brightness(1.14)}.btn-sm{padding:7px 14px;font-size:13px}.btn-full{width:100%;justify-content:center;padding:15px;font-size:16px}.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-radius:10px;background:rgba(255,255,255,0.03);border:1.5px solid var(--card-border);margin-bottom:12px;gap:14px}.toggle-row.danger{border-color:rgba(255,82,82,0.3);background:rgba(255,82,82,0.05)}.toggle-row.warning{border-color:rgba(255,171,64,0.3);background:rgba(255,171,64,0.05)}.toggle-row.blue{border-color:rgba(64,196,255,0.3);background:rgba(64,196,255,0.05)}.toggle-row.purple{border-color:rgba(209,140,255,0.3);background:rgba(209,140,255,0.05)}.toggle-row.pink{border-color:rgba(240,100,170,0.3);background:rgba(240,100,170,0.05)}.toggle-row.green{border-color:rgba(100,200,120,0.3);background:rgba(100,200,120,0.05)}.toggle-left{display:flex;align-items:center;gap:16px}.toggle-label{font-size:15px;font-weight:600;color:var(--text)}.toggle-label small{display:block;font-size:12px;color:var(--text-muted);font-weight:400;margin-top:2px}.toggle-label.danger{color:var(--red)}.toggle-label.warning{color:var(--orange)}.toggle-label.blue{color:var(--blue)}.toggle-label.purple{color:var(--purple)}.toggle-label.pink{color:#ff80ab}.toggle-label.green{color:#69f0ae}.switch{position:relative;display:inline-block;width:50px;height:28px;flex-shrink:0}.switch input{opacity:0;width:0;height:0}.slider{position:absolute;cursor:pointer;inset:0;background:#1e2830;border:1.5px solid #2a3a4a;transition:.3s;border-radius:28px}.slider:before{position:absolute;content:"";height:20px;width:20px;bottom:2px;inset-inline-start:2px;background:#4a5a6a;transition:.3s;border-radius:50%}input:checked+.slider{background:rgba(0,230,118,0.2);border-color:var(--accent)}input:checked+.slider:before{background:var(--accent);box-shadow:0 0 8px rgba(0,230,118,0.6)}[dir=ltr] input:checked+.slider:before{transform:translateX(22px)}[dir=rtl] input:checked+.slider:before{transform:translateX(-22px)}.lang-slider:before{height:14px;width:14px;bottom:1.5px;inset-inline-start:1.5px}[dir=ltr] input:checked+.lang-slider:before{transform:translateX(20px)}[dir=rtl] input:checked+.lang-slider:before{transform:translateX(-20px)}.chip-container{display:flex;flex-wrap:wrap;gap:10px;padding:14px;background:var(--input-bg);border-radius:10px;min-height:52px;max-height:220px;overflow-y:auto;border:1.5px dashed var(--card-border);margin-top:10px}.chip{background:var(--accent-dim);color:var(--accent);padding:6px 14px;border-radius:20px;font-size:14px;display:flex;align-items:center;gap:8px;border:1px solid rgba(0,230,118,0.3);font-weight:500}.chip.red-chip{background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3)}.chip-remove{cursor:pointer;font-size:16px;font-weight:700;opacity:.6;line-height:1}.chip-remove:hover{opacity:1}.sub-panel{background:rgba(0,0,0,0.2);border:1.5px solid var(--card-border);border-radius:10px;padding:18px;margin-top:12px}.sub-panel.orange{border-color:rgba(255,171,64,0.3)}.sub-panel.red{border-color:rgba(255,82,82,0.3)}.sub-panel h4{font-size:14px;font-weight:700;color:var(--text-muted);margin-bottom:14px;display:flex;align-items:center;gap:8px;text-transform:uppercase;letter-spacing:.5px}.cb-group{display:flex;gap:10px;flex-wrap:wrap}.cb-label{display:flex;align-items:center;gap:8px;padding:8px 14px;background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:8px;cursor:pointer;font-size:14px;color:var(--text-muted);transition:all .2s;user-select:none}.cb-label:hover{border-color:var(--accent);color:var(--text)}.cb-label input{accent-color:var(--accent);width:16px;height:16px;cursor:pointer}.limit-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}.limit-item{display:flex;align-items:center;gap:10px;background:var(--card-bg);padding:10px 14px;border-radius:9px;border:1.5px solid var(--card-border)}.limit-item input[type=checkbox]{accent-color:var(--accent);width:16px;height:16px;cursor:pointer;flex-shrink:0}.limit-item span{font-size:14px;flex:1;color:var(--text)}.limit-item input[type=number]{width:60px;padding:6px 8px;font-size:14px;margin:0;text-align:center}.group-list-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:14px;display:flex;align-items:center;gap:18px;padding:18px 22px;cursor:pointer;transition:border-color .2s,transform .2s}.group-list-card:hover{border-color:rgba(64,196,255,0.35);filter:brightness(1.08)}.group-list-card:hover .glc-arrow{opacity:1}.glc-avatar{width:52px;height:52px;border-radius:13px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:18px;font-weight:700;color:var(--accent)}.glc-avatar img{width:100%;height:100%;object-fit:cover;border-radius:11px}.glc-info{flex:1;min-width:0}.glc-name{font-size:16px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.glc-id{font-family:monospace;font-size:11px;color:var(--text-muted);background:var(--input-bg);padding:2px 8px;border-radius:5px;border:1px solid var(--card-border);margin-top:4px;display:inline-block}.glc-chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.glc-chip{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600}.glc-chip.green{background:var(--accent-dim);color:var(--accent);border:1px solid rgba(0,200,83,0.25)}.glc-chip.orange{background:var(--orange-dim);color:var(--orange);border:1px solid rgba(255,171,64,0.25)}.glc-chip.blue{background:var(--blue-dim);color:var(--blue);border:1px solid rgba(64,196,255,0.25)}.glc-chip.red{background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.25)}.glc-chip.purple{background:var(--purple-dim);color:var(--purple);border:1px solid rgba(209,140,255,0.25)}.glc-arrow{font-size:16px;color:var(--blue);opacity:0;transition:opacity .2s;flex-shrink:0;margin-inline-start:4px}.group-detail-bar{display:flex;align-items:center;gap:16px;margin-bottom:28px;flex-wrap:wrap}.group-detail-identity{display:flex;align-items:center;gap:14px;background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:12px 20px;flex:1}.group-detail-avatar{width:46px;height:46px;border-radius:12px;flex-shrink:0;background:var(--accent-dim);border:1.5px solid var(--card-border);display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:17px;font-weight:700;color:var(--accent)}.group-detail-avatar img{width:100%;height:100%;object-fit:cover;border-radius:10px}.group-card{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:14px;margin-bottom:16px;overflow:hidden;transition:border-color .2s}.group-card-header{display:flex;justify-content:space-between;align-items:center;padding:16px 20px;background:rgba(255,255,255,0.02);border-bottom:1px solid var(--card-border)}.group-card-title{font-size:16px;font-weight:700;color:var(--text);display:flex;align-items:center;gap:10px}.group-card-body{padding:20px}.group-id-badge{font-family:monospace;font-size:12px;color:var(--text-muted);background:var(--input-bg);padding:3px 10px;border-radius:6px;border:1px solid var(--card-border)}.qr-wrap{display:flex;flex-direction:column;align-items:center;gap:20px;padding:36px;background:var(--input-bg);border-radius:12px;border:1.5px dashed var(--card-border)}#qr-image{max-width:230px;border-radius:12px;border:10px solid #fff;box-shadow:0 8px 30px rgba(0,0,0,0.5);display:none}.toast{position:fixed;bottom:32px;left:50%;transform:translateX(-50%) translateY(24px);background:var(--accent);color:#000;padding:13px 28px;border-radius:40px;font-weight:700;font-size:15px;z-index:9999;opacity:0;transition:all .35s;pointer-events:none;box-shadow:0 4px 20px rgba(0,230,118,0.5)}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}.modal{display:none;position:fixed;z-index:1000;inset:0;background:var(--modal-bg);backdrop-filter:blur(8px);align-items:center;justify-content:center}.modal.open{display:flex}.modal-content{background:var(--card-bg);border:1.5px solid var(--card-border);border-radius:16px;padding:32px;width:90%;max-width:640px;box-shadow:0 24px 80px rgba(0,0,0,0.7);animation:slideIn .25s ease;max-height:90vh;overflow-y:auto}.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}.modal-header h3{font-size:20px;font-weight:700}.close-modal{background:0 0;border:none;color:var(--text-muted);font-size:26px;cursor:pointer;padding:4px;line-height:1}.close-modal:hover{color:var(--red)}@keyframes slideIn{from{transform:translateY(-24px);opacity:0}to{transform:translateY(0);opacity:1}}#terminalOutput{background:#000;color:#00ff88;font-family:'Courier New',monospace;height:400px;overflow-y:auto;padding:16px;border-radius:10px;font-size:13px;direction:ltr;text-align:start;border:1px solid #0a1a0a}#terminalOutput div{margin-bottom:5px;border-bottom:1px solid #0a1a0a;padding-bottom:5px;word-wrap:break-word;line-height:1.6}.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}.card-grid .card{margin-bottom:0}.card-grid-full{grid-column:1/-1}@media (max-width:1100px){.card-grid{grid-template-columns:1fr}}.section-sep{height:1px;background:var(--card-border);margin:20px 0}::-webkit-scrollbar{width:7px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:var(--card-border);border-radius:4px}.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:99}.hamburger{display:none;background:0 0;border:none;color:var(--text);font-size:24px;cursor:pointer;padding:4px}.group-tabs{display:flex;gap:4px;border-bottom:1.5px solid var(--card-border);margin-bottom:20px}.group-tab{padding:10px 18px;border:none;background:0 0;color:var(--text-muted);font-size:14px;font-weight:600;font-family:var(--font);cursor:pointer;border-bottom:2.5px solid transparent;margin-bottom:-1.5px;transition:all .2s;display:flex;align-items:center;gap:7px;border-radius:8px 8px 0 0}.group-tab:hover{color:var(--text);background:rgba(255,255,255,0.04)}.group-tab.active{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-dim)}.group-tab-panel{display:none}.group-tab-panel.active{display:block}.step-badge{display:inline-block;background:var(--blue-dim);color:var(--blue);padding:2px 9px;border-radius:12px;margin-inline-end:6px;font-weight:700;font-size:13px}@media (max-width:768px){.sidebar{transform:translateX(100%)}[dir=ltr] .sidebar{transform:translateX(-100%)}.sidebar.open{transform:translateX(0)}.sidebar-overlay.open{display:block}.main{margin-inline-start:0}.hamburger{display:block}.page{padding:18px}.topbar{padding:0 18px}.limit-grid{grid-template-columns:1fr}.card-grid{grid-template-columns:1fr}.field-row{flex-direction:column}}</style>
-    </head>
-    <body>
-        <style>
-            #page-users .btn {
-                border-radius: 10px !important;
-                border: 1.5px solid var(--card-border) !important;
-                background: var(--input-bg) !important;
-                font-weight: 700 !important;
-                transition: all .2s !important;
-                display: inline-flex;
-                align-items: center;
-                justify-content: center;
-            }
-
-            #page-users .btn:hover {
-                filter: brightness(1.14);
-                box-shadow: none !important;
-            }
-
-            #page-users .btn-primary {
-                background: var(--accent-dim) !important;
-                border-color: rgba(0,230,118,0.4) !important;
-                color: var(--accent) !important;
-            }
-
-            #page-users .btn-danger {
-                background: var(--red-dim) !important;
-                border-color: rgba(248,81,73,0.4) !important;
-                color: var(--red) !important;
-            }
-
-            #page-users .btn-warning {
-                background: var(--orange-dim) !important;
-                border-color: rgba(255,171,64,0.45) !important;
-                color: var(--orange) !important;
-            }
-
-            #page-users .btn-blue {
-                background: var(--blue-dim) !important;
-                border-color: rgba(64,196,255,0.45) !important;
-                color: var(--blue) !important;
-            }
-
-            #page-users .btn-ghost {
-                background: var(--input-bg) !important;
-                border-color: var(--card-border) !important;
-                color: var(--text-muted) !important;
-            }
-
-            .um-actions-row {
-                display: flex;
-                flex-wrap: wrap;
-                gap: 8px;
-            }
-
-            .um-actions-row .btn {
-                flex: 1 1 170px;
-            }
-
-            .um-layout {
-                display: grid;
-                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-                gap: 18px;
-                margin-bottom: 20px;
-            }
-
-            .um-stack {
-                display: flex;
-                flex-direction: column;
-                gap: 20px;
-            }
-
-            .um-stats {
-                display: grid;
-                grid-template-columns: repeat(3, minmax(0, 1fr));
-                gap: 10px;
-                margin-bottom: 12px;
-            }
-
-            .um-stat {
-                border: 1px solid var(--card-border);
-                border-radius: 10px;
-                background: var(--input-bg);
-                padding: 10px 12px;
-            }
-
-            .um-stat-label {
-                color: var(--text-muted);
-                font-size: 11px;
-                text-transform: uppercase;
-                letter-spacing: .6px;
-            }
-
-            .um-stat-value {
-                color: var(--text);
-                font-size: 20px;
-                font-weight: 700;
-                margin-top: 2px;
-                line-height: 1.2;
-            }
-
-            .um-card-note {
-                font-size: 13px;
-                color: var(--text-muted);
-                margin-top: -6px;
-                margin-bottom: 12px;
-            }
-
-            .um-scroll-box {
-                max-height: 330px;
-                overflow: auto;
-                padding-right: 4px;
-            }
-
-            .um-selected-user {
-                border: 1px solid rgba(64,196,255,0.28);
-                background: rgba(64,196,255,0.06);
-            }
-
-            .um-access-grid {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 14px;
-            }
-
-            .um-perm-drawer {
-                overflow: hidden;
-                max-height: 0;
-                opacity: 0;
-                transition: max-height .35s ease, opacity .25s ease, margin-top .25s ease;
-                margin-top: 0;
-            }
-
-            .um-perm-drawer.open {
-                max-height: 420px;
-                opacity: 1;
-                margin-top: 12px;
-            }
-
-            .um-perm-help {
-                margin-top: 12px;
-                border: 1px solid rgba(64,196,255,0.28);
-                background: rgba(64,196,255,0.06);
-                border-radius: 10px;
-                padding: 12px;
-                max-height: 280px;
-                overflow: auto;
-            }
-
-            .um-perm-help-item {
-                padding: 7px 0;
-                border-bottom: 1px dashed rgba(255,255,255,0.08);
-            }
-
-            .um-perm-help-item:last-child {
-                border-bottom: 0;
-                padding-bottom: 0;
-            }
-
-            .um-perm-help-key {
-                font-family: monospace;
-                font-size: 12px;
-                color: var(--blue);
-                margin-bottom: 4px;
-            }
-
-            .um-perm-help-desc {
-                color: var(--text-muted);
-                font-size: 12px;
-                line-height: 1.5;
-            }
-
-            #page-groups #groupsContainer {
-                display: grid;
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 12px;
-            }
-
-            #page-groups .group-list-card {
-                margin-bottom: 0;
-                padding: 14px 16px;
-                gap: 14px;
-                border-radius: 12px;
-            }
-
-            #page-groups .glc-avatar {
-                width: 46px;
-                height: 46px;
-                border-radius: 11px;
-                font-size: 16px;
-            }
-
-            #page-groups .glc-id {
-                font-size: 12px;
-                padding: 3px 8px;
-            }
-
-            #page-groups .glc-chips {
-                margin-top: 8px;
-            }
-
-            #page-groups .glc-side {
-                display: flex;
-                align-items: center;
-                gap: 10px;
-                flex-shrink: 0;
-            }
-
-            #page-groups .glc-stats {
-                text-align: end;
-                min-width: 68px;
-            }
-
-            #page-groups .glc-stats strong {
-                display: block;
-                color: var(--text);
-                font-size: 16px;
-                line-height: 1.1;
-            }
-
-            #page-groups .glc-stats span {
-                font-size: 11px;
-                color: var(--text-muted);
-                text-transform: uppercase;
-                letter-spacing: .5px;
-            }
-
-            #page-groups .glc-arrow {
-                opacity: .58;
-                margin-inline-start: 0;
-                font-size: 14px;
-            }
-
-            #page-groups .group-list-card:hover .glc-arrow {
-                opacity: 1;
-            }
-
-            @media (max-width: 1100px) {
-                .um-layout,
-                .um-access-grid,
-                .um-stats {
-                    grid-template-columns: 1fr;
-                }
-
-                .um-actions-row .btn {
-                    flex: 1 1 auto;
-                }
-            }
-
-            @media (max-width: 900px) {
-                #page-groups #groupsContainer {
-                    grid-template-columns: 1fr;
-                }
-
-                #page-groups .glc-stats {
-                    display: none;
-                }
-            }
-        </style>
-        <nav class="sidebar" id="sidebar">
-            <div class="sidebar-logo">
-                <div class="logo-icon"><img src="/public/logo.png?v=2" alt="${t('شعار البوت', 'Bot Logo')}" style="width:100%;height:100%;object-fit:cover;border-radius:14px;display:block;" onerror="if(!this.dataset.retry){this.dataset.retry='1';this.src='public/logo.png?v=2';return;}this.style.display='none';this.nextElementSibling.style.display='flex';"><i class="fas fa-robot" style="display:none;align-items:center;justify-content:center;width:100%;height:100%;font-size:22px;color:#fff;"></i></div>
-                <div class="logo-text">${t('المشرف الآلي', 'Auto Mod')} <small>${t('لوحة التحكم V.6.6', 'Dashboard V6.6')}</small></div>
-            </div>
-
-            <div class="sidebar-nav-scroll">
-                <div class="nav-section">${t('الرئيسية', 'Main')}</div>
-                <button class="nav-item active" onclick="showPage('page-status', this)">
-                    <span class="nav-icon"><i class="fas fa-satellite-dish"></i></span> ${t('حالة الاتصال', 'Connection Status')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-blacklist', this)">
-                    <span class="nav-icon"><i class="fas fa-users-slash"></i></span> ${t('إدارة الأرقام', 'Manage Numbers')}
-                    <span class="nav-badge" id="blacklist-count">0</span>
-                </button>
-
-                <div class="nav-section">${t('الإعدادات', 'Settings')}</div>
-                <button class="nav-item" onclick="showPage('page-general', this)">
-                    <span class="nav-icon"><i class="fas fa-cog"></i></span> ${t('الإعدادات العامة', 'General Settings')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-spam', this)">
-                    <span class="nav-icon"><i class="fas fa-shield-alt"></i></span> ${t('مكافحة الإزعاج', 'Anti-Spam')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-media', this)">
-                    <span class="nav-icon"><i class="fas fa-filter"></i></span> ${t('فلتر الوسائط', 'Media Filter')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-ai', this)">
-                    <span class="nav-icon"><i class="fas fa-brain"></i></span> ${t('الذكاء الاصطناعي', 'AI Moderator')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-global-qa', this)">
-                    <span class="nav-icon"><i class="fas fa-comments"></i></span> ${t('الأسئلة العامة', 'Global Q&A')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-groups', this)">
-                    <span class="nav-icon"><i class="fas fa-users-cog"></i></span> ${t('المجموعات المخصصة', 'Custom Groups')}
-                </button>
-
-                <div class="nav-section">${t('أدوات', 'Tools')}</div>
-                <button class="nav-item" onclick="openDebuggerModal()">
-                    <span class="nav-icon"><i class="fas fa-bug"></i></span> ${t('سجل الأحداث', 'Event Logs')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-import-export', this)">
-                    <span class="nav-icon"><i class="fas fa-exchange-alt"></i></span> ${t('استيراد/تصدير', 'Import/Export')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-users', this)">
-                    <span class="nav-icon"><i class="fas fa-user-shield"></i></span> ${t('إدارة المستخدمين', 'User Management')}
-                </button>
-                <button class="nav-item" onclick="showPage('page-about', this)">
-                    <span class="nav-icon"><i class="fas fa-info-circle"></i></span> ${t('حول', 'About')}
-                </button>
-            </div>
-
-            <div class="sidebar-footer">
-                <button id="signOutBtn" data-variant="danger" onclick="signOutSession()"><i class="fas fa-right-from-bracket"></i> ${t('تسجيل الخروج', 'Sign Out')}</button>
-                <button data-variant="primary" onclick="saveConfig()"><i class="fas fa-save"></i> ${t('حفظ', 'Save')}</button>
-            </div>
-        </nav>
-
-        <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeSidebar()"></div>
-
-        <div class="main">
-            <div class="topbar">
-                <div style="display:flex;align-items:center;gap:12px;">
-                    <button class="hamburger" onclick="toggleSidebar()"><i class="fas fa-bars"></i></button>
-                    <span class="topbar-title" id="topbarTitle">${t('حالة الاتصال', 'Connection Status')}</span>
-                </div>
-                <div class="topbar-right">
-                    
-                    <div style="display: flex; align-items: center; gap: 6px; background: var(--input-bg); padding: 4px 10px; border-radius: 20px; border: 1.5px solid var(--card-border);">
-                        <span style="font-size: 11px; font-weight: 700; color: ${lang === 'ar' ? 'var(--accent)' : 'var(--text-muted)'}; transition: color 0.3s;">AR</span>
-                        <label class="switch" style="width: 36px; height: 20px;">
-                            <input type="checkbox" id="langToggle" onchange="switchLanguage(this)" ${lang === 'en' ? 'checked' : ''}>
-                            <span class="slider lang-slider" style="border-radius: 20px;"></span>
-                        </label>
-                        <span style="font-size: 11px; font-weight: 700; color: ${lang === 'en' ? 'var(--accent)' : 'var(--text-muted)'}; transition: color 0.3s;">EN</span>
-                    </div>
-
-                    <div class="status-pill">
-                        <div class="${initialStatusDotClass}" id="statusDot"></div>
-                        <span id="status-text"><i id="status-text-icon" class="${initialStatusIconClass}"></i> <span id="status-text-label">${initialStatusText}</span></span>
-                    </div>
-                </div>
-            </div>
-
-            <form id="configForm">
-
-            <div class="page active" id="page-status">
-                <div class="page-header">
-                    <h2><i class="fas fa-wifi"></i> ${t('حالة الاتصال بواتساب', 'WhatsApp Connection Status')}</h2>
-                    <p>${t('اربط حساب واتساب بمسح رمز QR أو راقب الاتصال الحالي', 'Link WhatsApp account by scanning the QR code or monitor connection')}</p>
-                </div>
-                <div class="card-grid">
-                    <div class="card" style="grid-column: 1;">
-                        <div class="card-header"><h3><i class="fas fa-qrcode"></i> ${t('رمز QR', 'QR Code')}</h3></div>
-                        <div class="qr-wrap">
-                            <img id="qr-image" src="" alt="QR Code" />
-                            <div id="qr-placeholder" style="text-align:center; color: var(--text-muted); padding: 20px 0;">
-                                <div style="font-size: 64px; margin-bottom: 16px;"><i class="fas fa-mobile-alt"></i></div>
-                                <div style="font-size: 18px; font-weight: 700; color: var(--text);">${t('في انتظار رمز QR...', 'Waiting for QR code...')}</div>
-                                <div style="font-size: 14px; margin-top: 8px;">${t('سيظهر الرمز هنا تلقائياً', 'Code will appear here automatically')}</div>
-                            </div>
-                        </div>
-                    </div>
-                    <div style="display:flex; flex-direction:column; gap:20px;">
-                        <div class="card success">
-                            <div class="card-header"><h3 style="color:var(--accent);"><i class="fas fa-chart-line"></i> ${t('حالة النظام', 'System Status')}</h3></div>
-                            <div style="font-size:16px; color:var(--text-muted); line-height:2.2;">
-                                <div><i class="fas fa-robot"></i> <strong style="color:var(--text);">${t('البوت:', 'Bot:')}</strong> <span id="status-text-detail" style="color:var(--accent);">...</span> <i id="status-text-detail-check" class="fas fa-check" style="color:var(--accent);display:none;"></i></div>
-                                <div><i class="fas fa-database"></i> <strong style="color:var(--text);">${t('قاعدة البيانات:', 'Database:')}</strong> <span style="color:var(--accent);">${t('متصلة', 'Connected')} <i class="fas fa-check"></i></span></div>
-                                <div><i class="fas fa-globe"></i> <strong style="color:var(--text);">${t('المنفذ:', 'Port:')}</strong> <span style="color:var(--accent);">3000 <i class="fas fa-check"></i></span></div>
-                            </div>
-                            <div style="margin-top:14px; padding-top:14px; border-top:1px dashed var(--card-border);">
-                                <button id="logoutBtn" type="button" class="btn btn-danger" onclick="logoutBot()" style="display:none;"><i class="fas fa-link-slash"></i> ${t('قطع اتصال واتساب', 'Disconnect WhatsApp')}</button>
-                                <div style="font-size:12px; color:var(--text-muted); margin-top:8px;">${t('هذا الخيار يفصل جلسة واتساب فقط وليس حساب لوحة التحكم', 'This disconnects only the WhatsApp session, not your dashboard account')}</div>
-                            </div>
-                        </div>
-                        <div class="card info">
-                            <div class="card-header"><h3 style="color:var(--blue);"><i class="fas fa-info-circle"></i> ${t('تعليمات الاستخدام', 'Instructions')}</h3></div>
-                            <div style="font-size:14px; color:var(--text-muted); line-height:2.2;">
-                                <div><span class="step-badge">1</span> ${t('امسح رمز QR بهاتفك من واتساب', 'Scan QR code with your phone')}</div>
-                                <div><span class="step-badge">2</span> ${t('أضف البوت كمشرف في المجموعات', 'Add bot as group admin')}</div>
-                                <div><span class="step-badge">3</span> ${t('افتح صفحة الإعدادات وخصّص القواعد', 'Customize rules in settings')}</div>
-                                <div><span class="step-badge">4</span> ${t('اضغط على حفظ لتطبيق التغييرات', 'Click Save to apply changes')}</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="page" id="page-blacklist">
-                <div class="page-header">
-                    <h2><i class="fas fa-shield-alt"></i> ${t('إدارة الأرقام (حظر وتوثيق)', 'Number Management (Ban & VIP)')}</h2>
-                    <p>${t('أضف الأرقام المحظورة (طرد فوري) أو الموثوقة (تخطي الفلاتر)', 'Add banned numbers (instant kick) or trusted VIPs (bypass filters)')}</p>
-                </div>
-                <style>
-                    #page-blacklist .page-header p { color: var(--text); opacity: .84; }
-                    #page-blacklist .field-label { color: var(--text); opacity: .78; }
-                    #page-blacklist .toggle-label small { color: var(--text); opacity: .72; }
-                    #page-blacklist .blacklist-grid { 
-                        align-items: start;
-                        grid-template-columns: 1fr 1fr;
-                    }
-                    #page-blacklist .blacklist-column {
-                        display: flex;
-                        flex-direction: column;
-                        gap: 20px;
-                        min-width: 0;
-                    }
-                    #page-blacklist .blacklist-column .card { margin-bottom: 0; }
-                    #page-blacklist .purge-card {
-                        border-color: rgba(255,171,64,0.55);
-                        box-shadow: 0 0 0 1px rgba(255,171,64,0.18) inset;
-                    }
-                    @media (max-width:1100px) {
-                        #page-blacklist .blacklist-grid { grid-template-columns: 1fr; }
-                    }
-                </style>
-                <div class="card-grid blacklist-grid">
-                    <div class="blacklist-column">
-                    <div class="card danger blacklist-main-card">
-                        <div class="card-header">
-                            <h3 style="color:var(--red);"><i class="fas fa-user-plus"></i> ${t('القائمة السوداء (حظر)', 'Blacklist (Banned)')}</h3>
-                            <span style="font-size: 13px; color: var(--text-muted); background:var(--red-dim); padding:4px 10px; border-radius:20px;">${t('طرد فوري', 'Instant Kick')}</span>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('رقم الهاتف (بدون +)', 'Phone Number (without +)')}</label>
-                            <div class="input-with-btn">
-                                <input type="text" id="newBlacklistNumber" placeholder="Ex: 966512345678" onkeypress="if(event.key==='Enter'){event.preventDefault();addBlacklistNumber();}">
-                                <button type="button" class="btn btn-danger" onclick="addBlacklistNumber()"><i class="fas fa-ban"></i> ${t('حظر', 'Ban')}</button>
-                            </div>
-                        </div>
-                        <label class="field-label">${t('الأرقام المحظورة حالياً', 'Currently Banned Numbers')}</label>
-                        <div id="blacklistContainer" class="chip-container"></div>
-                        
-                        <div class="toggle-row danger" style="margin-top:20px; margin-bottom:0;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="enableBlacklist" ${config.enableBlacklist ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label danger">
-                                    ${t('تفعيل نظام القائمة السوداء', 'Enable Blacklist System')}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card warning purge-card">
-                        <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-broom"></i> ${t('طرد رجعي شامل', 'Global Purge')}</h3></div>
-                        <p style="font-size:14px; color:var(--text-muted); margin-bottom: 18px; line-height:1.8;">${t('سيبحث البوت في جميع المجموعات التي هو فيها مشرف، ويطرد كل من في القائمة السوداء فوراً.', 'Bot will scan all managed groups and kick anyone in the blacklist immediately.')}</p>
-                        <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; justify-content:center; padding:15px; font-size:16px;" onclick="purgeBlacklisted()">
-                            <i class="fas fa-gavel"></i> ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
-                        </button>
-                    </div>
-
-                    <div class="card warning purge-card">
-                        <div class="card-header"><h3 style="color:var(--orange);"><i class="fas fa-clock"></i> ${t('جدولة الطرد الشامل', 'Auto-Purge Schedule')}</h3></div>
-                        <div class="field-row" style="align-items:end; margin-bottom:10px;">
-                            <div class="field-group" style="margin-bottom:0;">
-                                <label class="field-label">${t('الفاصل بالدقائق', 'Interval (minutes)')}</label>
-                                <input type="number" id="autoPurgeIntervalMinutes" min="1" step="1" value="60">
-                            </div>
-                            <button type="button" id="saveAutoPurgeScheduleBtn" class="btn btn-warning" onclick="saveAutoPurgeSchedule()" style="height:44px;">
-                                <i class="fas fa-save"></i> ${t('حفظ', 'Save')}
-                            </button>
-                        </div>
-                        <div class="toggle-row warning" style="margin-bottom:12px;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="autoPurgeScheduleEnabled"><span class="slider"></span></label>
-                                <div class="toggle-label warning">${t('تفعيل الجدولة التلقائية', 'Enable automatic schedule')}</div>
-                            </div>
-                        </div>
-                        <button type="button" id="runAutoPurgeScheduleBtn" class="btn btn-warning" style="width:100%; justify-content:center;" onclick="runAutoPurgeNow()">
-                            <i class="fas fa-play"></i> ${t('تشغيل الطرد الآن', 'Run Auto-Purge Now')}
-                        </button>
-                    </div>
-                    </div>
-
-                    <div class="blacklist-column">
-                    <div class="card danger blocked-ext-card">
-                        <div class="card-header">
-                            <h3 style="color:var(--red);"><i class="fas fa-globe"></i> ${t('رموز الدول المحظورة', 'Blocked Extensions')}</h3>
-                            <span style="font-size: 13px; color: var(--text-muted); background:var(--red-dim); padding:4px 10px; border-radius:20px;">${t('حظر دول كاملة', 'Ban Entire Countries')}</span>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('رمز الدولة (بدون +)', 'Country Code (without +)')}</label>
-                            <div class="input-with-btn">
-                                <input type="number" id="newBlockedExtension" placeholder="Ex: 1, 91" onkeypress="if(event.key==='Enter'){event.preventDefault();addBlockedExtension();}">
-                                <button type="button" class="btn btn-danger" onclick="addBlockedExtension()"><i class="fas fa-ban"></i> ${t('حظر', 'Ban')}</button>
-                            </div>
-                        </div>
-                        <label class="field-label">${t('رموز الدول المحظورة حالياً', 'Currently Blocked Extensions')}</label>
-                        <div id="blockedExtensionsContainer" class="chip-container"></div>
-                    </div>
-
-                    <div class="card success whitelist-card">
-                        <div class="card-header">
-                            <h3 style="color:var(--accent);"><i class="fas fa-star"></i> ${t('القائمة البيضاء (VIP)', 'Whitelist (VIP)')}</h3>
-                            <span style="font-size: 13px; color: var(--text-muted); background:var(--accent-dim); padding:4px 10px; border-radius:20px;">${t('تخطي جميع القيود', 'Bypasses all rules')}</span>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('رقم الهاتف (بدون +)', 'Phone Number (without +)')}</label>
-                            <div class="input-with-btn">
-                                <input type="text" id="newWhitelistNumber" placeholder="Ex: 966512345678" onkeypress="if(event.key==='Enter'){event.preventDefault();addWhitelistNumber();}">
-                                <button type="button" class="btn btn-primary" onclick="addWhitelistNumber()"><i class="fas fa-check"></i> ${t('إضافة', 'Add')}</button>
-                            </div>
-                        </div>
-                        <label class="field-label">${t('الأرقام الموثوقة حالياً', 'Currently Trusted Numbers')}</label>
-                        <div id="whitelistContainer" class="chip-container"></div>
-
-                        <div class="toggle-row green" style="margin-top:20px; margin-bottom:0;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="enableWhitelist" ${config.enableWhitelist ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label green">
-                                    ${t('تفعيل نظام القائمة البيضاء', 'Enable Whitelist System')}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="card info" style="border-color:rgba(64,196,255,0.4);">
-                        <div class="card-header"><h3 style="color:var(--blue);"><i class="fas fa-user-shield"></i> ${t('مزامنة مشرفي المجموعات', 'Admin Whitelist Sync')}</h3></div>
-                        <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px; line-height:1.8;">${t('يضيف جميع مشرفي المجموعات (التي يديرها البوت) إلى القائمة البيضاء تلقائياً.', 'Automatically adds admins from bot-managed groups to the whitelist.')}</p>
-                        <div class="field-row" style="align-items:end; margin-bottom:10px;">
-                            <div class="field-group" style="margin-bottom:0;">
-                                <label class="field-label">${t('الفاصل بالدقائق', 'Interval (minutes)')}</label>
-                                <input type="number" id="adminWhitelistSyncIntervalMinutes" min="1" step="1" value="60">
-                            </div>
-                            <button type="button" id="saveAdminWhitelistSyncScheduleBtn" class="btn btn-blue" onclick="saveAdminWhitelistSyncSchedule()" style="height:44px;">
-                                <i class="fas fa-save"></i> ${t('حفظ', 'Save')}
-                            </button>
-                        </div>
-                        <div class="toggle-row blue" style="margin-bottom:12px;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="adminWhitelistSyncEnabled"><span class="slider"></span></label>
-                                <div class="toggle-label blue">${t('تفعيل الجدولة التلقائية', 'Enable automatic schedule')}</div>
-                            </div>
-                        </div>
-                        <button type="button" id="runAdminWhitelistSyncBtn" class="btn btn-blue" style="width:100%; justify-content:center;" onclick="runAdminWhitelistSyncNow()">
-                            <i class="fas fa-play"></i> ${t('تشغيل المزامنة الآن', 'Run Sync Now')}
-                        </button>
-                    </div>
-                    </div>
-
-
-
-                </div>
-            </div>
-
-            <div class="page" id="page-general">
-                <div class="page-header">
-                    <h2><i class="fas fa-cog"></i> ${t('الإعدادات العامة', 'General Settings')}</h2>
-                    <p>${t('تطبّق على جميع المجموعات التي لا تملك إعدادات مخصصة', 'Applies to all groups without custom settings')}</p>
-                </div>
-
-                <div class="card-grid general-top-grid">
-                    <div class="card general-top-card" style="margin-bottom:0;">
-                        <div class="card-header"><h3><i class="fas fa-users"></i> ${t('مجموعة الإدارة الافتراضية', 'Default Admin Group')}</h3></div>
-                        <div class="field-group" id="defaultAdminGroupContainer">
-                            <label class="field-label">${t('اختر المجموعة لتلقي التنبيهات', 'Select Group for Alerts')}</label>
-                        </div>
-                    </div>
-
-                    <div class="card general-top-card" style="margin-bottom:0; border-color:rgba(100,220,150,0.35); background:linear-gradient(160deg,rgba(100,220,150,0.05) 0,var(--card-bg) 58%); position:relative; overflow:hidden;">
-                    <style>
-                        @keyframes safePulse {
-                            0%,100% { box-shadow: 0 0 0 0 rgba(100,220,150,0.55); }
-                            50%      { box-shadow: 0 0 0 8px rgba(100,220,150,0); }
-                        }
-                        .general-top-grid { align-items: stretch; margin-bottom: 20px; }
-                        .general-top-card { display: flex; flex-direction: column; }
-                        .general-top-card .field-group { margin-bottom: 0; }
-                        #defaultWordsContainer { max-height: 160px; gap: 8px; }
-                        #defaultWordsContainer .chip { padding: 5px 10px; font-size: 13px; }
-                        #safeMode + .slider { transition: background 0.35s ease, box-shadow 0.35s ease !important; }
-                        #safeMode:not(:checked) + .slider { animation: safePulse 1.8s ease-in-out infinite; }
-                    </style>
-
-                    <div style="display:flex;align-items:center;gap:10px;background:linear-gradient(90deg,rgba(255,171,64,0.16),rgba(255,171,64,0.03));border:1px solid rgba(255,171,64,0.35);border-radius:10px;padding:10px 14px;margin-bottom:14px;">
-                        <i class="fas fa-exclamation-triangle" style="color:var(--orange);font-size:18px;flex-shrink:0;"></i>
-                        <div>
-                            <strong style="color:#ffd08a;font-size:14px;">${t('يُنصح بشدة بتفعيله', '⚠️ Strongly Recommended')}</strong>
-                            <div style="font-size:12px;color:var(--text);opacity:.88;margin-top:2px;">${t('تشغيل البوت بدون هذا الوضع يزيد من احتمالية حظر حسابك من واتساب', 'Running the bot without Safe Mode significantly increases the risk of your WhatsApp account being banned')}</div>
-                        </div>
-                    </div>
-
-                    <div class="card-header" style="padding-bottom:14px;">
-                        <h3 style="color:#64dc96;"><i class="fas fa-user-shield"></i> ${t('الوضع الآمن (Safe Mode)', 'Safe Mode')}</h3>
-                        <span style="font-size:12px; background:rgba(100,220,150,0.15); color:#64dc96; border:1px solid rgba(100,220,150,0.4); padding:3px 12px; border-radius:20px; font-weight:700;">${t('حماية من الحظر', 'Anti-Ban')}</span>
-                    </div>
-                    <div class="toggle-row" style="border-color:rgba(100,220,150,0.35); background:rgba(100,220,150,0.07); margin-bottom:16px; padding:14px 18px; border-radius:12px;">
-                        <div class="toggle-left" style="gap:16px;">
-                            <label class="switch" style="flex-shrink:0;"><input type="checkbox" id="safeMode" ${config.safeMode ? 'checked' : ''}><span class="slider"></span></label>
-                            <div class="toggle-label" style="color:#64dc96;">
-                                ${t('تفعيل الوضع الآمن', 'Enable Safe Mode')}
-                                <small>${t('تأخير عشوائي 10–60 ثانية قبل كل إجراء لتجنب كشف البوت', 'Random 10–60s delay before each action to avoid bot detection')}</small>
-                            </div>
-                        </div>
-                        ${config.safeMode
-            ? `<span style="font-size:12px;background:rgba(100,220,150,0.15);color:#64dc96;border:1px solid rgba(100,220,150,0.3);padding:3px 10px;border-radius:20px;font-weight:700;"><i class="fas fa-check"></i> ${t('مفعّل', 'Active')}</span>`
-            : `<span style="font-size:12px;background:rgba(255,82,82,0.12);color:var(--red);border:1px solid rgba(255,82,82,0.3);padding:3px 10px;border-radius:20px;font-weight:700;"><i class="fas fa-times"></i> ${t('معطّل', 'Off')}</span>`
+const express = require('express');
+const { Client, LocalAuth, Poll, MessageMedia } = require('whatsapp-web.js');
+const qrcode = require('qrcode');
+const Database = require('better-sqlite3');
+const util = require('util');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+const { exec } = require('child_process');
+const renderDashboard = require('./UI.js');
+
+// Ensure media storage directory exists
+if (!fs.existsSync('./media')) fs.mkdirSync('./media');
+
+function ensureDashboardLogo() {
+    const publicDir = path.join(process.cwd(), 'public');
+    const logoPath = path.join(publicDir, 'logo.png');
+
+    try {
+        if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
+        if (fs.existsSync(logoPath) && fs.statSync(logoPath).isFile()) return;
+
+        const rootFiles = fs.readdirSync(process.cwd(), { withFileTypes: true })
+            .filter(entry => entry.isFile())
+            .map(entry => entry.name);
+
+        const imageCandidates = rootFiles.filter(name => /\.(png|jpg|jpeg|webp)$/i.test(name));
+        const firstImage = imageCandidates.find(name => name.toLowerCase() !== 'logo.png');
+
+        if (firstImage) {
+            fs.copyFileSync(path.join(process.cwd(), firstImage), logoPath);
+            console.log(`[UI] Seeded missing logo from ${firstImage} -> public/logo.png`);
         }
-                    </div>
-                    <div style="font-size:12px; color:var(--text-muted); line-height:1.9; padding:11px 12px; background:var(--input-bg); border-radius:10px; border:1px solid var(--card-border);">
-                        <div style="margin-bottom:6px;"><i class="fas fa-times-circle" style="color:var(--red);"></i> <strong style="color:var(--text);">${t('إيقاف:', 'Off:')}</strong> ${t('إجراءات فورية — أسرع ولكن تُعرّض حسابك للحظر', 'Instant actions — faster but risks getting your account banned')}</div>
-                        <div style="margin-bottom:6px;"><i class="fas fa-shield-alt" style="color:#64dc96;"></i> <strong style="color:var(--text);">${t('تشغيل:', 'On:')}</strong> ${t('تأخير عشوائي 10–60 ث — يحاكي سلوك الإنسان ويقلل خطر الحظر بشكل كبير', 'Random 10–60s delay — mimics human behaviour, greatly reduces ban risk')}</div>
-                        <div><i class="fas fa-info-circle" style="color:var(--blue);"></i> <strong style="color:var(--text);">${t('يؤثر على:', 'Covers:')}</strong> ${t('الطرد، الحذف، التصويت، الإبلاغ، رسائل الترحيب', 'Kicks, deletes, polls, reports, welcome messages')}</div>
-                    </div>
-                </div>
+    } catch (err) {
+        console.error(`[UI] Failed to ensure dashboard logo: ${err.message || err}`);
+    }
+}
 
-                </div>
+ensureDashboardLogo();
 
-                <div class="card-grid">
-                    <div class="card">
-                        <div class="card-header"><h3><i class="fas fa-filter"></i> ${t('فلتر الكلمات الممنوعة', 'Forbidden Word Filter')}</h3></div>
-                        <div class="toggle-row" style="margin-bottom:18px;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="enableWordFilter" ${config.enableWordFilter ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label">${t('تفعيل فلتر الكلمات', 'Enable Word Filter')}<small>${t('حذف فوري عند رصد أي كلمة ممنوعة', 'Instant delete on detecting forbidden words')}</small></div>
-                            </div>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('الكلمات الممنوعة الافتراضية', 'Default Forbidden Words')}</label>
-                            <div class="input-with-btn">
-                                <input type="text" id="newDefaultWord" placeholder="${t('أدخل الكلمة الممنوعة...', 'Enter forbidden word...')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addDefaultWord();}">
-                                <button type="button" class="btn btn-primary" onclick="addDefaultWord()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
-                            </div>
-                            <div id="defaultWordsContainer" class="chip-container"></div>
-                        </div>
-                    </div>
-                    <div class="card">
-                        <div class="card-header"><h3><i class="fas fa-bolt"></i> ${t('الإجراء التلقائي', 'Automatic Action')}</h3></div>
-                        <div class="toggle-row pink">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="autoAction" ${config.autoAction ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label pink">
-                                    ${t('الحذف والإبلاغ المباشر', 'Direct Delete & Report')}
-                                    <small>${t('تخطي تصويت الإدارة عند رصد المخالفات', 'Skip admin poll upon detecting violations')}</small>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="toggle-row blue" style="margin-top:12px;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="enableJoinProfileScreening" ${config.enableJoinProfileScreening ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label blue">
-                                    ${t('فحص الملف الشخصي عند الانضمام', 'Join Profile Screening')}
-                                    <small>${t('يفحص الاسم/النبذة للطلبات والأعضاء الجدد باستخدام فلتر الكلمات وAI عند تفعيلهما', 'Checks name/bio for join requests and new members using Word Filter and AI when enabled')}</small>
-                                </div>
-                            </div>
-                        </div>
-                        <div style="margin-top:20px; padding:16px; background:var(--input-bg); border-radius:10px; border:1px solid var(--card-border);">
-                            <div style="font-size:13px; color:var(--text-muted); line-height:2;">
-                                <div><i class="fas fa-robot"></i> <strong style="color:var(--text);">${t('البوت:', 'Bot:')}</strong> <span id="status-text-detail" style="color:var(--accent);">${initialStatusText}</span> <i id="status-text-detail-check" class="fas fa-check" style="color:var(--accent);display:${initialStatusKind === 'connected' ? 'inline-block' : 'none'};"></i></div>
-                                <div><i class="fas fa-circle text-warning" style="color:var(--orange); font-size: 10px; margin-inline-end: 5px;"></i> <strong style="color:var(--text);">${t('معطّل:', 'Disabled:')}</strong> ${t('حذف + تصويت للإدارة', 'Delete + admin poll')}</div>
-                            </div>
-                        </div>
-                    </div>
+// Multer: dynamic storage per group
+const mediaStorage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        const dir = path.join('./media', req.params.groupId);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        cb(null, dir);
+    },
+    filename: (req, file, cb) => {
+        // Preserve original name but make it safe
+        const safe = file.originalname.replace(/[^a-zA-Z0-9._\u0600-\u06FF-]/g, '_');
+        cb(null, safe);
+    }
+});
+const upload = multer({ storage: mediaStorage, limits: { fileSize: 64 * 1024 * 1024 } }); // 64 MB max
 
-                    <div class="card" style="margin-bottom:0;">
-                        <div class="card-header"><h3><i class="fas fa-link-slash"></i> ${t('قطع الاتصال', 'Disconnect')}</h3></div>
-                        <button id="logoutBtn" type="button" class="btn btn-danger" onclick="logoutBot()" style="width:100%;justify-content:center;display:${initialLogoutDisplay};"><i class="fas fa-link-slash"></i> ${t('قطع اتصال واتساب', 'Disconnect WhatsApp')}</button>
-                    </div>
-                </div>
+const logsHistory = [];
+const origLog = console.log;
+const origErr = console.error;
 
-            </div>
+function saveLog(type, args) {
+    const time = new Date().toLocaleTimeString('ar-SA', { hour12: false });
+    const msg = util.format(...args);
+    logsHistory.push(`[${time}] [${type}] ${msg}`);
+    if (logsHistory.length > 200) logsHistory.shift();
+}
 
-            <div class="page" id="page-spam">
-                <div class="page-header">
-                    <h2><i class="fas fa-shield-alt"></i> ${t('مكافحة الإزعاج', 'Anti-Spam')}</h2>
-                    <p>${t('رصد الرسائل المتكررة خلال نافذة 15 ثانية', 'Monitor repeated messages within a 15-second window')}</p>
-                </div>
+function toLogPreview(value, maxLen = 140) {
+    if (typeof value !== 'string') return '';
+    const normalized = value.replace(/\s+/g, ' ').trim();
+    if (!normalized) return '';
+    return normalized.length > maxLen ? `${normalized.slice(0, maxLen)}...` : normalized;
+}
 
-                <div class="card warning" style="max-width:700px;">
-                    <div class="toggle-row warning" style="margin-bottom:0; border-radius:10px;">
-                        <div class="toggle-left">
-                            <label class="switch">
-                                <input type="checkbox" id="enableAntiSpam" ${config.enableAntiSpam ? 'checked' : ''} onchange="toggleGroupPanel('global', 'spam', this.checked)">
-                                <span class="slider"></span>
-                            </label>
-                            <div class="toggle-label warning">
-                                ${t('تفعيل نظام Anti-Spam', 'Enable Anti-Spam System')}
-                                <small>${t('مراقبة معدل إرسال كل مستخدم خلال نافذة 15 ثانية', 'Monitor per-user send rate within 15 secs')}</small>
-                            </div>
-                        </div>
-                    </div>
+function compactMsgId(value) {
+    if (typeof value !== 'string' || value.length === 0) return 'n/a';
+    if (value.length <= 24) return value;
+    return `${value.slice(0, 8)}...${value.slice(-8)}`;
+}
 
-                    <div id="group_spam_panel_global" style="overflow: hidden; max-height: ${config.enableAntiSpam ? '800px' : '0px'}; opacity: ${config.enableAntiSpam ? '1' : '0'}; transition: max-height 0.45s ease, opacity 0.35s ease, margin-top 0.35s ease; margin-top: ${config.enableAntiSpam ? '20px' : '0px'};">
-                        <div style="border-top: 1px dashed rgba(255,171,64,0.3); padding-top: 20px;">
-                            <div class="field-row" style="margin-bottom:20px;">
-                                <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('الإجراء عند الرصد', 'Action on Detection')}</label>
-                                    <select id="spamAction">
-                                        <option value="poll" ${config.spamAction === 'poll' ? 'selected' : ''}><i class="fas fa-poll"></i> ${t('تصويت للإدارة', 'Admin Poll')}</option>
-                                        <option value="auto" ${config.spamAction === 'auto' ? 'selected' : ''}><i class="fas fa-hammer"></i> ${t('طرد تلقائي وحظر', 'Auto Kick & Ban')}</option>
-                                    </select>
-                                </div>
-                                <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('حد تكرار نفس النص', 'Duplicate Text Limit')}</label>
-                                    <input type="number" id="spamDuplicateLimit" value="${config.spamDuplicateLimit}" min="2" max="15" placeholder="3">
-                                </div>
-                            </div>
-                            <label class="field-label" style="margin-bottom:12px;"><i class="fas fa-stopwatch"></i> ${t('حدود كل نوع خلال 15 ثانية', 'Limits per media type (15s)')}</label>
-                            <p style="font-size:13px; color:var(--text-muted); margin-bottom:14px;">${t('فعّل النوع المراد مراقبته، ثم حدد الحد الأقصى للرسائل المسموح بها', 'Check the type to monitor, then set max allowed messages')}</p>
-                            <div class="limit-grid">
-                                ${mediaTypesMeta.map(tData => `
-                                <div class="limit-item">
-                                    <input type="checkbox" id="global_spam_check_${tData.id}" value="${tData.id}" ${config.spamTypes.includes(tData.id) ? 'checked' : ''}>
-                                    <span>${tData.icon} ${tData.name}</span>
-                                    <input type="number" id="global_spam_limit_${tData.id}" value="${config.spamLimits[tData.id] || 5}" min="1">
-                                </div>`).join('')}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+function unfoldVCardLines(vcardText) {
+    if (typeof vcardText !== 'string') return [];
+    const lines = vcardText.replace(/\r/g, '').split('\n');
+    const unfolded = [];
+    for (const line of lines) {
+        if ((line.startsWith(' ') || line.startsWith('\t')) && unfolded.length > 0) {
+            unfolded[unfolded.length - 1] += line.trim();
+        } else {
+            unfolded.push(line);
+        }
+    }
+    return unfolded;
+}
 
-            <div class="page" id="page-media">
-                <div class="page-header">
-                    <h2><i class="fas fa-filter"></i> ${t('فلتر الوسائط', 'Media Filter')}</h2>
-                    <p>${t('منع قطعي لأنواع محددة — الحذف يحدث فوراً بغض النظر عن أي إعداد آخر', 'Absolute ban for specific media types — deleted instantly regardless of other settings')}</p>
-                </div>
-                <div class="card-grid">
-                    <div class="card danger">
-                        <div class="card-header"><h3 style="color:var(--red);"><i class="fas fa-folder-minus"></i> ${t('اختر الأنواع الممنوعة', 'Select Blocked Types')}</h3></div>
-                        <p style="font-size:14px; color:var(--text-muted); margin-bottom:18px;">${t('أي رسالة من هذه الأنواع ستُحذف تلقائياً ودون استثناء.', 'Any message of these types will be deleted automatically without exception.')}</p>
-                        <div class="cb-group" id="globalBlockedTypes" style="gap:12px;">
-                            ${mediaTypesMeta.map(tData => `
-                            <label class="cb-label" style="flex:1; min-width:120px; justify-content:center; padding:12px;">
-                                <input type="checkbox" value="${tData.id}" ${config.blockedTypes.includes(tData.id) ? 'checked' : ''}> ${tData.icon} ${tData.name}
-                            </label>`).join('')}
-                        </div>
-                    </div>
-                    <div class="card danger">
-                        <div class="card-header"><h3 style="color:var(--red);"><i class="fas fa-gavel"></i> ${t('الإجراء عند الرصد', 'Action on Detection')}</h3></div>
-                        <div class="field-group">
-                            <label class="field-label">${t('ماذا يفعل البوت عند إرسال نوع ممنوع؟', 'What should the bot do when a blocked type is sent?')}</label>
-                            <select id="globalBlockedAction" style="font-size:15px; padding:14px;">
-                                <option value="delete" ${config.blockedAction === 'delete' ? 'selected' : ''}>${t('حذف الرسالة فقط (بصمت)', 'Delete Message Only (Silent)')}</option>
-                                <option value="poll" ${config.blockedAction === 'poll' ? 'selected' : ''}>${t('حذف + فتح تصويت للإدارة', 'Delete + Open Admin Poll')}</option>
-                                <option value="auto" ${config.blockedAction === 'auto' ? 'selected' : ''}>${t('حذف + طرد تلقائي وحظر', 'Delete + Auto Kick & Ban')}</option>
-                            </select>
-                        </div>
-                        <div style="margin-top:16px; padding:16px; background:var(--red-dim); border-radius:10px; border:1px solid rgba(255,82,82,0.2);">
-                            <div style="font-size:13px; color:var(--text-muted); line-height:2.2;">
-                                <div><i class="fas fa-trash"></i> <strong style="color:var(--text);">${t('حذف فقط:', 'Delete Only:')}</strong> ${t('صامت، لا يعلم المرسل', 'Silent, sender is unaware')}</div>
-                                <div><i class="fas fa-poll"></i> <strong style="color:var(--text);">${t('تصويت:', 'Poll:')}</strong> ${t('تنبيه الإدارة لاتخاذ قرار', 'Alert admins to decide')}</div>
-                                <div><i class="fas fa-hammer"></i> <strong style="color:var(--text);">${t('طرد تلقائي:', 'Auto Kick:')}</strong> ${t('أقوى إجراء، حظر فوري', 'Strictest action, instant ban')}</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+function extractVCardValue(unfoldedLines, key) {
+    const upperKey = `${key.toUpperCase()}`;
+    const line = unfoldedLines.find(l => l.toUpperCase().startsWith(`${upperKey}`) && l.includes(':'));
+    if (!line) return '';
+    return line.slice(line.indexOf(':') + 1).trim();
+}
 
-            <div class="page" id="page-ai">
-                <div class="page-header">
-                    <h2><i class="fas fa-brain"></i> ${t('المشرف الذكي (AI)', 'AI Moderator')}</h2>
-                    <p>${t('تحليل المحتوى باستخدام نموذج Ollama LLM محلي', 'Analyze content using a local Ollama LLM model')}</p>
-                </div>
-                <div class="card-grid">
-                    <div class="card info">
-                        <div class="card-header">
-                            <h3 style="color:var(--blue);"><i class="fas fa-plug"></i> ${t('تفعيل الذكاء الاصطناعي', 'Enable AI')}</h3>
-                            <button type="button" class="btn btn-blue btn-sm" onclick="openOllamaModal()"><i class="fas fa-cog"></i> ${t('إعداد الخادم', 'Server Setup')}</button>
-                        </div>
-                        <div class="toggle-row blue" style="margin-bottom:12px;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="enableAIFilter" ${config.enableAIFilter ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label blue">${t('تحليل النصوص بالـ AI', 'AI Text Analysis')}<small>${t('فحص كل رسالة نصية قبل السماح بها', 'Scan every text message before allowing')}</small></div>
-                            </div>
-                        </div>
-                        <div class="toggle-row purple">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="enableAIMedia" ${config.enableAIMedia ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label purple">${t('تحليل الصور (Vision AI)', 'Image Analysis (Vision)')}<small>${t('يتطلب نموذجاً يدعم Vision مثل llava', 'Requires a vision-capable model like llava')}</small></div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="card" id="aiPromptContainer">
-                        <div class="card-header"><h3><i class="fas fa-file-alt"></i> ${t('تعليمات الذكاء الاصطناعي', 'AI Prompt Instructions')}</h3></div>
-                        <div class="field-group">
-                            <label class="field-label">${t('صف المحتوى الممنوع للنموذج', 'Describe forbidden content to the model')}</label>
-                            <textarea id="aiPromptText" rows="6" style="font-size:14px; line-height:1.8;">${config.aiPrompt}</textarea>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('كلمات التشغيل (كلمات تشير إلى المخالفة)', 'Trigger Words (words indicating violation)')}</label>
-                            <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 10px;">${t('عندما يجيب النموذج بأي من هذه الكلمات، سيتم حذف الرسالة', 'When the model responds with any of these words, the message will be deleted')}</p>
-                            <div class="input-with-btn">
-                                <input type="text" id="newAITriggerWord" placeholder="${t('مثال: نعم أو انتهاك', 'Example: نعم or violation')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addAITriggerWord();}">
-                                <button type="button" class="btn btn-primary" onclick="addAITriggerWord()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
-                            </div>
-                            <div id="aiTriggerWordsContainer" class="chip-container"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+function formatVCardForDisplay(vcardText) {
+    const lines = unfoldVCardLines(vcardText);
+    if (lines.length === 0) return '';
 
-            <div class="page" id="page-global-qa">
-                <div class="page-header">
-                    <h2><i class="fas fa-comments"></i> ${t('الأسئلة والأجوبة العامة', 'Global Q&A')}</h2>
-                    <p>${t('قاعدة أسئلة واحدة يمكن تطبيقها على كل المجموعات أو المجموعات المخصصة التي تختارها', 'One Q&A knowledge base that can be applied to all groups or selected custom groups')}</p>
-                </div>
+    const fn = extractVCardValue(lines, 'FN');
+    const tel = extractVCardValue(lines, 'TEL');
 
-                <div class="card info" style="max-width:900px;">
-                    <div class="toggle-row blue" style="margin-bottom:0;border-radius:10px;">
-                        <div class="toggle-left">
-                            <label class="switch"><input type="checkbox" id="globalQAEnabled" ${config.globalQAEnabled ? 'checked' : ''}><span class="slider"></span></label>
-                            <div class="toggle-label blue">${t('تفعيل Q&A العام', 'Enable Global Q&A')}<small>${t('عند التفعيل: يعمل للمجموعات غير المخصصة تلقائياً، ويمكن تفعيله للمجموعات المخصصة من إعداداتها', 'When enabled: applies to non-custom groups automatically, and to custom groups when opted in')}</small></div>
-                        </div>
-                    </div>
-                </div>
+    const altName = (() => {
+        const nValue = extractVCardValue(lines, 'N');
+        if (!nValue) return '';
+        const parts = nValue.split(';').map(p => p.trim()).filter(Boolean);
+        return parts.join(' ');
+    })();
 
-                <div class="card-grid" style="align-items:start;">
-                    <div class="card" style="margin-bottom:0;">
-                        <div class="card-header"><h3><i class="fas fa-plus-circle"></i> ${t('إضافة / تعديل زوج سؤال وجواب', 'Add / Edit Q&A Pair')}</h3></div>
+    const displayName = fn || altName || 'بدون اسم';
+    const displayPhone = tel || 'غير متوفر';
+    return `جهة اتصال: ${displayName} (${displayPhone})`;
+}
 
-                        <div class="sub-panel blue" style="margin-bottom:16px;">
-                            <h4 style="color:var(--blue);">${t('مرجع الحقول الديناميكية', 'Dynamic Fields Reference')}</h4>
-                            <div style="font-size:13px;color:var(--text-muted);line-height:1.8;">
-                                <div><strong style="color:var(--blue);">{eventdate}</strong> - ${t('الحدث الأساسي (الأول في القائمة)', 'Primary event/deadline (first in list)')}</div>
-                                <div><strong style="color:var(--blue);">{eventdate:Label}</strong> - ${t('حدث معين حسب العنوان', 'Specific event by label')}</div>
-                                <div><strong style="color:var(--blue);">{user}</strong> - ${t('اسم المرسل', 'Sender username')}</div>
-                            </div>
-                        </div>
+function formatVCardsForDisplay(vcards) {
+    if (!Array.isArray(vcards) || vcards.length === 0) return '';
+    const parsed = vcards
+        .map(formatVCardForDisplay)
+        .filter(Boolean);
+    if (parsed.length === 0) return '';
+    return parsed.join('\n');
+}
 
-                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                            <label class="field-label" style="margin-bottom:0;">${t('إدارة الأحداث والمواعيد', 'Manage Events/Deadlines')}</label>
-                            <button type="button" class="btn btn-primary btn-sm" onclick="addGlobalQAEventDate()"><i class="fas fa-plus"></i> ${t('إضافة حدث', 'Add Event')}</button>
-                        </div>
-                        <div id="globalQAEventDatesContainer" style="margin-bottom: 20px;"></div>
+function stripRawVCardBlocks(text) {
+    if (typeof text !== 'string') return '';
+    return text.replace(/BEGIN:VCARD[\s\S]*?END:VCARD/gi, '').trim();
+}
 
-                        <div class="field-row" style="margin-bottom:16px;">
-                            <div class="field-group" style="margin-bottom:0;">
-                                <label class="field-label" style="margin-bottom:4px;">${t('تاريخ الحدث القديم (لحقل {eventdate})', 'Legacy Event Date (for {eventdate})')}</label>
-                                <input type="date" id="globalQAEventDateInput" style="color-scheme: dark; font-family: var(--font);">
-                            </div>
-                            <div class="field-group" style="margin-bottom:0;">
-                                <label class="field-label" style="margin-bottom:4px;">${t('لغة عرض الأيام المتبقية', 'Days-Left Language')}</label>
-                                <select id="globalQALanguageInput">
-                                    <option value="ar">${t('العربية', 'Arabic')}</option>
-                                    <option value="en">English</option>
-                                </select>
-                            </div>
-                        </div>
+function normalizeAdminLang(value) {
+    return value === 'en' ? 'en' : 'ar';
+}
 
-                        <label class="field-label">${t('أضف صيغ السؤال', 'Add Questions for This Answer')}</label>
-                        <div class="field-group" style="margin-bottom:10px;">
-                            <input type="text" id="globalQAQuestionInput" placeholder="${t('أدخل صيغة سؤال...', 'Enter a question variant...')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addGlobalQAQuestion();}">
-                            <button type="button" class="btn btn-primary btn-full" style="margin-top:10px;background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700;" onclick="addGlobalQAQuestion()"><i class="fas fa-plus"></i> ${t('إضافة صيغة', 'Add Variant')}</button>
-                            <div class="chip-container" id="globalQAQuestionsContainer" style="min-height:40px;"></div>
-                        </div>
+function resolveAdminLang(groupConfig, conf) {
+    const defaultLang = normalizeAdminLang(conf && conf.defaultAdminLanguage ? conf.defaultAdminLanguage : 'ar');
+    if (!groupConfig || !groupConfig.adminLanguage || groupConfig.adminLanguage === 'default') return defaultLang;
+    return normalizeAdminLang(groupConfig.adminLanguage);
+}
 
-                        <label class="field-label" style="margin-top:14px;">${t('الإجابة', 'Answer')}</label>
-                        <div class="field-group" style="margin-bottom:10px;">
-                            <textarea id="globalQAAnswerInput" rows="4" placeholder="${t('استخدم {date} و {eventdate} و {user} داخل النص إن أردت', 'You can use {date}, {eventdate}, and {user} placeholders')}" style="margin-bottom:10px;" oninput="updateGlobalQACurrentAnswer(this.value)" onchange="updateGlobalQACurrentAnswer(this.value)"></textarea>
-                            <button type="button" id="saveGlobalQABtn" class="btn btn-full" onclick="saveGlobalQA()" style="background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700;"><i class="fas fa-save"></i> ${t('حفظ زوج س و ج', 'Save Q&A Pair')}</button>
-                        </div>
+function tAdmin(groupConfig, conf, arText, enText) {
+    return resolveAdminLang(groupConfig, conf) === 'en' ? enText : arText;
+}
 
-                        <div class="sub-panel" style="margin-bottom:16px;border-color:rgba(100,220,150,0.3);background:rgba(100,220,150,0.04);">
-                            <h4 style="color:#64dc96;margin-bottom:12px;"><i class="fas fa-paperclip"></i> ${t('إرفاق وسائط بهذه الإجابة', 'Attach Media to This Answer')}</h4>
-                            <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">${t('اختر ملفاً ليُرفق تلقائياً عند حفظ الزوج. سيرسل البوت الملف مع نص الإجابة كتعليق.', 'Select a file to automatically attach it when saving the Q&A pair. The bot will send the file + answer caption.')}</p>
-                            <div id="globalQA_media_selected" style="display:none;align-items:center;gap:10px;background:rgba(100,220,150,0.1);border:1px solid rgba(100,220,150,0.3);border-radius:8px;padding:10px 14px;margin-bottom:12px;">
-                                <i class="fas fa-paperclip" style="color:#64dc96;"></i>
-                                <span id="globalQA_media_selected_name" style="font-size:13px;color:#64dc96;flex:1;"></span>
-                                <button type="button" onclick="clearGlobalQAMedia()" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;">×</button>
-                            </div>
-                            <div style="display:flex;gap:10px;margin-bottom:14px;">
-                                <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;background:var(--input-bg);border:1.5px dashed rgba(100,220,150,0.4);border-radius:10px;cursor:pointer;font-size:13px;color:var(--text-muted);transition:all 0.2s;" onmouseover="this.style.borderColor='#64dc96'" onmouseout="this.style.borderColor='rgba(100,220,150,0.4)'">
-                                    <i class="fas fa-cloud-upload-alt" style="color:#64dc96;font-size:18px;"></i>
-                                    <span>${currentLang==='en'?'Click to upload a file':'انقر لرفع ملف'}</span>
-                                    <input type="file" id="globalQA_file_input" style="display:none;" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar" onchange="uploadGlobalQAMedia(this)">
-                                </label>
-                            </div>
-                            <div id="globalQA_upload_status" style="display:none;font-size:12px;color:var(--text-muted);margin-bottom:10px;"></div>
-                            <div id="globalQA_media_grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;"></div>
-                        </div>
-                    </div>
+console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
+console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
-                    <div class="card" style="margin-bottom:0;">
-                        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
-                            <h3><i class="fas fa-list"></i> ${t('الأزواج المحفوظة', 'Saved Pairs')}</h3>
-                            <button type="button" class="btn btn-ghost btn-sm" onclick="pasteGlobalQA()"><i class="fas fa-paste"></i> ${t('لصق س و ج', 'Paste Q&A')}</button>
-                        </div>
-                        <div id="globalQAList"></div>
-                    </div>
-                </div>
-            </div>
+function resolveDbPath() {
+    if (process.env.WA_DB_PATH && process.env.WA_DB_PATH.trim()) {
+        return process.env.WA_DB_PATH.trim();
+    }
+    if (process.env.WA_DATA_DIR && process.env.WA_DATA_DIR.trim()) {
+        return path.join(process.env.WA_DATA_DIR.trim(), 'bot_data.sqlite');
+    }
+    return path.join(process.cwd(), 'bot_data.sqlite');
+}
 
-            <div class="page" id="page-groups">
+function ensureDbPathReady(dbPath) {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
-                <div id="groupsListView">
-                    <div class="page-header" style="display:flex; justify-content:space-between; align-items:flex-start;">
-                        <div>
-                            <h2><i class="fas fa-users-cog"></i> ${t('المجموعات المخصصة', 'Custom Groups')}</h2>
-                            <p>${t('إعدادات مخصصة لكل مجموعة — تتجاوز الإعدادات العامة', 'Custom settings per group — overrides global settings')}</p>
-                        </div>
-                        <button type="button" class="btn btn-blue" onclick="addGroup()"><i class="fas fa-plus"></i> ${t('إضافة مجموعة', 'Add Group')}</button>
-                    </div>
-                    <div id="groupsContainer"></div>
-                </div>
+    if (fs.existsSync(dbPath)) {
+        const stat = fs.statSync(dbPath);
+        if (stat.isDirectory()) {
+            throw new Error(`[DB] Invalid database path: ${dbPath} points to a directory.`);
+        }
+    }
 
-                <div id="groupsDetailView" style="display:none;">
-                    <div class="group-detail-bar">
-                        <button type="button" class="btn btn-ghost" onclick="closeGroupDetail()">
-                            <i class="fas fa-arrow-${lang === 'en' ? 'left' : 'right'}"></i> ${t('رجوع', 'Back')}
-                        </button>
-                        <div class="group-detail-identity">
-                            <div class="group-detail-avatar" id="detailGroupAvatar"></div>
-                            <div>
-                                <div style="font-size:18px; font-weight:700;" id="detailGroupName"></div>
-                                <span class="group-id-badge" id="detailGroupId"></span>
-                            </div>
-                        </div>
-                        <button type="button" class="btn btn-danger btn-sm" id="detailDeleteBtn"><i class="fas fa-trash"></i> ${t('حذف', 'Delete')}</button>
-                    </div>
-                    <div id="groupDetailBody"></div>
-                </div>
+    // Ensure SQLite file exists without truncating existing data.
+    fs.closeSync(fs.openSync(dbPath, 'a'));
+}
 
-            </div>
+function openDatabaseWithFallback() {
+    const primaryPath = resolveDbPath();
+    const fallbackPath = path.join('/tmp', 'wa-bot', 'bot_data.sqlite');
+    const hasExplicitDbPath = Boolean(
+        (process.env.WA_DB_PATH && process.env.WA_DB_PATH.trim()) ||
+        (process.env.WA_DATA_DIR && process.env.WA_DATA_DIR.trim())
+    );
+    const allowTmpFallback = process.env.WA_ALLOW_TMP_DB_FALLBACK === 'true';
+    const candidates = allowTmpFallback ? [primaryPath, fallbackPath] : [primaryPath];
 
-            <div class="page" id="page-import-export">
-                <div class="page-header">
-                    <h2><i class="fas fa-exchange-alt"></i> ${t('استيراد/تصدير البيانات', 'Import/Export Dataset')}</h2>
-                    <p>${t('قم بتصدير واستيراد إعدادات البوت والقوائم المختلفة', 'Export and import bot settings and lists')}</p>
-                </div>
+    for (const dbPath of candidates) {
+        try {
+            ensureDbPathReady(dbPath);
+            const openedDb = new Database(dbPath);
+            console.log(`[DB] Using database file: ${dbPath}`);
+            return openedDb;
+        } catch (err) {
+            console.error(`[DB] Failed to open database at ${dbPath}: ${err.message || err}`);
+        }
+    }
 
-                <div class="card-grid">
-                    <div class="card">
-                        <div class="card-header">
-                            <h3><i class="fas fa-download"></i> ${t('تصدير البيانات', 'Export Data')}</h3>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('اختر البيانات المراد تصديرها', 'Select data to export')}</label>
-                            <div class="cb-group" id="exportOptions">
-                                <label class="cb-label">
-                                    <input type="checkbox" id="export_global_settings" checked>
-                                    ${t('الإعدادات العامة', 'Global Settings')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="export_llm_settings" checked>
-                                    ${t('إعدادات الذكاء الاصطناعي', 'AI Settings')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="export_blacklist" checked>
-                                    ${t('القائمة السوداء', 'Blacklist')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="export_whitelist" checked>
-                                    ${t('القائمة البيضاء', 'Whitelist')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="export_blocked_extensions" checked>
-                                    ${t('الرموز المحظورة', 'Blocked Extensions')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="export_whatsapp_groups" checked>
-                                    ${t('مجموعات واتساب', 'WhatsApp Groups')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="export_custom_groups" checked>
-                                    ${t('الإعدادات المخصصة للمجموعات', 'Custom Group Settings')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="export_media" checked>
-                                    ${t('ملفات الوسائط', 'Media Files')}
-                                </label>
-                            </div>
-                        </div>
-                        <button type="button" class="btn btn-primary btn-full" onclick="exportData()">
-                            <i class="fas fa-download"></i> ${t('تصدير الآن', 'Export Now')}
-                        </button>
-                    </div>
+    if (!allowTmpFallback) {
+        throw new Error(`Could not open configured SQLite database path: ${primaryPath}. Temporary fallback is disabled.`);
+    }
 
-                    <div class="card">
-                        <div class="card-header">
-                            <h3><i class="fas fa-upload"></i> ${t('استيراد البيانات', 'Import Data')}</h3>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('حدد ملف الاستيراد', 'Select import file')}</label>
-                            <input type="file" id="importFile" accept=".json" style="cursor:pointer;">
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('اختر البيانات المراد استيرادها', 'Select data to import')}</label>
-                            <div class="cb-group" id="importOptions">
-                                <label class="cb-label">
-                                    <input type="checkbox" id="import_global_settings" checked>
-                                    ${t('الإعدادات العامة', 'Global Settings')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="import_llm_settings" checked>
-                                    ${t('إعدادات الذكاء الاصطناعي', 'AI Settings')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="import_blacklist" checked>
-                                    ${t('القائمة السوداء', 'Blacklist')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="import_whitelist" checked>
-                                    ${t('القائمة البيضاء', 'Whitelist')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="import_blocked_extensions" checked>
-                                    ${t('الرموز المحظورة', 'Blocked Extensions')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="import_whatsapp_groups" checked>
-                                    ${t('مجموعات واتساب', 'WhatsApp Groups')}
-                                </label>
-                                <label class="cb-label">
-                                    <input type="checkbox" id="import_custom_groups" checked>
-                                    ${t('الإعدادات المخصصة للمجموعات', 'Custom Group Settings')}
-                                </label>
-                            </div>
-                        </div>
-                        <div class="sub-panel" style="margin-top:16px;">
-                            <h4><i class="fas fa-exclamation-circle"></i> ${t('خيارات متقدمة', 'Advanced Options')}</h4>
-                            <label class="cb-label" style="margin-bottom:10px;">
-                                <input type="checkbox" id="import_blacklist_clear">
-                                ${t('مسح القائمة السوداء الحالية قبل الاستيراد', 'Clear current blacklist before import')}
-                            </label>
-                            <label class="cb-label" style="margin-bottom:10px;">
-                                <input type="checkbox" id="import_whitelist_clear">
-                                ${t('مسح القائمة البيضاء الحالية قبل الاستيراد', 'Clear current whitelist before import')}
-                            </label>
-                            <label class="cb-label" style="margin-bottom:10px;">
-                                <input type="checkbox" id="import_blocked_extensions_clear">
-                                ${t('مسح الرموز المحظورة الحالية قبل الاستيراد', 'Clear current blocked extensions before import')}
-                            </label>
-                            <label class="cb-label">
-                                <input type="checkbox" id="import_custom_groups_clear">
-                                ${t('مسح إعدادات المجموعات المخصصة الحالية قبل الاستيراد', 'Clear current custom group settings before import')}
-                            </label>
-                            <label class="cb-label" style="margin-top:10px;">
-                                <input type="checkbox" id="import_media" checked>
-                                ${t('استيراد ملفات الوسائط (إن وجدت)', 'Import Media Files (if any)')}
-                            </label>
-                        </div>
-                        <button type="button" class="btn btn-primary btn-full" onclick="importData()" style="margin-top:14px;">
-                            <i class="fas fa-upload"></i> ${t('استيراد الآن', 'Import Now')}
-                        </button>
-                    </div>
-                </div>
-            </div>
+    throw new Error('Could not open any writable SQLite database path.');
+}
 
-            <div class="page" id="page-about">
-                <style>
-                    #page-about {
-                        padding: 0 !important;
-                        background: var(--bg);
-                        color: var(--text);
-                        font-family: inherit;
-                    }
-                    #page-about .about-hero {
-                        position: relative;
-                        padding: 40px 20px;
-                        background: linear-gradient(135deg, var(--card-bg) 0%, var(--bg) 100%);
-                        border-bottom: 1px solid var(--card-border);
-                        text-align: center;
-                        overflow: hidden;
-                    }
-                    #page-about .about-hero-content {
-                        position: relative;
-                        z-index: 1;
-                        max-width: 800px;
-                        margin: 0 auto;
-                    }
-                    #page-about .hero-logo {
-                        font-size: 56px;
-                        color: var(--accent);
-                        margin-bottom: 16px;
-                    }
-                    #page-about .hero-title {
-                        font-size: 36px;
-                        font-weight: 800;
-                        margin: 0 0 12px 0;
-                        background: linear-gradient(90deg, var(--text) 0%, var(--text-muted) 100%);
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                        letter-spacing: -0.5px;
-                    }
-                    #page-about .hero-description {
-                        font-size: 16px;
-                        color: var(--text-muted);
-                        margin: 0 0 24px 0;
-                        line-height: 1.5;
-                    }
-                    #page-about .badge-container {
-                        display: flex;
-                        gap: 10px;
-                        justify-content: center;
-                        flex-wrap: wrap;
-                    }
-                    #page-about .status-badge {
-                        padding: 6px 14px;
-                        border-radius: 30px;
-                        font-size: 13px;
-                        font-weight: 600;
-                        display: flex;
-                        align-items: center;
-                        gap: 6px;
-                        background: var(--card-bg);
-                        border: 1px solid var(--card-border);
-                    }
-                    #page-about .status-badge.accent { border-color: rgba(0,200,83,0.3); color: var(--accent); background: var(--accent-dim); }
-                    #page-about .status-badge.blue { border-color: rgba(64,196,255,0.3); color: var(--blue); background: rgba(64,196,255,0.1); }
-                    
-                    #page-about .about-container {
-                        max-width: 1000px;
-                        margin: 0 auto;
-                        padding: 30px 20px;
-                        display: flex;
-                        flex-direction: column;
-                        gap: 40px;
-                    }
-                    
-                    #page-about .section-header {
-                        margin-bottom: 20px;
-                        border-bottom: 1px solid var(--card-border);
-                        padding-bottom: 10px;
-                    }
-                    #page-about .section-header h2 {
-                        font-size: 22px;
-                        color: var(--text);
-                        margin: 0;
-                        display: flex;
-                        align-items: center;
-                        gap: 10px;
-                    }
-                    #page-about .section-header h2 i { color: var(--accent); }
-                    
-                    #page-about .grid-2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
-                    #page-about .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-                    
-                    #page-about .info-card {
-                        background: var(--card-bg);
-                        border: 1px solid var(--card-border);
-                        border-radius: 12px;
-                        padding: 20px;
-                    }
-                    #page-about .info-card:hover {
-                        border-color: var(--accent);
-                    }
-                    
-                    #page-about .feat-icon {
-                        width: 40px;
-                        height: 40px;
-                        border-radius: 10px;
-                        background: var(--accent-dim);
-                        color: var(--accent);
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        font-size: 20px;
-                        margin-bottom: 12px;
-                    }
-                    #page-about .feat-title {
-                        font-size: 16px;
-                        font-weight: 700;
-                        color: var(--text);
-                        margin-bottom: 6px;
-                    }
-                    #page-about .feat-desc {
-                        font-size: 13px;
-                        color: var(--text-muted);
-                        line-height: 1.5;
-                    }
-                    
-                    #page-about .tech-pill {
-                        background: var(--card-bg);
-                        border: 1px solid var(--card-border);
-                        padding: 8px 14px;
-                        border-radius: 6px;
-                        text-align: center;
-                        font-weight: 600;
-                        font-size: 13px;
-                        color: var(--text-muted);
-                    }
-                    
-                    #page-about .req-box {
-                        display: flex;
-                        justify-content: space-between;
-                        padding: 12px 16px;
-                        background: var(--card-bg);
-                        border: 1px solid var(--card-border);
-                        border-radius: 6px;
-                    }
-                    #page-about .req-label { color: var(--text-muted); font-size: 13px; }
-                    #page-about .req-val { color: var(--text); font-weight: 700; font-size: 13px; }
-                    
-                    #page-about .dev-profile {
-                        display: flex;
-                        gap: 20px;
-                        align-items: flex-start;
-                        background: var(--card-bg);
-                        border: 1px solid var(--card-border);
-                        border-radius: 12px;
-                        padding: 20px;
-                    }
-                    #page-about .dev-avatar {
-                        width: 70px;
-                        height: 70px;
-                        border-radius: 50%;
-                        background: var(--bg);
-                        border: 2px solid var(--accent);
-                        display: flex;
-                        align-items: center;
-                        justify-content: center;
-                        overflow: hidden;
-                    }
-                    #page-about .dev-info { flex: 1; }
-                    #page-about .dev-name { font-size: 20px; font-weight: 700; color: var(--text); margin: 0 0 2px 0; }
-                    #page-about .dev-handle { font-size: 13px; color: var(--accent); margin: 0 0 10px 0; font-family: monospace; }
-                    #page-about .dev-bio { font-size: 14px; color: var(--text-muted); line-height: 1.5; margin: 0 0 16px 0; max-width: 500px; }
-                    #page-about .dev-links { display: flex; gap: 10px; flex-wrap: wrap; }
-                    #page-about .social-btn {
-                        padding: 8px 16px;
-                        border-radius: 6px;
-                        background: var(--bg);
-                        border: 1px solid var(--card-border);
-                        color: var(--text);
-                        text-decoration: none;
-                        font-size: 13px;
-                        font-weight: 600;
-                        display: inline-flex;
-                        align-items: center;
-                        gap: 6px;
-                    }
-                    #page-about .social-btn:hover {
-                        border-color: var(--text);
-                    }
-                    
-                    @media (max-width: 900px) {
-                        #page-about .grid-3 { grid-template-columns: repeat(2, 1fr); }
-                        #page-about .grid-2 { grid-template-columns: 1fr; }
-                    }
-                    @media (max-width: 600px) {
-                        #page-about .grid-3 { grid-template-columns: 1fr; }
-                        #page-about .dev-profile { flex-direction: column; align-items: center; text-align: center; }
-                        #page-about .dev-links { justify-content: center; }
-                    }
-                </style>
+const db = openDatabaseWithFallback();
+db.pragma('journal_mode = WAL');
 
-                <div class="about-hero">
-                    <div class="about-hero-content">
-                        <div class="hero-logo"><i class="fas fa-shield-alt"></i></div>
-                        <h1 class="hero-title">${t('المشرف الآلي', 'WhatsApp Auto Mod')}</h1>
-                        <p class="hero-description">${t('نظام إدارة مجموعات واتساب متقدم مع الذكاء الاصطناعي المحلي.', 'Advanced WhatsApp group management with local AI intelligence.')}</p>
-                        <div class="badge-container">
-                            <span class="status-badge accent"><i class="fas fa-check-circle"></i> ${t('نشط', 'Active')}</span>
-                            <span class="status-badge blue"><i class="fas fa-code-branch"></i> v6.6</span>
-                            <span class="status-badge"><i class="fab fa-osi"></i> ${t('مفتوح المصدر', 'Open Source')}</span>
-                        </div>
-                        <div style="margin-top: 28px;">
-                            <a href="https://github.com/az2oo1/wa-bot" target="_blank" style="display: inline-flex; align-items: center; gap: 10px; background: var(--text); color: var(--bg); padding: 12px 28px; border-radius: 30px; font-weight: 700; font-size: 15px; text-decoration: none; transition: transform 0.2s ease;">
-                                <i class="fab fa-github" style="font-size: 18px;"></i> ${t('المستودع على GitHub', 'View on GitHub')}
-                            </a>
-                        </div>
-                    </div>
-                </div>
+db.exec(`
+    CREATE TABLE IF NOT EXISTS global_settings (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE IF NOT EXISTS llm_settings (key TEXT PRIMARY KEY, value TEXT);
+    CREATE TABLE IF NOT EXISTS blacklist (number TEXT PRIMARY KEY);
+    CREATE TABLE IF NOT EXISTS blocked_extensions (ext TEXT PRIMARY KEY);
+    CREATE TABLE IF NOT EXISTS whitelist (number TEXT PRIMARY KEY); 
+    CREATE TABLE IF NOT EXISTS whatsapp_groups (id TEXT PRIMARY KEY, name TEXT);
+    CREATE TABLE IF NOT EXISTS custom_groups (
+        group_id TEXT PRIMARY KEY, admin_group TEXT, use_default_words INTEGER,
+        enable_word_filter INTEGER, enable_ai_filter INTEGER, enable_ai_media INTEGER,
+        auto_action INTEGER, enable_blacklist INTEGER, enable_anti_spam INTEGER,
+        spam_duplicate_limit INTEGER, spam_flood_limit INTEGER, spam_action TEXT,
+        enable_welcome_message INTEGER, welcome_message_text TEXT, custom_words TEXT,
+        custom_ai_trigger_words TEXT,
+        enable_join_profile_screening INTEGER,
+        use_global_qa INTEGER DEFAULT 0
+    );
+`);
 
-                <div class="about-container">
-                    
-                    <section class="overview-section">
-                        <div class="info-card" style="text-align: center;">
-                            <h3 style="font-size: 18px; color: var(--text); margin-top: 0; margin-bottom: 10px;">${t('عن النظام', 'About the System')}</h3>
-                            <p style="font-size: 14px; color: var(--text-muted); line-height: 1.6; max-width: 700px; margin: 0 auto;">
-                                ${t('هو نظام آلي ذكي لإدارة مجموعات واتساب يوفر حماية متقدمة من الرسائل غير المرغوبة والمحتوى المخالف. يتضمن تصفية كلمات مستخدمة، حجب الملحقات الخطرة، وإدارة قوائم حظر/سماح. يعمل بذكاء اصطناعي محلي ويوفر واجهة تحكم متقدمة.', 'An intelligent automated system for managing WhatsApp groups that provides advanced protection against spam and inappropriate content. Features custom word filtering, malicious extension blocking, and blacklist/whitelist management. Powered by local AI with an advanced dashboard.')}
-                            </p>
-                        </div>
-                    </section>
+db.exec(`
+    CREATE TABLE IF NOT EXISTS app_users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT NOT NULL UNIQUE,
+        password_hash TEXT NOT NULL,
+        display_name TEXT NOT NULL,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        is_superadmin INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
 
-                    <section>
-                        <div class="section-header">
-                            <h2><i class="fas fa-bolt"></i> ${t('الميزات الأساسية', 'Core Features')}</h2>
-                        </div>
-                        <div class="grid-3">
-                            <div class="info-card">
-                                <div class="feat-icon"><i class="fas fa-brain"></i></div>
-                                <div class="feat-title">${t('الذكاء الاصطناعي', 'AI Moderation')}</div>
-                                <div class="feat-desc">${t('كشف ومنع الرسائل غير المناسبة بذكاء محلي', 'Detect and block inappropriate messages dynamically.')}</div>
-                            </div>
-                            <div class="info-card">
-                                <div class="feat-icon"><i class="fas fa-shield-virus"></i></div>
-                                <div class="feat-title">${t('منع البريد المزعج', 'Anti-Spam')}</div>
-                                <div class="feat-desc">${t('حماية من الرسائل الملحة والفيضانات', 'Protection against repetitive and flood messages.')}</div>
-                            </div>
-                            <div class="info-card">
-                                <div class="feat-icon"><i class="fas fa-user-lock"></i></div>
-                                <div class="feat-title">${t('حظر وسماح مرن', 'Access Control')}</div>
-                                <div class="feat-desc">${t('إدارة مرنة للأرقام وقوائم الدخول', 'Flexible blacklist and whitelist configurations.')}</div>
-                            </div>
-                            <div class="info-card">
-                                <div class="feat-icon"><i class="fas fa-photo-video"></i></div>
-                                <div class="feat-title">${t('تصفية الملفات', 'Media Filtering')}</div>
-                                <div class="feat-desc">${t('حظر أنواع معينة من المرفقات والملفات', 'Strict restrictions on unwanted or risky media assets.')}</div>
-                            </div>
-                            <div class="info-card">
-                                <div class="feat-icon"><i class="fas fa-sliders-h"></i></div>
-                                <div class="feat-title">${t('تحكم شامل', 'Advanced Control')}</div>
-                                <div class="feat-desc">${t('تحكم كامل في إعدادات كل مجموعة', 'Deep and granular configurations customizable per group.')}</div>
-                            </div>
-                            <div class="info-card">
-                                <div class="feat-icon"><i class="fas fa-language"></i></div>
-                                <div class="feat-title">${t('تعدد اللغات', 'Multilingual')}</div>
-                                <div class="feat-desc">${t('دعم كامل للواجهتين العربية والإنجليزية', 'Native dashboard interfaces in both English and Arabic.')}</div>
-                            </div>
-                        </div>
-                    </section>
+    CREATE TABLE IF NOT EXISTS permission_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        permissions TEXT NOT NULL
+    );
 
-                    <div class="grid-2">
-                        <section>
-                            <div class="section-header">
-                                <h2><i class="fas fa-layer-group"></i> ${t('التقنيات المستخدمة', 'Tech Stack')}</h2>
-                            </div>
-                            <div class="grid-2" style="gap: 10px;">
-                                <div class="tech-pill">whatsapp-web.js</div>
-                                <div class="tech-pill">Node.js / Express</div>
-                                <div class="tech-pill">better-sqlite3</div>
-                                <div class="tech-pill">Ollama AI</div>
-                                <div class="tech-pill">Docker</div>
-                                <div class="tech-pill">Vanilla JS / CSS</div>
-                            </div>
-                        </section>
+    CREATE TABLE IF NOT EXISTS user_permission_groups (
+        user_id INTEGER NOT NULL,
+        permission_group_id INTEGER NOT NULL,
+        PRIMARY KEY (user_id, permission_group_id),
+        FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE,
+        FOREIGN KEY (permission_group_id) REFERENCES permission_groups(id) ON DELETE CASCADE
+    );
 
-                        <section>
-                            <div class="section-header">
-                                <h2><i class="fas fa-server"></i> ${t('متطلبات التشغيل', 'System Requirements')}</h2>
-                            </div>
-                            <div style="display: flex; flex-direction: column; gap: 8px;">
-                                <div class="req-box">
-                                    <span class="req-label">${t('الذاكرة (بدون AI)', 'RAM (Base)')}</span>
-                                    <span class="req-val">2 GB</span>
-                                </div>
-                                <div class="req-box">
-                                    <span class="req-label">${t('الذاكرة (مع AI)', 'RAM (w/ AI)')}</span>
-                                    <span class="req-val">8 GB+</span>
-                                </div>
-                                <div class="req-box">
-                                    <span class="req-label">${t('التخزين', 'Storage')}</span>
-                                    <span class="req-val">5 GB+ (20GB+ AI)</span>
-                                </div>
-                                <div class="req-box">
-                                    <span class="req-label">${t('بيئة العمل', 'Environment')}</span>
-                                    <span class="req-val">Node 16+ / Docker</span>
-                                </div>
-                            </div>
-                        </section>
-                    </div>
+    CREATE TABLE IF NOT EXISTS user_group_access (
+        user_id INTEGER NOT NULL,
+        wa_group_id TEXT NOT NULL,
+        PRIMARY KEY (user_id, wa_group_id),
+        FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
+    );
 
-                    <section>
-                        <div class="section-header">
-                            <h2><i class="fas fa-laptop-code"></i> ${t('المطور والمساهمون', 'Developer & Contributors')}</h2>
-                        </div>
-                        <div class="dev-profile" style="margin-bottom: 20px;">
-                            <div class="dev-avatar">
-                                <img src="https://github.com/az2oo1.png" alt="${t('عبدالعزيز القاسم', 'Abdulaziz Algassem')}" style="width: 100%; height: 100%; object-fit: cover;">
-                            </div>
-                            <div class="dev-info">
-                                <h3 class="dev-name">${t('عبدالعزيز القاسم', 'Abdulaziz Algassem')}</h3>
-                                <p class="dev-handle">@az2oo1 / INTERSTELLAR</p>
-                                <p class="dev-bio">
-                                    ${t('طالب تقنية معلومات متخصص في تطوير الحلول الذكية والتطبيقات المتقدمة.', 'IT student specialized in developing intelligent solutions and advanced applications.')}
-                                </p>
-                                <div class="dev-links">
-                                    <a href="https://github.com/az2oo1" target="_blank" class="social-btn"><i class="fab fa-github"></i> GitHub</a>
-                                    <a href="https://www.linkedin.com/in/agssa/" target="_blank" class="social-btn"><i class="fab fa-linkedin"></i> LinkedIn</a>
-                                    <a href="https://instagram.com/az2oo1" target="_blank" class="social-btn"><i class="fab fa-instagram"></i> Instagram</a>
-                                </div>
-                            </div>
-                        </div>
+    CREATE TABLE IF NOT EXISTS user_settings (
+        user_id INTEGER NOT NULL,
+        key TEXT NOT NULL,
+        value TEXT,
+        PRIMARY KEY (user_id, key),
+        FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
+    );
+`);
 
-                        <div class="info-card" style="display: flex; gap: 16px; align-items: flex-start; padding: 16px 20px;">
-                            <div class="dev-avatar" style="width: 50px; height: 50px; flex-shrink: 0; border-width: 1.5px; overflow: hidden;">
-                                <img src="https://github.com/Fahad-Alshalawi1.png" alt="${t('فهد الشلوي', 'Fahad Alshalawi')}" style="width: 100%; height: 100%; object-fit: cover;">
-                            </div>
-                            <div class="dev-info">
-                                <h3 class="dev-name" style="font-size: 18px; margin: 0 0 2px 0;">${t('فهد الشلوي', 'Fahad Alshalawi')}</h3>
-                                <p class="dev-handle" style="font-size: 13px; margin: 0 0 8px 0; color: var(--blue);"><i class="fas fa-brain"></i> ${t('مساهم الذكاء الاصطناعي', 'AI Contributor')}</p>
-                                <p class="dev-bio" style="font-size: 13px; margin: 0 0 12px 0; line-height: 1.5;">
-                                    ${t('مساعدة قيمة في تطوير خوارزميات الذكاء الاصطناعي وتجهيزها للعمل داخل النظام.', 'Valuable assistance in developing and integrating AI capabilities into the system.')}
-                                </p>
-                                <a href="https://github.com/Fahad-Alshalawi1" target="_blank" class="social-btn" style="padding: 6px 12px; font-size: 12px; border-radius: 6px;"><i class="fab fa-github"></i> GitHub</a>
-                            </div>
-                        </div>
-                    </section>
+const colsToAdd = [
+    'blocked_types TEXT', 'blocked_action TEXT', 'spam_types TEXT', 'spam_limits TEXT',
+    'enable_panic_mode INTEGER', 'panic_message_limit INTEGER', 'panic_time_window INTEGER',
+    'panic_lockout_duration INTEGER', 'panic_alert_target TEXT', 'panic_alert_message TEXT',
+    'enable_whitelist INTEGER', 'custom_blacklist TEXT', 'custom_whitelist TEXT',
+    'use_global_blacklist INTEGER', 'use_global_whitelist INTEGER',
+    'use_global_qa INTEGER DEFAULT 0',
+    'enable_qa_feature INTEGER', 'custom_qa TEXT', 'qa_event_date TEXT', 'qa_language TEXT', 'qa_event_dates TEXT',
+    'admin_language TEXT', 'custom_ai_trigger_words TEXT', 'enable_join_profile_screening INTEGER',
+    'enable_admin_sync INTEGER DEFAULT 0', 'enable_commands INTEGER DEFAULT 1'
+];
+colsToAdd.forEach(col => {
+    try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch (e) { }
+});
 
-                </div>
-            </div>
+function loadConfigFromDB() {
+    let newConfig = {
+        enableWordFilter: true, enableAIFilter: false, enableAIMedia: false,
+        autoAction: false, enableBlacklist: true, enableWhitelist: true, enableAntiSpam: false,
+        autoPurgeScheduleEnabled: false, autoPurgeIntervalMinutes: 60,
+        adminWhitelistSyncEnabled: false, adminWhitelistSyncIntervalMinutes: 60,
+        enableJoinProfileScreening: false,
+        safeMode: false,
+        purgeScheduleEnabled: false, purgeScheduleIntervalHours: 24,
+        adminSyncEnabled: false, adminSyncIntervalHours: 1,
+        globalQAEnabled: false, globalQA: [],
+        spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll',
+        blockedTypes: [], blockedAction: 'delete',
+        spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
+        spamLimits: { text: 7, image: 3, video: 2, audio: 3, document: 3, sticker: 3 },
+        defaultAdminGroup: '', defaultAdminLanguage: 'ar', defaultWords: [], aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية.',
+        aiFilterTriggerWords: ['نعم'],
+        ollamaUrl: 'http://localhost:11434', ollamaModel: 'llava', groupsConfig: {}
+    };
 
-            <div class="page" id="page-users">
-                <div class="page-header">
-                    <h2><i class="fas fa-user-shield"></i> ${t('إدارة المستخدمين', 'User Management')}</h2>
-                    <p>${t('إدارة الحسابات والصلاحيات بشكل مباشر داخل اللوحة', 'Manage users and permissions directly inside the dashboard')}</p>
-                </div>
+    db.prepare('SELECT * FROM global_settings').all().forEach(row => {
+        if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits', 'aiFilterTriggerWords', 'globalQA'].includes(row.key)) newConfig[row.key] = JSON.parse(row.value);
+        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled', 'autoPurgeScheduleEnabled', 'adminWhitelistSyncEnabled'].includes(row.key)) {
+            newConfig[row.key] = row.value === '1';
+        } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes'].includes(row.key)) {
+            newConfig[row.key] = parseInt(row.value, 10);
+        } else newConfig[row.key] = row.value;
+    });
 
-                <div class="um-stats">
-                    <div class="um-stat">
-                        <div class="um-stat-label">${t('إجمالي المستخدمين', 'Total Users')}</div>
-                        <div class="um-stat-value" id="um_users_count">0</div>
-                    </div>
-                    <div class="um-stat">
-                        <div class="um-stat-label">${t('المديرون العامون', 'Superadmins')}</div>
-                        <div class="um-stat-value" id="um_superadmins_count">0</div>
-                    </div>
-                    <div class="um-stat">
-                        <div class="um-stat-label">${t('مجموعات الصلاحيات', 'Permission Groups')}</div>
-                        <div class="um-stat-value" id="um_perm_count">0</div>
-                    </div>
-                </div>
+    db.prepare('SELECT * FROM llm_settings').all().forEach(row => { newConfig[row.key] = row.value; });
 
-                <div class="um-layout">
-                    <div class="um-stack">
-                        <div class="card success">
-                            <div class="card-header"><h3><i class="fas fa-user-plus"></i> ${t('إضافة مستخدم', 'Create User')}</h3></div>
-                            <p class="um-card-note">${t('أنشئ حساباً جديداً بسرعة ثم عدّل وصوله من لوحة الوصول بالأسفل.', 'Create a user quickly, then fine-tune access in the access panel below.')}</p>
-                            <div class="field-row">
-                                <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('اسم المستخدم', 'Username')}</label>
-                                    <input type="text" id="um_create_username" placeholder="agent_1">
-                                </div>
-                                <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('الاسم المعروض', 'Display Name')}</label>
-                                    <input type="text" id="um_create_display_name" placeholder="Agent One">
-                                </div>
-                            </div>
-                            <div class="field-row" style="margin-top:12px;">
-                                <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('كلمة المرور', 'Password')}</label>
-                                    <input type="password" id="um_create_password" placeholder="${t('8 أحرف على الأقل', 'At least 8 characters')}">
-                                </div>
-                                <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('الدور السريع', 'Quick Role')}</label>
-                                    <select id="um_create_quick_role">
-                                        <option value="viewer">${t('مشاهدة فقط', 'Viewer')}</option>
-                                        <option value="operator" selected>${t('مشغل', 'Operator')}</option>
-                                        <option value="admin">${t('مدير كامل', 'Full Admin')}</option>
-                                        <option value="custom">${t('مخصص (يدوي)', 'Custom (Manual)')}</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="field-row" style="margin-top:12px;">
-                                <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('نطاق المجموعات', 'Groups Scope')}</label>
-                                    <select id="um_create_group_scope">
-                                        <option value="all" selected>${t('كل المجموعات', 'All Groups')}</option>
-                                        <option value="none">${t('بدون صلاحيات مجموعات الآن', 'No Groups Yet')}</option>
-                                    </select>
-                                </div>
-                                <div class="toggle-row" style="margin-bottom:0; margin-top:21px;">
-                                    <div class="toggle-left">
-                                        <label class="switch"><input type="checkbox" id="um_create_superadmin"><span class="slider"></span></label>
-                                        <div class="toggle-label">${t('صلاحية مدير عام', 'Superadmin Permission')}</div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="field-row" style="margin-top:12px;">
-                                <button class="btn btn-primary" type="button" onclick="umCreateUser()"><i class="fas fa-wand-magic-sparkles"></i> ${t('إضافة المستخدم', 'Create User')}</button>
-                                <button class="btn btn-ghost" type="button" onclick="umLoadData(true)"><i class="fas fa-sync"></i> ${t('تحديث', 'Refresh')}</button>
-                            </div>
-                            <div id="um_create_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
-                        </div>
+    db.prepare('SELECT * FROM custom_groups').all().forEach(g => {
+        newConfig.groupsConfig[g.group_id] = {
+            adminGroup: g.admin_group, useDefaultWords: g.use_default_words === 1,
+            adminLanguage: g.admin_language || 'default',
+            enableWordFilter: g.enable_word_filter === 1, enableAIFilter: g.enable_ai_filter === 1,
+            enableAIMedia: g.enable_ai_media === 1, autoAction: g.auto_action === 1,
+            enableBlacklist: g.enable_blacklist === 1, enableWhitelist: g.enable_whitelist !== 0,
+            useGlobalBlacklist: g.use_global_blacklist !== 0, useGlobalWhitelist: g.use_global_whitelist !== 0,
+            useGlobalQA: g.use_global_qa === 1,
+            customBlacklist: JSON.parse(g.custom_blacklist || '[]'), customWhitelist: JSON.parse(g.custom_whitelist || '[]'),
+            enableAntiSpam: g.enable_anti_spam === 1, spamDuplicateLimit: g.spam_duplicate_limit,
+            spamFloodLimit: g.spam_flood_limit, spamAction: g.spam_action,
+            enableWelcomeMessage: g.enable_welcome_message === 1, welcomeMessageText: g.welcome_message_text,
+            words: JSON.parse(g.custom_words || '[]'), blockedTypes: JSON.parse(g.blocked_types || '[]'),
+            blockedAction: g.blocked_action || 'delete', spamTypes: JSON.parse(g.spam_types || '["text", "image", "video", "audio", "document", "sticker"]'),
+            spamLimits: JSON.parse(g.spam_limits || '{"text":7,"image":3,"video":2,"audio":3,"document":3,"sticker":3}'),
+            enablePanicMode: g.enable_panic_mode === 1, panicMessageLimit: g.panic_message_limit || 10,
+            panicTimeWindow: g.panic_time_window || 5, panicLockoutDuration: g.panic_lockout_duration || 10,
+            panicAlertTarget: g.panic_alert_target || 'both', panicAlertMessage: g.panic_alert_message || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.',
+            enableQAFeature: g.enable_qa_feature === 1, qaList: JSON.parse(g.custom_qa || '[]'), eventDate: g.qa_event_date || '', qaLanguage: g.qa_language || 'ar', eventDates: JSON.parse(g.qa_event_dates || '[]'),
+            aiFilterTriggerWords: JSON.parse(g.custom_ai_trigger_words || '[]'),
+            enableJoinProfileScreening: g.enable_join_profile_screening === 1,
+            enableAdminSync: g.enable_admin_sync === 1,
+            enableCommands: g.enable_commands !== 0
+        };
+    });
+    return newConfig;
+}
 
-                        <div class="card info">
-                            <div class="card-header"><h3><i class="fas fa-users"></i> ${t('المستخدمون', 'Users')}</h3></div>
-                            <div class="um-scroll-box" id="um_users_list"></div>
-                        </div>
+function syncTx(chats) {
+    const tx = db.transaction(() => {
+        const stmt = db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)');
+        for (const chat of chats) {
+            try {
+                if (chat.isGroup) {
+                    const groupId = chat.id._serialized;
+                    stmt.run(groupId, chat.name);
+                }
+            } catch (error) {
+                console.error(`[خطأ] فشل مزامنة المجموعة: ${chat.name}`, error.message);
+            }
+        }
+    });
+    tx();
+}
 
-                        <div class="card warning" style="margin-bottom:0;">
-                            <div class="card-header"><h3><i class="fas fa-sliders-h"></i> ${t('صلاحيات المستخدم المحدد', 'Selected User Access')}</h3></div>
-                            <p id="um_selected_user" style="color:var(--text-muted);margin-bottom:14px;">${t('اختر مستخدماً من القائمة', 'Select a user from the list')}</p>
-                            <div class="field-row um-actions-row" style="margin-bottom:10px;">
-                                <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-perm', true)"><i class="fas fa-check-double"></i> ${t('تحديد كل الصلاحيات', 'Select All Permissions')}</button>
-                                <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-perm', false)"><i class="fas fa-eraser"></i> ${t('إلغاء كل الصلاحيات', 'Clear Permissions')}</button>
-                                <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-wa', true)"><i class="fas fa-check-double"></i> ${t('تحديد كل المجموعات', 'Select All Groups')}</button>
-                                <button class="btn btn-ghost btn-sm" type="button" onclick="umToggleAll('um-wa', false)"><i class="fas fa-eraser"></i> ${t('إلغاء كل المجموعات', 'Clear Groups')}</button>
-                            </div>
-                            <div class="um-access-grid">
-                                <div>
-                                    <label class="field-label">${t('ماذا يمكن لهذا المستخدم أن يفعل؟', 'What can this user do?')}</label>
-                                    <div id="um_assign_perm_groups" class="chip-container" style="display:block;min-height:120px;"></div>
-                                </div>
-                                <div>
-                                    <label class="field-label">${t('في أي مجموعات يمكنه إدارة الإعدادات؟', 'Which groups can they manage?')}</label>
-                                    <div id="um_assign_wa_groups" class="chip-container" style="display:block;min-height:120px;"></div>
-                                </div>
-                            </div>
-                            <div class="field-row" style="margin-top:12px;">
-                                <button class="btn btn-primary" type="button" onclick="umSaveSelectedUserAccess()"><i class="fas fa-save"></i> ${t('حفظ الوصول', 'Save Access')}</button>
-                                <button class="btn btn-danger" type="button" onclick="umDeleteSelectedUser()"><i class="fas fa-trash"></i> ${t('حذف المستخدم', 'Delete User')}</button>
-                            </div>
-                            <div id="um_access_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
-                        </div>
-                    </div>
+function saveConfigToDB(conf) {
+    const saveTx = db.transaction(() => {
+        const setGlobal = db.prepare('INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)');
+        setGlobal.run('enableWordFilter', conf.enableWordFilter ? '1' : '0');
+        setGlobal.run('enableAIFilter', conf.enableAIFilter ? '1' : '0');
+        setGlobal.run('enableAIMedia', conf.enableAIMedia ? '1' : '0');
+        setGlobal.run('autoAction', conf.autoAction ? '1' : '0');
+        setGlobal.run('enableBlacklist', conf.enableBlacklist ? '1' : '0');
+        setGlobal.run('enableWhitelist', conf.enableWhitelist ? '1' : '0');
+        setGlobal.run('enableAntiSpam', conf.enableAntiSpam ? '1' : '0');
+        setGlobal.run('autoPurgeScheduleEnabled', conf.autoPurgeScheduleEnabled ? '1' : '0');
+        setGlobal.run('autoPurgeIntervalMinutes', String(Math.max(1, parseInt(conf.autoPurgeIntervalMinutes, 10) || 60)));
+        setGlobal.run('adminWhitelistSyncEnabled', conf.adminWhitelistSyncEnabled ? '1' : '0');
+        setGlobal.run('adminWhitelistSyncIntervalMinutes', String(Math.max(1, parseInt(conf.adminWhitelistSyncIntervalMinutes, 10) || 60)));
+        setGlobal.run('enableJoinProfileScreening', conf.enableJoinProfileScreening ? '1' : '0');
+        setGlobal.run('safeMode', conf.safeMode ? '1' : '0');
+        setGlobal.run('purgeScheduleEnabled', conf.purgeScheduleEnabled ? '1' : '0');
+        setGlobal.run('purgeScheduleIntervalHours', (conf.purgeScheduleIntervalHours || 24).toString());
+        setGlobal.run('adminSyncEnabled', conf.adminSyncEnabled ? '1' : '0');
+        setGlobal.run('adminSyncIntervalHours', (conf.adminSyncIntervalHours || 1).toString());
+        setGlobal.run('globalQAEnabled', conf.globalQAEnabled ? '1' : '0');
+        setGlobal.run('globalQA', JSON.stringify(conf.globalQA || []));
+        setGlobal.run('spamDuplicateLimit', conf.spamDuplicateLimit.toString());
+        setGlobal.run('spamAction', conf.spamAction);
+        setGlobal.run('blockedTypes', JSON.stringify(conf.blockedTypes));
+        setGlobal.run('blockedAction', conf.blockedAction);
+        setGlobal.run('spamTypes', JSON.stringify(conf.spamTypes));
+        setGlobal.run('spamLimits', JSON.stringify(conf.spamLimits));
+        setGlobal.run('defaultAdminGroup', conf.defaultAdminGroup);
+        setGlobal.run('defaultAdminLanguage', normalizeAdminLang(conf.defaultAdminLanguage));
+        setGlobal.run('defaultWords', JSON.stringify(conf.defaultWords));
+        setGlobal.run('aiFilterTriggerWords', JSON.stringify(conf.aiFilterTriggerWords || ['نعم']));
 
-                    <div class="um-stack">
-                        <div class="card purple">
-                            <div class="card-header"><h3><i class="fas fa-layer-group"></i> ${t('إضافة مجموعة صلاحيات', 'Create Permission Group')}</h3></div>
-                            <p class="um-card-note">${t('استخدم القوالب الجاهزة ثم عدّل الصلاحيات كما تريد.', 'Start with presets, then customize permissions as needed.')}</p>
-                            <div class="field-row um-actions-row" style="margin-bottom:10px;">
-                                <button class="btn btn-ghost btn-sm" type="button" onclick="umUsePermPreset('viewer')">${t('مشاهدة فقط', 'Viewer')}</button>
-                                <button class="btn btn-ghost btn-sm" type="button" onclick="umUsePermPreset('operator')">${t('مشغل', 'Operator')}</button>
-                                <button class="btn btn-ghost btn-sm" type="button" onclick="umUsePermPreset('admin')">${t('مدير كامل', 'Full Admin')}</button>
-                            </div>
-                            <div class="field-row">
-                                <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('اسم المجموعة', 'Group Name')}</label>
-                                    <input type="text" id="um_perm_name" placeholder="${t('المشرفون', 'Moderators')}">
-                                </div>
-                                <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('الوصف', 'Description')}</label>
-                                    <input type="text" id="um_perm_desc" placeholder="${t('وصف مختصر', 'Short description')}">
-                                </div>
-                            </div>
-                            <div class="field-group" style="margin-top:12px;">
-                                <label class="field-label">${t('اختر الصلاحيات', 'Choose Permissions')}</label>
-                                <div id="um_perm_picker" class="cb-group" style="gap:8px;"></div>
-                            </div>
-                            <div class="um-perm-help">
-                                <label class="field-label" style="margin-bottom:8px;"><i class="fas fa-circle-info"></i> ${t('شرح الصلاحيات', 'Permissions Guide')}</label>
-                                <div id="um_perm_help"></div>
-                            </div>
-                            <div class="field-row um-actions-row" style="margin-bottom:10px;">
-                                <button class="btn btn-ghost btn-sm" type="button" onclick="umSetAllCreatePerms(true)"><i class="fas fa-check-double"></i> ${t('تحديد الكل', 'Select All')}</button>
-                                <button class="btn btn-ghost btn-sm" type="button" onclick="umSetAllCreatePerms(false)"><i class="fas fa-eraser"></i> ${t('مسح الكل', 'Clear All')}</button>
-                            </div>
-                            <div class="field-group">
-                                <label class="field-label">${t('إضافة صلاحية مخصصة', 'Add Custom Permission')}</label>
-                                <div class="input-with-btn">
-                                    <input type="text" id="um_perm_custom" placeholder="custom:permission" onkeypress="if(event.key==='Enter'){event.preventDefault();umAddCustomCreatePerm();}">
-                                    <button class="btn btn-ghost" type="button" onclick="umAddCustomCreatePerm()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
-                                </div>
-                            </div>
-                            <div class="field-group">
-                                <label class="field-label">${t('الصلاحيات المختارة', 'Selected Permissions')}</label>
-                                <div id="um_perm_selected" class="chip-container" style="min-height:54px;"></div>
-                            </div>
-                            <div class="field-row" style="margin-top:6px;">
-                                <button class="btn btn-primary" id="um_perm_submit_btn" type="button" onclick="umCreatePermissionGroup()"><i class="fas fa-plus"></i> ${t('إضافة المجموعة', 'Create Group')}</button>
-                                <button class="btn btn-ghost" id="um_perm_cancel_btn" type="button" onclick="umResetPermissionForm()" style="display:none;"><i class="fas fa-rotate-left"></i> ${t('إلغاء التعديل', 'Cancel Edit')}</button>
-                            </div>
-                            <div id="um_perm_status" style="margin-top:10px;color:var(--text-muted);font-size:13px;"></div>
+        const setLLM = db.prepare('INSERT OR REPLACE INTO llm_settings (key, value) VALUES (?, ?)');
+        setLLM.run('aiPrompt', conf.aiPrompt); setLLM.run('ollamaUrl', conf.ollamaUrl); setLLM.run('ollamaModel', conf.ollamaModel);
 
-                            <button class="btn btn-ghost btn-sm" type="button" onclick="umTogglePermissionGroupsDrawer()" style="margin-top:10px; width:100%; justify-content:space-between;">
-                                <span><i class="fas fa-key"></i> ${t('عرض مجموعات الصلاحيات الحالية', 'Show Current Permission Groups')}</span>
-                                <i id="um_perm_drawer_icon" class="fas fa-chevron-down"></i>
-                            </button>
-                            <div id="um_perm_drawer" class="um-perm-drawer">
-                                <div class="card" style="margin:0; padding:14px; background:var(--input-bg); border-color:var(--card-border);">
-                                    <div class="um-scroll-box" id="um_perm_groups_list"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+        db.prepare('DELETE FROM custom_groups').run();
+        const insertGroup = db.prepare(`
+            INSERT INTO custom_groups (
+                group_id, admin_group, admin_language, use_default_words, enable_word_filter, enable_ai_filter, 
+                enable_ai_media, auto_action, enable_blacklist, enable_whitelist, enable_anti_spam, spam_duplicate_limit, 
+                spam_action, enable_welcome_message, welcome_message_text, custom_words,
+                blocked_types, blocked_action, spam_types, spam_limits,
+                enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
+                panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist, use_global_qa,
+                enable_qa_feature, custom_qa, qa_event_date, qa_language, qa_event_dates, custom_ai_trigger_words, enable_join_profile_screening,
+                enable_admin_sync, enable_commands
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
 
-            <div id="saveMsgToast" class="toast"><i class="fas fa-check-circle"></i> ${t('تم الحفظ في قاعدة البيانات بنجاح!', 'Saved to database successfully!')}</div>
+        for (const [gId, gData] of Object.entries(conf.groupsConfig)) {
+            insertGroup.run(
+                gId, gData.adminGroup, gData.adminLanguage || 'default', gData.useDefaultWords ? 1 : 0, gData.enableWordFilter ? 1 : 0,
+                gData.enableAIFilter ? 1 : 0, gData.enableAIMedia ? 1 : 0, gData.autoAction ? 1 : 0,
+                gData.enableBlacklist ? 1 : 0, gData.enableWhitelist ? 1 : 0, gData.enableAntiSpam ? 1 : 0, gData.spamDuplicateLimit,
+                gData.spamAction, gData.enableWelcomeMessage ? 1 : 0, gData.welcomeMessageText, JSON.stringify(gData.words),
+                JSON.stringify(gData.blockedTypes || []), gData.blockedAction || 'delete',
+                JSON.stringify(gData.spamTypes || []), JSON.stringify(gData.spamLimits || {}),
+                gData.enablePanicMode ? 1 : 0, gData.panicMessageLimit, gData.panicTimeWindow,
+                gData.panicLockoutDuration, gData.panicAlertTarget, gData.panicAlertMessage,
+                JSON.stringify(gData.customBlacklist || []), JSON.stringify(gData.customWhitelist || []),
+                gData.useGlobalBlacklist ? 1 : 0, gData.useGlobalWhitelist ? 1 : 0,
+                gData.useGlobalQA ? 1 : 0,
+                gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || '', gData.qaLanguage || 'ar', JSON.stringify(gData.eventDates || []), JSON.stringify(gData.aiFilterTriggerWords || []), gData.enableJoinProfileScreening ? 1 : 0,
+                gData.enableAdminSync ? 1 : 0, gData.enableCommands !== false ? 1 : 0
+            );
+        }
+    });
+    saveTx();
+}
 
-            </form>
-        </div>
+const SESSION_COOKIE_NAME = 'wa_bot_session';
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const REMEMBER_ME_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const sessionStore = new Map();
 
-        <div id="ollamaModal" class="modal">
-            <div class="modal-content">
-                <div class="modal-header">
-                    <h3 style="color:var(--blue);"><i class="fas fa-link"></i> ${t('إعدادات خادم Ollama', 'Ollama Server Settings')}</h3>
-                    <button class="close-modal" onclick="closeOllamaModal()">×</button>
-                </div>
-                <div class="field-group">
-                    <label class="field-label">${t('رابط الخادم (Endpoint URL)', 'Server URL (Endpoint)')}</label>
-                    <input type="text" id="ollamaUrl" value="${config.ollamaUrl}" dir="ltr" style="text-align:left; font-family:monospace;">
-                </div>
-                <div class="field-group">
-                    <label class="field-label">${t('اسم النموذج', 'Model Name')}</label>
-                    <input type="text" id="ollamaModel" value="${config.ollamaModel}" dir="ltr" style="text-align:left; font-family:monospace;" placeholder="Ex: llava">
-                </div>
-                <button type="button" class="btn btn-primary btn-full" onclick="closeOllamaModal()">${t('حفظ وإغلاق', 'Save & Close')}</button>
+const DEFAULT_PERMISSION_GROUPS = [
+    {
+        name: 'Viewer',
+        description: 'Read-only dashboard access',
+        permissions: ['dashboard:read', 'groups:view', 'logs:view']
+    },
+    {
+        name: 'Group Manager',
+        description: 'Manage scoped groups and media',
+        permissions: ['dashboard:read', 'groups:view', 'groups:manage-scoped', 'config:write-scoped', 'media:manage', 'logs:view']
+    },
+    {
+        name: 'Security Manager',
+        description: 'Manage security lists and anti-abuse actions',
+        permissions: ['dashboard:read', 'groups:view', 'security:manage', 'logs:view']
+    },
+    {
+        name: 'Operator',
+        description: 'Daily operations with import/export and bot actions',
+        permissions: ['dashboard:read', 'groups:view', 'config:write', 'security:manage', 'media:manage', 'import-export:manage', 'bot:logout', 'logs:view', 'users:manage']
+    }
+];
+
+function nowIso() {
+    return new Date().toISOString();
+}
+
+function sanitizeUsername(value) {
+    if (typeof value !== 'string') return '';
+    return value.trim().toLowerCase();
+}
+
+function parseJsonArray(value) {
+    try {
+        const parsed = JSON.parse(value || '[]');
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function normalizePermissionGroupName(value) {
+    return String(value || '').trim().replace(/\s+/g, ' ');
+}
+
+function normalizePermissionList(values) {
+    if (!Array.isArray(values)) return [];
+    const cleaned = values
+        .map(v => String(v || '').trim())
+        .filter(Boolean);
+    return Array.from(new Set(cleaned));
+}
+
+function hashPassword(password, saltHex) {
+    const salt = saltHex || crypto.randomBytes(16).toString('hex');
+    const digest = crypto.scryptSync(password, salt, 64).toString('hex');
+    return `${salt}:${digest}`;
+}
+
+function verifyPassword(password, storedHash) {
+    if (!storedHash || typeof storedHash !== 'string' || !storedHash.includes(':')) return false;
+    const [salt, savedDigestHex] = storedHash.split(':');
+    const actualDigestHex = crypto.scryptSync(password, salt, 64).toString('hex');
+    const savedDigest = Buffer.from(savedDigestHex, 'hex');
+    const actualDigest = Buffer.from(actualDigestHex, 'hex');
+    if (savedDigest.length !== actualDigest.length) return false;
+    return crypto.timingSafeEqual(savedDigest, actualDigest);
+}
+
+function parseCookies(req) {
+    const header = req.headers.cookie;
+    if (!header) return {};
+    return header.split(';').reduce((acc, segment) => {
+        const idx = segment.indexOf('=');
+        if (idx === -1) return acc;
+        const key = decodeURIComponent(segment.slice(0, idx).trim());
+        const val = decodeURIComponent(segment.slice(idx + 1).trim());
+        acc[key] = val;
+        return acc;
+    }, {});
+}
+
+function setSessionCookie(res, token, ttlMs = SESSION_TTL_MS) {
+    const secureFlag = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+    const maxAgeSeconds = Math.max(1, Math.floor((ttlMs || SESSION_TTL_MS) / 1000));
+    res.setHeader('Set-Cookie', `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${secureFlag}`);
+}
+
+function clearSessionCookie(res) {
+    res.setHeader('Set-Cookie', `${SESSION_COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`);
+}
+
+function cleanupExpiredSessions() {
+    const now = Date.now();
+    for (const [token, session] of sessionStore.entries()) {
+        if (!session || session.expiresAt <= now) {
+            sessionStore.delete(token);
+        }
+    }
+}
+
+setInterval(cleanupExpiredSessions, 15 * 60 * 1000).unref();
+
+function ensureDefaultPermissionGroups() {
+    const upsert = db.prepare(`
+        INSERT INTO permission_groups (name, description, permissions)
+        VALUES (?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET
+            description = excluded.description,
+            permissions = excluded.permissions
+    `);
+    for (const group of DEFAULT_PERMISSION_GROUPS) {
+        upsert.run(group.name, group.description, JSON.stringify(group.permissions));
+    }
+}
+
+function ensureBootstrapAdmin() {
+    const count = db.prepare('SELECT COUNT(*) AS count FROM app_users').get().count;
+    if (count > 0) return;
+
+    const username = 'admin';
+    const password = 'admin123';
+    const timestamp = nowIso();
+    const insertUser = db.prepare(`
+        INSERT INTO app_users (username, password_hash, display_name, is_active, is_superadmin, created_at, updated_at)
+        VALUES (?, ?, ?, 1, 1, ?, ?)
+    `);
+    const info = insertUser.run(username, hashPassword(password), 'System Admin', timestamp, timestamp);
+    db.prepare('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)')
+        .run(Number(info.lastInsertRowid), 'must_change_credentials', '1');
+    console.log('[Auth] Created bootstrap superadmin user: admin / admin123 (change immediately).');
+}
+
+function getUserByUsername(username) {
+    return db.prepare('SELECT * FROM app_users WHERE username = ?').get(username);
+}
+
+function getUserById(userId) {
+    return db.prepare('SELECT * FROM app_users WHERE id = ?').get(userId);
+}
+
+function isDefaultCredentialChangeRequired(userId) {
+    const row = db.prepare('SELECT value FROM user_settings WHERE user_id = ? AND key = ?').get(userId, 'must_change_credentials');
+    return Boolean(row && row.value === '1');
+}
+
+function setDefaultCredentialChangeRequired(userId, required) {
+    if (required) {
+        db.prepare('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)')
+            .run(userId, 'must_change_credentials', '1');
+        return;
+    }
+    db.prepare('DELETE FROM user_settings WHERE user_id = ? AND key = ?').run(userId, 'must_change_credentials');
+}
+
+function shouldShowDefaultLoginHint() {
+    const row = db.prepare("SELECT COUNT(*) AS count FROM user_settings WHERE key = 'must_change_credentials' AND value = '1'").get();
+    return row && row.count > 0;
+}
+
+function ensureLegacyBootstrapCredentialChangeFlag() {
+    const adminUser = getUserByUsername('admin');
+    if (!adminUser) return;
+    if (isDefaultCredentialChangeRequired(adminUser.id)) return;
+    if (verifyPassword('admin123', adminUser.password_hash)) {
+        setDefaultCredentialChangeRequired(adminUser.id, true);
+        console.log('[Auth] Marked legacy bootstrap admin account to require credential change.');
+    }
+}
+
+function getEffectivePermissions(user) {
+    if (!user || user.is_active !== 1) return [];
+    if (user.is_superadmin === 1) return ['*'];
+
+    const rows = db.prepare(`
+        SELECT pg.permissions
+        FROM user_permission_groups upg
+        JOIN permission_groups pg ON pg.id = upg.permission_group_id
+        WHERE upg.user_id = ?
+    `).all(user.id);
+
+    const merged = new Set();
+    rows.forEach(r => parseJsonArray(r.permissions).forEach(p => merged.add(String(p))));
+    return Array.from(merged);
+}
+
+function hasPermission(user, permission) {
+    const permissions = getEffectivePermissions(user);
+    return permissions.includes('*') || permissions.includes(permission);
+}
+
+function getAllowedGroupIds(user) {
+    if (!user || user.is_superadmin === 1) return null;
+    const rows = db.prepare('SELECT wa_group_id FROM user_group_access WHERE user_id = ?').all(user.id);
+    return new Set(rows.map(r => r.wa_group_id));
+}
+
+function createSession(userId, ttlMs = SESSION_TTL_MS) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const effectiveTtl = Math.max(1, Number(ttlMs) || SESSION_TTL_MS);
+    sessionStore.set(token, { userId, ttlMs: effectiveTtl, expiresAt: Date.now() + effectiveTtl });
+    return token;
+}
+
+function destroySession(req, res) {
+    const cookies = parseCookies(req);
+    const token = cookies[SESSION_COOKIE_NAME];
+    if (token) sessionStore.delete(token);
+    clearSessionCookie(res);
+}
+
+function requireAuthApi(req, res, next) {
+    const cookies = parseCookies(req);
+    const token = cookies[SESSION_COOKIE_NAME];
+    if (!token || !sessionStore.has(token)) return res.status(401).json({ error: 'Unauthorized' });
+
+    const session = sessionStore.get(token);
+    if (!session || session.expiresAt <= Date.now()) {
+        sessionStore.delete(token);
+        clearSessionCookie(res);
+        return res.status(401).json({ error: 'Session expired' });
+    }
+
+    const user = getUserById(session.userId);
+    if (!user || user.is_active !== 1) {
+        sessionStore.delete(token);
+        clearSessionCookie(res);
+        return res.status(401).json({ error: 'User inactive or not found' });
+    }
+
+    const ttlMs = session.ttlMs || SESSION_TTL_MS;
+    session.ttlMs = ttlMs;
+    session.expiresAt = Date.now() + ttlMs;
+    req.authUser = user;
+    req.authPermissions = getEffectivePermissions(user);
+    next();
+}
+
+function requireAuthPage(req, res, next) {
+    const cookies = parseCookies(req);
+    const token = cookies[SESSION_COOKIE_NAME];
+    if (!token || !sessionStore.has(token)) return res.redirect('/login');
+
+    const session = sessionStore.get(token);
+    if (!session || session.expiresAt <= Date.now()) {
+        sessionStore.delete(token);
+        clearSessionCookie(res);
+        return res.redirect('/login');
+    }
+
+    const user = getUserById(session.userId);
+    if (!user || user.is_active !== 1) {
+        sessionStore.delete(token);
+        clearSessionCookie(res);
+        return res.redirect('/login');
+    }
+
+    const ttlMs = session.ttlMs || SESSION_TTL_MS;
+    session.ttlMs = ttlMs;
+    session.expiresAt = Date.now() + ttlMs;
+    req.authUser = user;
+    req.authPermissions = getEffectivePermissions(user);
+    next();
+}
+
+function requirePermission(permission) {
+    return (req, res, next) => {
+        if (!req.authUser) return res.status(401).json({ error: 'Unauthorized' });
+        if (hasPermission(req.authUser, permission)) return next();
+        return res.status(403).json({ error: 'Forbidden' });
+    };
+}
+
+function normalizeUserAccessPayload(payload) {
+    const permissionGroupIds = Array.isArray(payload.permissionGroupIds) ? payload.permissionGroupIds.map(n => parseInt(n, 10)).filter(Number.isFinite) : [];
+    const allowedGroupIds = Array.isArray(payload.allowedGroupIds) ? payload.allowedGroupIds.map(g => String(g)) : [];
+    const settings = payload.settings && typeof payload.settings === 'object' ? payload.settings : {};
+    return { permissionGroupIds, allowedGroupIds, settings };
+}
+
+ensureDefaultPermissionGroups();
+ensureBootstrapAdmin();
+ensureLegacyBootstrapCredentialChangeFlag();
+
+if (db.prepare('SELECT count(*) as count FROM global_settings').get().count === 0) saveConfigToDB(loadConfigFromDB());
+let config = loadConfigFromDB();
+
+let autoPurgeTimer = null;
+let adminWhitelistSyncTimer = null;
+let isAutoPurgeRunning = false;
+let isAdminWhitelistSyncRunning = false;
+
+const app = express();
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use('/public', express.static(path.join(__dirname, 'public')));
+
+let currentQR = '';
+let botStatus = '<i class="fas fa-spinner fa-spin"></i> جاري تهيئة النظام وبدء التشغيل...';
+let botStatusKind = 'initializing';
+const userTrackers = new Map(); const abortedMessages = new Set(); const spamMutedUsers = new Map();
+const groupRaidTrackers = new Map(); const lockedGroups = new Set();
+const joinProfileReviewCache = new Map();
+
+// Client initialization tracking and debugging
+let isInitializing = false;
+let initializationTimeout = null;
+let initializationStartTime = null;
+let lastConnectionTimestamp = null;
+let clientConnectionHistory = [];
+
+function addConnectionLog(status, details = '') {
+    const timestamp = new Date().toLocaleTimeString('ar-SA', { hour12: false });
+    const logEntry = `[${timestamp}] Status: ${status}${details ? ` | Details: ${details}` : ''}`;
+    clientConnectionHistory.push(logEntry);
+    if (clientConnectionHistory.length > 100) clientConnectionHistory.shift();
+    console.log(`[اتصال] ${logEntry}`);
+}
+
+app.get('/login', (req, res) => {
+    const lang = req.headers.cookie && req.headers.cookie.includes('bot_lang=en') ? 'en' : 'ar';
+    const dir = lang === 'en' ? 'ltr' : 'rtl';
+    const t = (ar, en) => lang === 'en' ? en : ar;
+    const showDefaultHint = shouldShowDefaultLoginHint();
+    const html = `<!doctype html>
+<html lang="${lang}" dir="${dir}">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>${t('تسجيل الدخول', 'Sign In')}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root{--bg:#080c10;--card-bg:#131920;--card-border:#1e2830;--input-bg:#0a0f14;--input-border:#1e2830;--text:#dce8f5;--text-muted:#6b8099;--accent:#00c853;--accent-dim:rgba(0,200,83,.12);--red:#ff5252;--blue:#40c4ff}
+        *{box-sizing:border-box} html,body{margin:0;padding:0}
+        body{font-family:'IBM Plex Sans Arabic',sans-serif;background:radial-gradient(circle at 0 0,#0f1720 0,#080c10 45%,#070a0d 100%);color:var(--text);min-height:100vh;display:grid;place-items:center;padding:18px}
+        .card{width:min(96vw,460px);background:var(--card-bg);border:1px solid var(--card-border);border-radius:16px;padding:26px;box-shadow:0 24px 80px rgba(0,0,0,.5)}
+        .brand{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+        .brand .icon{width:80px;height:80px;border-radius:14px;background:transparent;display:flex;align-items:center;justify-content:center;font-size:22px;color:#fff;box-shadow:none;overflow:hidden}
+        .brand .icon img{width:100%;height:100%;object-fit:cover}
+        h1{margin:0;font-size:25px}
+        p{margin:4px 0 0;color:var(--text-muted)}
+        label{display:block;margin:14px 0 6px;font-weight:700;color:var(--text-muted);font-size:12px;text-transform:uppercase;letter-spacing:.5px}
+        input{width:100%;padding:12px 14px;border-radius:10px;border:1.5px solid var(--input-border);background:var(--input-bg);color:var(--text);font-family:inherit}
+        input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
+        .btn{margin-top:15px;width:100%;padding:12px 14px;border-radius:10px;border:1.5px solid rgba(0,200,83,.45);background:var(--accent-dim);color:var(--accent);font-weight:700;cursor:pointer;font-size:15px;transition:all .2s}
+        .btn:hover{transform:translateY(-1px);filter:none;box-shadow:none}
+        .lang-row{display:flex;justify-content:space-between;align-items:center;margin-top:10px}
+        .lang-btn{border:1.5px solid rgba(64,196,255,.45);background:rgba(64,196,255,.1);color:var(--blue);padding:6px 10px;border-radius:10px;cursor:pointer;font-weight:700;transition:all .2s}
+        .lang-btn:hover{transform:translateY(-1px);filter:none;box-shadow:none}
+        .hint{margin-top:12px;color:#ffd68a;font-size:13px}
+        .error{margin-top:8px;color:#ff9f9f;min-height:19px}
+        .input-wrap{position:relative}
+        .input-wrap input{padding-inline-end:48px}
+        [dir="rtl"] .input-wrap input{padding-inline-end:14px;padding-inline-start:48px}
+        .peek-btn{position:absolute;top:50%;transform:translateY(-50%);right:12px;background:transparent;border:none;color:var(--text-muted);cursor:pointer;font-size:16px;padding:4px;line-height:1;border-radius:8px;transition:color .2s}
+        .peek-btn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+        .peek-btn:hover{color:var(--accent)}
+        [dir="rtl"] .peek-btn{left:12px;right:auto}
+        .form-options{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;flex-wrap:wrap}
+        .remember-toggle{display:inline-flex}
+        .remember-toggle input{display:none}
+        .remember-chip{display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:999px;border:1.5px solid var(--card-border);background:var(--input-bg);color:var(--text-muted);font-size:13px;font-weight:700;cursor:pointer;transition:all .2s}
+        .remember-toggle input:checked + .remember-chip{border-color:rgba(0,200,83,.45);background:var(--accent-dim);color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
+        .remember-note{font-size:12px;color:var(--text-muted)}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="brand">
+            <div class="icon"><img src="/public/logo.png" alt="Bot Logo" onerror="this.style.display='none';document.querySelector('.brand .icon i')?.style.display='flex';"><i class="fas fa-robot" style="display:none"></i></div>
+            <div>
+                <h1>WA Bot</h1>
+                <p>${t('تسجيل الدخول للوصول إلى لوحة التحكم', 'Sign in to access dashboard controls')}</p>
             </div>
         </div>
-
-        <div id="debuggerModal" class="modal">
-            <div class="modal-content" style="max-width:800px; background:#0d1117; border-color:#21262d;">
-                <div class="modal-header">
-                    <h3 style="color:var(--accent); font-family:monospace;"><i class="fas fa-terminal"></i> ${t('سجل الأحداث المباشر', 'Live Event Logs')}</h3>
-                    <button class="close-modal" onclick="closeDebuggerModal()">×</button>
-                </div>
-                <div id="terminalOutput"></div>
-                <button type="button" class="btn btn-ghost btn-full" style="margin-top:14px;" onclick="closeDebuggerModal()">${t('إغلاق', 'Close')}</button>
+        <form id="loginForm">
+            <label for="username">${t('اسم المستخدم', 'Username')}</label>
+            <input id="username" name="username" autocomplete="username" required>
+            <label for="password">${t('كلمة المرور', 'Password')}</label>
+            <div class="input-wrap">
+                <input id="password" name="password" type="password" autocomplete="current-password" required>
+                <button type="button" class="peek-btn" id="passwordPeek" aria-label="${t('إظهار كلمة المرور', 'Show password')}" aria-pressed="false">
+                    <i class="fas fa-eye"></i>
+                </button>
             </div>
-        </div>
-
-        <div id="firstLoginModal" class="modal">
-            <div class="modal-content" style="max-width:620px; border-color:rgba(255,171,64,0.35); background:linear-gradient(180deg,rgba(255,171,64,0.06) 0,var(--card-bg) 60%);">
-                <div class="modal-header">
-                    <h3 style="color:var(--orange);"><i class="fas fa-user-lock"></i> ${t('تغيير بيانات الدخول مطلوب', 'Credential Change Required')}</h3>
-                </div>
-                <p style="color:var(--text-muted); margin-top:-8px; margin-bottom:14px; line-height:1.8;">
-                    ${t('تم تسجيل الدخول بالحساب الافتراضي. لأمان النظام، يجب تغيير اسم المستخدم وكلمة المرور قبل المتابعة.', 'You signed in with the default account. For security, you must change username and password before continuing.')}
-                </p>
-                <div class="field-group">
-                    <label class="field-label">${t('اسم المستخدم الجديد', 'New Username')}</label>
-                    <input id="firstLoginUsername" type="text" autocomplete="username" dir="ltr" style="text-align:left; font-family:monospace;" placeholder="admin_new">
-                </div>
-                <div class="field-group">
-                    <label class="field-label">${t('كلمة المرور الجديدة', 'New Password')}</label>
-                    <input id="firstLoginPassword" type="password" autocomplete="new-password" placeholder="${t('8 أحرف على الأقل', 'At least 8 characters')}">
-                </div>
-                <div class="field-group">
-                    <label class="field-label">${t('تأكيد كلمة المرور', 'Confirm Password')}</label>
-                    <input id="firstLoginConfirm" type="password" autocomplete="new-password" placeholder="${t('أعد كتابة كلمة المرور', 'Re-enter password')}">
-                </div>
-                <div id="firstLoginStatus" style="min-height:20px; color:var(--text-muted); margin-bottom:8px; font-size:13px;"></div>
-                <button type="button" class="btn btn-primary btn-full" onclick="submitFirstLoginChange()"><i class="fas fa-key"></i> ${t('حفظ ومتابعة', 'Save and Continue')}</button>
+            <div class="form-options">
+                <label class="remember-toggle">
+                    <input type="checkbox" id="rememberMe" name="rememberMe">
+                    <span class="remember-chip"><i class="fas fa-lock"></i> ${t('إبقني مسجلاً للدخول', 'Keep me logged in')}</span>
+                </label>
+                <span class="remember-note">${t('تجنب استخدام هذا الخيار على الأجهزة المشتركة.', 'Avoid using this on shared devices.')}</span>
             </div>
-        </div>
+            <button class="btn" type="submit">${t('تسجيل الدخول', 'Sign In')}</button>
+            <div class="error" id="error"></div>
+            ${showDefaultHint ? `<div class="hint">${t('بيانات الدخول الافتراضية أول مرة: admin / admin123', 'Default first login: admin / admin123')}</div>` : ''}
+            <div class="lang-row">
+                <span style="color:var(--text-muted);font-size:12px">${t('اللغة', 'Language')}</span>
+                <button class="lang-btn" type="button" onclick="switchLanguage()">${lang === 'en' ? 'AR' : 'EN'}</button>
+            </div>
+        </form>
+    </div>
+    <script>
+        const dict = {
+            login_failed: '${t('فشل تسجيل الدخول', 'Login failed')}',
+            show_password: '${t('إظهار كلمة المرور', 'Show password')}',
+            hide_password: '${t('إخفاء كلمة المرور', 'Hide password')}'
+        };
+        const form = document.getElementById('loginForm');
+        const err = document.getElementById('error');
+        const passwordInput = document.getElementById('password');
+        const peekBtn = document.getElementById('passwordPeek');
+        const rememberInput = document.getElementById('rememberMe');
 
-        <script>
-            const currentLang = '${lang}';
-            const currentDir = '${dir}';
-            let fetchedGroups = [];
-            let firstLoginEnforced = false;
+        if (peekBtn && passwordInput) {
+            peekBtn.addEventListener('click', () => {
+                const reveal = passwordInput.type === 'password';
+                passwordInput.type = reveal ? 'text' : 'password';
+                peekBtn.setAttribute('aria-pressed', reveal ? 'true' : 'false');
+                peekBtn.setAttribute('aria-label', reveal ? dict.hide_password : dict.show_password);
+                peekBtn.innerHTML = reveal ? '<i class="fas fa-eye-slash"></i>' : '<i class="fas fa-eye"></i>';
+                passwordInput.focus();
+            });
+        }
 
-            const dict = {
-                'delete_confirm': '${t("هل أنت متأكد من رغبتك في حذف الإعدادات المخصصة لهذه المجموعة؟", "Are you sure you want to delete settings for this group?")}',
-                'logout_confirm': '${t("هل أنت متأكد من رغبتك في تسجيل الخروج من حساب واتساب؟ سيتم فصل البوت.", "Are you sure you want to log out of WhatsApp? The bot will disconnect.")}',
-                'signout_confirm': '${t("هل تريد تسجيل الخروج من لوحة التحكم؟", "Do you want to sign out from the dashboard?")}',
-                'logging_out': '<i class="fas fa-spinner fa-spin"></i> ${t("جاري تسجيل الخروج...", "Logging out...")}',
-                'purge_warn': '⚠️ ${t("تحذير: هذا الخيار سيجعل البوت يبحث في جميع المجموعات، وسيطرد أي شخص موجود في القائمة السوداء فوراً. متأكد؟", "Warning: The bot will scan all groups and instantly kick anyone in the blacklist. Sure?")}',
-                'purging': '<i class="fas fa-spinner fa-spin"></i> ${t("جاري المسح والطرد من المجموعات...", "Scanning and purging...")}',
-                'saving_schedule': '<i class="fas fa-spinner fa-spin"></i> ${t("جاري حفظ الجدولة...", "Saving schedule...")}',
-                'running_sync': '<i class="fas fa-spinner fa-spin"></i> ${t("جاري التنفيذ...", "Running...")}',
-                'schedule_saved': '${t("✅ تم حفظ الجدولة بنجاح", "✅ Schedule saved successfully")}',
-                'schedule_load_fail': '${t("❌ تعذر تحميل إعدادات الجدولة", "❌ Failed to load schedule settings")}',
-                'sync_success': '${t("✅ تمت المزامنة بنجاح", "✅ Sync completed successfully")}',
-                'conn_err': '${t("حدث خطأ في الاتصال بالخادم.", "Connection error.")}',
-                'save_success': '<i class="fas fa-check-circle"></i> ${t("تم الحفظ في قاعدة البيانات بنجاح!", "Saved to database successfully!")}',
-                'save_fail': '<i class="fas fa-times-circle"></i> ${t("فشل الحفظ، تحقق من السيرفر", "Save failed, check server")}',
-                'group': '${t("المجموعة", "Group")}',
-                'no_id': '${t("لم يتم التحديد", "Not Selected")}',
-                'delete': '${t("حذف", "Delete")}',
-                'target_group': '${t("اختر المجموعة المستهدفة", "Select Target Group")}',
-                'admin_group': '${t("مجموعة الإدارة (اتركه فارغاً للافتراضي)", "Admin Group (leave empty for default)")}',
-                'admin_group_label': '${t("اختر المجموعة لتلقي التنبيهات", "Select Group for Alerts")}',
-                'admin_msg_lang': '${t("لغة رسائل الإدارة", "Admin Message Language")}',
-                'use_default_lang': '${t("استخدم الافتراضي", "Use Default")}',
-                'lang_ar': 'العربية',
-                'lang_en': 'English',
-                'blocked_types': '${t("الأنواع الممنوعة قطعياً", "Absolute Blocked Types")}',
-                'block_action': '${t("إجراء المنع", "Block Action")}',
-                'act_del': '${t("حذف الرسالة فقط", "Delete Message Only")}',
-                'act_poll': '${t("حذف + تصويت للإدارة", "Delete + Admin Poll")}',
-                'act_auto': '${t("حذف + طرد تلقائي", "Delete + Auto Kick")}',
-                'anti_spam': '${t("مكافحة الإزعاج (Anti-Spam)", "Anti-Spam")}',
-                'spam_desc': '${t("رصد الرسائل المتكررة خلال 15 ثانية", "Detect repeated messages within 15s")}',
-                'limits_15s': '${t("حدود كل نوع (15 ثانية)", "Type Limits (15s)")}',
-                'text_dup': '${t("تكرار النص", "Text Dup Limit")}',
-                'action': '${t("الإجراء", "Action")}',
-                'poll': '${t("تصويت للإدارة", "Admin Poll")}',
-                'auto_kick': '${t("طرد تلقائي", "Auto Kick")}',
-                'welcome_msg': '${t("رسالة ترحيبية عند الانضمام", "Welcome Message on Join")}',
-                'welcome_desc': '${t("يُرسلها البوت لكل عضو جديد", "Sent by bot to new members")}',
-                'msg_text': '${t("نص الرسالة ({user} للمنشن)", "Message Text ({user} for mention)")}',
-                'enable_bl': '${t("تفعيل القائمة السوداء", "Enable Blacklist")}',
-                'bl_desc': '${t("طرد فوري لأي رقم محظور", "Instant kick for banned numbers")}',
-                'word_filter': '${t("فلتر الكلمات الممنوعة", "Forbidden Word Filter")}',
-                'wf_desc': '${t("حذف فوري عند رصد كلمة ممنوعة", "Instant delete on forbidden word")}',
-                'use_global': '${t("تطبيق الكلمات العامة أيضاً", "Apply Global Words Too")}',
-                'ug_desc': '${t("إضافة قائمة الكلمات العامة لهذه المجموعة", "Include global words list")}',
-                'custom_words': '${t("كلمات ممنوعة مخصصة لهذه المجموعة", "Custom forbidden words for this group")}',
-                'add': '${t("إضافة", "Add")}',
-                'ai_text': '${t("المشرف الذكي (AI) للنصوص", "AI Moderator for Text")}',
-                'ai_trigger_words_group': '${t("كلمات تشغيل AI لهذه المجموعة", "AI Trigger Words for this group")}',
-                'ai_trigger_words_desc_group': '${t("عند وجود أي كلمة من هذه الكلمات في رد النموذج سيتم حذف الرسالة", "If AI response contains any of these words, the message will be deleted")}',
-                'join_profile_screening': '${t("فحص الملف الشخصي عند الانضمام", "Join Profile Screening")}',
-                'join_profile_screening_desc': '${t("يفحص الاسم/النبذة للأعضاء الجدد وطلبات الانضمام", "Checks profile name/bio for new joins and membership requests")}',
-                'ai_vision': '${t("تحليل الصور (Vision)", "Image Analysis (Vision)")}',
-                'direct_del': '${t("الحذف المباشر (تخطي التصويت)", "Direct Delete (Skip Poll)")}',
-                'select_group': '${t("اختر مجموعة...", "Select a Group...")}',
-                'default_setting': '${t("الاختيار الافتراضي (عام)", "Default (Global)")}',
-                'panic_mode': '${t("وضع الطوارئ (Panic Mode)", "Panic Mode")}',
-                'panic_desc': '${t("إغلاق المجموعة تلقائياً عند رصد هجوم", "Auto-lock group on raid detection")}',
-                'panic_msg_limit': '${t("عدد الرسائل", "Message Limit")}',
-                'panic_time_window': '${t("خلال (ثواني)", "Within (Seconds)")}',
-                'panic_lock_dur': '${t("مدة الإغلاق (دقائق)", "Lockout Duration (Mins)")}',
-                'panic_target': '${t("إرسال التنبيه إلى", "Send Alert To")}',
-                'target_group_only': '${t("المجموعة المستهدفة فقط", "Target Group Only")}',
-                'admin_group_only': '${t("مجموعة الإدارة فقط", "Admin Group Only")}',
-                'target_both': '${t("كلاهما (المجموعة والإدارة)", "Both")}',
-                'panic_msg_text': '${t("نص التنبيه ({time} للمدة)", "Alert Text ({time} for duration)")}',
-                'enable_wl': '${t("تفعيل القائمة البيضاء", "Enable Whitelist")}',
-                'wl_desc': '${t("تخطي الفلاتر للأرقام الموثوقة", "Bypass filters for trusted numbers")}',
-                'use_global_bl': '${t("تطبيق القائمة السوداء العامة", "Apply Global Blacklist")}',
-                'ug_bl_desc': '${t("دمج الأرقام المحظورة العامة مع هذه المجموعة", "Include globally banned numbers")}',
-                'custom_bl': '${t("أرقام محظورة مخصصة لهذه المجموعة", "Custom banned numbers for this group")}',
-                'use_global_wl': '${t("تطبيق القائمة البيضاء العامة", "Apply Global Whitelist")}',
-                'ug_wl_desc': '${t("دمج الأرقام الموثوقة العامة مع هذه المجموعة", "Include globally trusted numbers")}',
-                'custom_wl': '${t("أرقام موثوقة مخصصة لهذه المجموعة", "Custom trusted numbers for this group")}',
-                'cred_change_saving': '${t("جاري حفظ بيانات الدخول الجديدة...", "Saving new credentials...")}',
-                'cred_change_done': '${t("تم تحديث بيانات الدخول بنجاح", "Credentials updated successfully")}',
-                'cred_change_failed': '${t("فشل تحديث بيانات الدخول", "Credential update failed")}'
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            err.textContent = '';
+            const payload = {
+                username: document.getElementById('username').value,
+                password: passwordInput ? passwordInput.value : '',
+                rememberMe: rememberInput ? rememberInput.checked : false
             };
-
-            async function loadKnownGroups() {
-                try {
-                    const res = await fetch('/api/groups', { cache: 'no-store' });
-                    if (res.status === 401) {
-                        window.location.replace('/login');
-                        return;
-                    }
-                    if (!res.ok) return;
-                    fetchedGroups = await res.json();
-
-                    const defAdminContainer = document.getElementById('defaultAdminGroupContainer');
-                    if (defAdminContainer) {
-                        let defHTML = \`
-                            <label class="field-label" style="display:flex; justify-content:space-between; align-items:center;">
-                                <span>\${dict.admin_group_label}</span>
-                                <span style="cursor:pointer; color:var(--accent); font-size:14px;" onclick="loadKnownGroups()" title="Refresh Groups"><i class="fas fa-sync"></i></span>
-                            </label>
-                            <select id="defaultAdminGroup" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">
-                        \`;
-                        defHTML += \`<option value="">-- \${dict.select_group} --</option>\`;
-                        
-                        let defFound = false;
-                        fetchedGroups.forEach(g => {
-                            const sel = g.id === '${config.defaultAdminGroup}' ? 'selected' : '';
-                            if(sel) defFound = true;
-                            defHTML += \`<option value="\${g.id}" \${sel}>\${g.name}</option>\`;
-                        });
-
-                        if ('${config.defaultAdminGroup}' && !defFound) {
-                            defHTML += \`<option value="${config.defaultAdminGroup}" selected>${config.defaultAdminGroup} (Unknown)</option>\`;
-                        }
-                        defHTML += \`</select>\`;
-                        defHTML += \`
-                            <div class="field-group" style="margin-top:12px; margin-bottom:0;">
-                                <label class="field-label">\${dict.admin_msg_lang}</label>
-                                <select id="defaultAdminLanguage" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">
-                                    <option value="ar" ${config.defaultAdminLanguage === 'en' ? '' : 'selected'}>\${dict.lang_ar}</option>
-                                    <option value="en" ${config.defaultAdminLanguage === 'en' ? 'selected' : ''}>\${dict.lang_en}</option>
-                                </select>
-                            </div>
-                        \`;
-                        defAdminContainer.innerHTML = defHTML;
-                    }
-                    
-                    renderGroups();
-
-                } catch(e) {}
+            const res = await fetch('/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (!res.ok) {
+                const data = await res.json().catch(() => ({ error: dict.login_failed }));
+                err.textContent = data.error || dict.login_failed;
+                return;
             }
-
-            function createGroupSelectHTML(selectedValue, onchangeCode, allowEmpty = false) {
-                let html = \`<select onchange="\${onchangeCode}" dir="ltr" style="text-align:\${currentDir === 'rtl' ? 'right' : 'left'};">\`;
-                html += \`<option value="">\${allowEmpty ? '-- ' + dict.default_setting + ' --' : '-- ' + dict.select_group + ' --'}</option>\`;
-                let found = false;
-                fetchedGroups.forEach(g => {
-                    let sel = g.id === selectedValue ? 'selected' : '';
-                    if(sel) found = true;
-                    html += \`<option value="\${g.id}" \${sel}>\${g.name}</option>\`;
-                });
-                if (selectedValue && !found) {
-                    html += \`<option value="\${selectedValue}" selected>\${selectedValue} (Unknown)</option>\`;
-                }
-                html += \`</select>\`;
-                return html;
-            }
-
-            function switchLanguage(checkbox) {
-                const newLang = checkbox.checked ? 'en' : 'ar';
-                document.cookie = "bot_lang=" + newLang + "; path=/; max-age=31536000";
-                window.location.reload();
-            }
-
-            function openOllamaModal() { document.getElementById('ollamaModal').classList.add('open'); }
-            function closeOllamaModal() { document.getElementById('ollamaModal').classList.remove('open'); }
-            
-            let debuggerInterval;
-            function openDebuggerModal() { 
-                document.getElementById('debuggerModal').classList.add('open'); 
-                fetchLogs();
-                debuggerInterval = setInterval(fetchLogs, 1500); 
-            }
-            function closeDebuggerModal() { 
-                document.getElementById('debuggerModal').classList.remove('open'); 
-                clearInterval(debuggerInterval);
-            }
-
-            async function enforceFirstLoginChange() {
-                try {
-                    const res = await fetch('/auth/me', { cache: 'no-store' });
-                    if (res.status === 401) {
-                        window.location.replace('/login');
-                        return;
-                    }
-                    if (!res.ok) return;
-                    const me = await res.json();
-                    if (!me || !me.mustChangeCredentials) return;
-
-                    firstLoginEnforced = true;
-                    const modal = document.getElementById('firstLoginModal');
-                    const usernameInput = document.getElementById('firstLoginUsername');
-                    const statusEl = document.getElementById('firstLoginStatus');
-                    if (statusEl) statusEl.textContent = '';
-                    if (usernameInput) usernameInput.value = me.username || '';
-                    modal.classList.add('open');
-                    document.body.style.overflow = 'hidden';
-                } catch (e) {}
-            }
-
-            async function submitFirstLoginChange() {
-                const usernameEl = document.getElementById('firstLoginUsername');
-                const passwordEl = document.getElementById('firstLoginPassword');
-                const confirmEl = document.getElementById('firstLoginConfirm');
-                const statusEl = document.getElementById('firstLoginStatus');
-                if (!usernameEl || !passwordEl || !confirmEl || !statusEl) return;
-
-                statusEl.style.color = 'var(--text-muted)';
-                statusEl.textContent = dict.cred_change_saving;
-
-                try {
-                    const response = await fetch('/auth/first-login-change', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            username: usernameEl.value,
-                            password: passwordEl.value,
-                            confirmPassword: confirmEl.value
-                        })
-                    });
-
-                    if (!response.ok) {
-                        const data = await response.json().catch(() => ({ error: dict.cred_change_failed }));
-                        statusEl.style.color = 'var(--red)';
-                        statusEl.textContent = data.error || dict.cred_change_failed;
-                        return;
-                    }
-
-                    statusEl.style.color = 'var(--accent)';
-                    statusEl.textContent = dict.cred_change_done;
-                    firstLoginEnforced = false;
-                    document.getElementById('firstLoginModal').classList.remove('open');
-                    document.body.style.overflow = '';
-                    showToast('<i class="fas fa-check-circle"></i> ' + dict.cred_change_done);
-                } catch (e) {
-                    statusEl.style.color = 'var(--red)';
-                    statusEl.textContent = dict.cred_change_failed;
-                }
-            }
-
-            window.onclick = function(event) {
-                if (event.target === document.getElementById('ollamaModal')) closeOllamaModal();
-                if (event.target === document.getElementById('debuggerModal')) closeDebuggerModal();
-                if (event.target === document.getElementById('confirmModal')) closeConfirmModal(false);
-            }
-
-            let confirmResolver = null;
-
-            function closeConfirmModal(result) {
-                const modal = document.getElementById('confirmModal');
-                if (!modal) return;
-                modal.classList.remove('open');
-                document.body.style.overflow = '';
-                if (confirmResolver) {
-                    const resolve = confirmResolver;
-                    confirmResolver = null;
-                    resolve(Boolean(result));
-                }
-            }
-
-            function showConfirmModal(message, options = {}) {
-                return new Promise(resolve => {
-                    const modal = document.getElementById('confirmModal');
-                    const titleEl = document.getElementById('confirmModalTitle');
-                    const msgEl = document.getElementById('confirmModalMessage');
-                    const closeBtn = document.getElementById('confirmModalClose');
-                    const cancelBtn = document.getElementById('confirmModalCancel');
-                    const confirmBtn = document.getElementById('confirmModalConfirm');
-
-                    if (!modal || !titleEl || !msgEl || !closeBtn || !cancelBtn || !confirmBtn) {
-                        resolve(window.confirm(message));
-                        return;
-                    }
-
-                    const title = options.title || (currentLang === 'en' ? 'Confirm Action' : 'تأكيد الإجراء');
-                    const confirmText = options.confirmText || (currentLang === 'en' ? 'Confirm' : 'تأكيد');
-                    const cancelText = options.cancelText || (currentLang === 'en' ? 'Cancel' : 'إلغاء');
-
-                    titleEl.innerHTML = '<i class="fas fa-circle-question"></i> ' + umEscapeHtml(title);
-                    msgEl.textContent = String(message || '');
-                    confirmBtn.textContent = confirmText;
-                    cancelBtn.textContent = cancelText;
-                    confirmBtn.className = 'btn ' + (options.confirmClass || 'btn-danger');
-
-                    confirmResolver = resolve;
-                    modal.classList.add('open');
-                    document.body.style.overflow = 'hidden';
-
-                    confirmBtn.onclick = () => closeConfirmModal(true);
-                    cancelBtn.onclick = () => closeConfirmModal(false);
-                    closeBtn.onclick = () => closeConfirmModal(false);
-                });
-            }
-
-            async function fetchLogs() {
-                try {
-                    let res = await fetch('/api/logs');
-                    let logs = await res.json();
-                    const term = document.getElementById('terminalOutput');
-                    
-                    let html = logs.map(l => {
-                        let styled = l.replace(/\\[خطأ\\]/g, '<span style="color:#ff3b30">[ERROR]</span>')
-                                      .replace(/\\[معلومة\\]/g, '<span style="color:#4fc3f7">[INFO]</span>')
-                                      .replace(/\\[فحص\\]/g, '<span style="color:#ffeb3b">[SCAN]</span>')
-                                      .replace(/\\[أمان\\]/g, '<span style="color:#ff9800">[SECURITY]</span>')
-                                      .replace(/\\[تنظيف\\]/g, '<span style="color:#9c27b0">[PURGE]</span>');
-                        return \`<div>\${styled}</div>\`;
-                    }).join('');
-                    
-                    if (term.innerHTML !== html) {
-                        term.innerHTML = html;
-                        term.scrollTop = term.scrollHeight;
-                    }
-                } catch(e) {}
-            }
-
-            async function logoutBot() {
-                if(await showConfirmModal(dict.logout_confirm.replace(/<[^>]*>?/gm, ''))) {
-                    renderDashboardStatus(dict.logging_out.replace(/<[^>]*>?/gm, '').trim(), 'terminating');
-                    await fetch('/api/logout', { method: 'POST' });
-                }
-            }
-
-            async function signOutSession() {
-                if (firstLoginEnforced) return;
-                if (!await showConfirmModal(dict.signout_confirm.replace(/<[^>]*>?/gm, ''))) return;
-                try {
-                    await fetch('/auth/logout', { method: 'POST' });
-                } catch (e) {}
-                window.location.href = '/login';
-            }
-
-            const pageTitles = {
-                'page-status': '${t("حالة الاتصال", "Connection Status")}',
-                'page-blacklist': '${t("إدارة الأرقام", "Manage Numbers")}',
-                'page-general': '${t("الإعدادات العامة", "General Settings")}',
-                'page-spam': '${t("مكافحة الإزعاج", "Anti-Spam")}',
-                'page-media': '${t("فلتر الوسائط", "Media Filter")}',
-                'page-ai': '${t("الذكاء الاصطناعي", "AI Moderator")}',
-                'page-global-qa': '${t("الأسئلة العامة", "Global Q&A")}',
-                'page-groups': '${t("المجموعات المخصصة", "Custom Groups")}',
-                'page-import-export': '${t("استيراد/تصدير", "Import/Export")}',
-                'page-users': '${t("إدارة المستخدمين", "User Management")}',
-                'page-about': '${t("حول", "About")}'
-            };
-            function showPage(pageId, btn) {
-                document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-                document.getElementById(pageId).classList.add('active');
-                document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-                if(btn) btn.classList.add('active');
-                document.getElementById('topbarTitle').textContent = pageTitles[pageId] || '';
-                closeSidebar();
-                if (pageId === 'page-groups') {
-                    document.getElementById('groupsListView').style.display = 'block';
-                    document.getElementById('groupsDetailView').style.display = 'none';
-                }
-                if (pageId === 'page-users') {
-                    umLoadData();
-                }
-            }
-            function toggleSidebar() {
-                document.getElementById('sidebar').classList.toggle('open');
-                document.getElementById('sidebarOverlay').classList.toggle('open');
-            }
-            function closeSidebar() {
-                document.getElementById('sidebar').classList.remove('open');
-                document.getElementById('sidebarOverlay').classList.remove('open');
-            }
-            function showToast(msg) {
-                const t = document.getElementById('saveMsgToast');
-                if(msg) t.innerHTML = msg;
-                t.classList.add('show');
-                setTimeout(() => t.classList.remove('show'), 3000);
-            }
-
-            const umState = {
-                users: [],
-                permissionGroups: [],
-                waGroups: [],
-                selectedUserId: null,
-                selectedUserAccess: null,
-                loaded: false
-            };
-            const umNoUsersText = '${t('لا يوجد مستخدمون حالياً', 'No users yet')}';
-            const umNoPermsText = '${t('لا توجد مجموعات صلاحيات', 'No permission groups')}';
-            const umSelectText = '${t('اختيار', 'Select')}';
-            const umDeleteText = '${t('حذف', 'Delete')}';
-            const umCreatePermCatalog = [
-                'dashboard:read',
-                'groups:view',
-                'config:write',
-                'config:write-scoped',
-                'security:manage',
-                'media:manage',
-                'import-export:manage',
-                'bot:logout',
-                'logs:view',
-                'users:manage',
-                '*'
-            ];
-            const umPermissionDescriptions = {
-                'dashboard:read': {
-                    ar: 'عرض لوحة التحكم والحالة العامة.',
-                    en: 'View dashboard pages and overall status.'
-                },
-                'groups:view': {
-                    ar: 'عرض المجموعات وبياناتها داخل النظام.',
-                    en: 'View WhatsApp groups and related data.'
-                },
-                'config:write': {
-                    ar: 'تعديل جميع الإعدادات العامة وإعدادات المجموعات.',
-                    en: 'Edit all global and group configuration.'
-                },
-                'config:write-scoped': {
-                    ar: 'تعديل الإعدادات فقط ضمن المجموعات المسموح بها للمستخدم.',
-                    en: 'Edit settings only for groups assigned to this user.'
-                },
-                'security:manage': {
-                    ar: 'إدارة القوائم السوداء/البيضاء وإجراءات الأمان.',
-                    en: 'Manage blacklist/whitelist and security actions.'
-                },
-                'media:manage': {
-                    ar: 'رفع/حذف وإدارة الوسائط الخاصة بالمجموعات.',
-                    en: 'Upload/delete/manage group media files.'
-                },
-                'import-export:manage': {
-                    ar: 'استخدام أدوات الاستيراد والتصدير للبيانات.',
-                    en: 'Use data import and export tools.'
-                },
-                'bot:logout': {
-                    ar: 'فصل جلسة واتساب (تسجيل خروج البوت).',
-                    en: 'Disconnect WhatsApp session (bot logout).'
-                },
-                'logs:view': {
-                    ar: 'عرض سجل الأحداث والعمليات.',
-                    en: 'View event and activity logs.'
-                },
-                'users:manage': {
-                    ar: 'إدارة المستخدمين والصلاحيات.',
-                    en: 'Manage users and permissions.'
-                },
-                '*': {
-                    ar: 'وصول كامل لكل الصلاحيات بدون قيود.',
-                    en: 'Full unrestricted access to all permissions.'
-                }
-            };
-            const umNoCreatePermsText = '${t('لم يتم اختيار أي صلاحيات', 'No permissions selected')}';
-            let umCreatePermSet = new Set();
-            let umEditingPermGroupId = null;
-
-            async function umApi(url, options = {}) {
-                const res = await fetch(url, options);
-                const text = await res.text();
-                const contentType = res.headers.get('content-type') || '';
-
-                let data = null;
-                if (text) {
-                    if (contentType.includes('application/json')) {
-                        try { data = JSON.parse(text); } catch (e) { data = null; }
-                    } else {
-                        try { data = JSON.parse(text); } catch (e) { data = { message: text }; }
-                    }
-                }
-
-                if (!res.ok) {
-                    throw new Error((data && (data.error || data.message)) || (currentLang === 'en' ? 'Request failed' : 'فشل الطلب'));
-                }
-
-                return data;
-            }
-
-            function umSetStatus(elId, msg, isErr = false) {
-                const el = document.getElementById(elId);
-                if (!el) return;
-                el.textContent = msg || '';
-                el.style.color = isErr ? 'var(--red)' : 'var(--text-muted)';
-            }
-
-            function umUpdateSummary() {
-                const usersCountEl = document.getElementById('um_users_count');
-                const superadminsCountEl = document.getElementById('um_superadmins_count');
-                const permsCountEl = document.getElementById('um_perm_count');
-                if (usersCountEl) usersCountEl.textContent = String((umState.users || []).length);
-                if (superadminsCountEl) superadminsCountEl.textContent = String((umState.users || []).filter(u => u.is_superadmin).length);
-                if (permsCountEl) permsCountEl.textContent = String((umState.permissionGroups || []).length);
-            }
-
-            function umEscapeHtml(value) {
-                return String(value)
-                    .replace(/&/g, '&amp;')
-                    .replace(/</g, '&lt;')
-                    .replace(/>/g, '&gt;')
-                    .replace(/"/g, '&quot;')
-                    .replace(/'/g, '&#039;');
-            }
-
-            async function umLoadData(force = false) {
-                if (umState.loaded && !force) return;
-                try {
-                    const [users, permissionGroups, waGroups] = await Promise.all([
-                        umApi('/api/users'),
-                        umApi('/api/access/permission-groups'),
-                        umApi('/api/groups')
-                    ]);
-                    umState.users = users || [];
-                    umState.permissionGroups = permissionGroups || [];
-                    umState.waGroups = waGroups || [];
-                    umState.loaded = true;
-                    umUpdateSummary();
-                    umRenderUsers();
-                    umRenderPermissionGroups();
-                    umRenderSelectedUserAccess();
-                } catch (e) {
-                    umSetStatus('um_create_status', e.message, true);
-                }
-            }
-
-            function umRenderUsers() {
-                const container = document.getElementById('um_users_list');
-                if (!container) return;
-                if (!umState.users.length) {
-                    container.innerHTML = '<p style="color:var(--text-muted);">' + umNoUsersText + '</p>';
-                    return;
-                }
-
-                container.innerHTML = umState.users.map(user => {
-                    const activeTxt = user.is_active ? (currentLang === 'en' ? 'Active' : 'مفعل') : (currentLang === 'en' ? 'Disabled' : 'معطل');
-                    const superTxt = user.is_superadmin ? '<span class="chip" style="margin-inline-start:6px;">' + (currentLang === 'en' ? 'Superadmin' : 'مدير عام') + '</span>' : '';
-                    const activeClass = user.is_active ? 'green' : 'red';
-                    const selectedClass = Number(umState.selectedUserId) === Number(user.id) ? ' um-selected-user' : '';
-                    return '' +
-                        '<div class="group-list-card' + selectedClass + '" style="padding:12px 14px;margin-bottom:10px;align-items:center;" onclick="umSelectUser(' + user.id + ')">' +
-                            '<div class="glc-info">' +
-                                '<div class="glc-name">' + umEscapeHtml(user.display_name) + ' <span class="mono">(' + umEscapeHtml(user.username) + ')</span></div>' +
-                                '<div class="glc-chips" style="margin-top:6px;">' +
-                                    '<span class="glc-chip ' + activeClass + '">' + activeTxt + '</span>' +
-                                    superTxt +
-                                '</div>' +
-                            '</div>' +
-                            '<button type="button" class="btn btn-sm btn-blue" onclick="event.stopPropagation();umSelectUser(' + user.id + ')"><i class="fas fa-hand-pointer"></i> ' + umSelectText + '</button>' +
-                        '</div>';
-                }).join('');
-            }
-
-            function umRenderPermissionGroups() {
-                const container = document.getElementById('um_perm_groups_list');
-                if (!container) return;
-                if (!umState.permissionGroups.length) {
-                    container.innerHTML = '<p style="color:var(--text-muted);">' + umNoPermsText + '</p>';
-                    return;
-                }
-
-                container.innerHTML = umState.permissionGroups.map(group => {
-                    const perms = Array.isArray(group.permissions) ? group.permissions : [];
-                    const permsHtml = perms.map(p => '<span class="chip">' + umEscapeHtml(p) + '</span>').join('');
-                    return '' +
-                        '<div class="card" style="padding:12px;margin-bottom:10px;">' +
-                            '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">' +
-                                '<div>' +
-                                    '<strong>' + umEscapeHtml(group.name) + '</strong>' +
-                                    '<div style="color:var(--text-muted);font-size:12px;">' + umEscapeHtml(group.description || '') + '</div>' +
-                                '</div>' +
-                                '<div style="display:flex;gap:8px;">' +
-                                    '<button type="button" class="btn btn-sm btn-blue" onclick="umEditPermissionGroup(' + group.id + ')"><i class="fas fa-pen"></i> ' + (currentLang === 'en' ? 'Edit' : 'تعديل') + '</button>' +
-                                    '<button type="button" class="btn btn-sm btn-danger" onclick="umDeletePermissionGroup(' + group.id + ')"><i class="fas fa-trash"></i> ' + umDeleteText + '</button>' +
-                                '</div>' +
-                            '</div>' +
-                            '<div class="chip-container" style="margin-top:8px;max-height:80px;">' + permsHtml + '</div>' +
-                        '</div>';
-                }).join('');
-            }
-
-            async function umSelectUser(userId) {
-                umState.selectedUserId = userId;
-                try {
-                    umState.selectedUserAccess = await umApi('/api/users/' + userId + '/access');
-                    umRenderSelectedUserAccess();
-                } catch (e) {
-                    umSetStatus('um_access_status', e.message, true);
-                }
-            }
-
-            function umRenderSelectedUserAccess() {
-                const meta = document.getElementById('um_selected_user');
-                const permBox = document.getElementById('um_assign_perm_groups');
-                const waBox = document.getElementById('um_assign_wa_groups');
-                if (!meta || !permBox || !waBox) return;
-
-                if (!umState.selectedUserId || !umState.selectedUserAccess) {
-                    meta.textContent = currentLang === 'en' ? 'Select a user from the list' : 'اختر مستخدماً من القائمة';
-                    permBox.innerHTML = '';
-                    waBox.innerHTML = '';
-                    return;
-                }
-
-                const user = umState.users.find(u => u.id === umState.selectedUserId);
-                meta.innerHTML = user
-                    ? (currentLang === 'en' ? 'Editing:' : 'تعديل:') + ' <strong>' + umEscapeHtml(user.display_name) + '</strong> <span class="mono">(' + umEscapeHtml(user.username) + ')</span>'
-                    : (currentLang === 'en' ? 'User:' : 'المستخدم:') + ' #' + umState.selectedUserId;
-
-                const selectedPermIds = new Set((umState.selectedUserAccess.permissionGroupIds || []).map(Number));
-                permBox.innerHTML = umState.permissionGroups.map(group => {
-                    const checked = selectedPermIds.has(Number(group.id)) ? 'checked' : '';
-                    return '<label class="cb-label" style="display:flex;margin:0 0 8px 0;justify-content:flex-start;">' +
-                        '<input type="checkbox" data-role="um-perm" value="' + group.id + '" ' + checked + '> ' + umEscapeHtml(group.name) +
-                    '</label>';
-                }).join('');
-
-                const selectedWaIds = new Set(umState.selectedUserAccess.allowedGroupIds || []);
-                waBox.innerHTML = umState.waGroups.map(group => {
-                    const checked = selectedWaIds.has(group.id) ? 'checked' : '';
-                    return '<label class="cb-label" style="display:flex;margin:0 0 8px 0;justify-content:flex-start;">' +
-                        '<input type="checkbox" data-role="um-wa" value="' + group.id + '" ' + checked + '> ' + umEscapeHtml(group.name || group.id) +
-                    '</label>';
-                }).join('');
-            }
-
-            async function umCreateUser() {
-                try {
-                    const usernameRaw = document.getElementById('um_create_username').value;
-                    const displayNameRaw = document.getElementById('um_create_display_name').value;
-                    const passwordRaw = document.getElementById('um_create_password').value;
-                    const role = document.getElementById('um_create_quick_role').value;
-                    const scope = document.getElementById('um_create_group_scope').value;
-
-                    const isAdminByRole = role === 'admin';
-                    const isSuperadmin = document.getElementById('um_create_superadmin').checked || isAdminByRole;
-
-                    await umApi('/api/users/create', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            username: usernameRaw,
-                            displayName: displayNameRaw,
-                            password: passwordRaw,
-                            isSuperadmin
-                        })
-                    });
-
-                    await umLoadData(true);
-
-                    const usernameNorm = String(usernameRaw || '').trim().toLowerCase();
-                    const createdUser = umState.users.find(u => String(u.username || '').toLowerCase() === usernameNorm);
-
-                    if (createdUser && !isSuperadmin && role !== 'custom') {
-                        const roleName = role === 'viewer' ? 'Viewer' : 'Operator';
-                        const roleGroup = umState.permissionGroups.find(g => String(g.name || '').toLowerCase() === roleName.toLowerCase());
-                        const permissionGroupIds = roleGroup ? [roleGroup.id] : [];
-                        const allowedGroupIds = scope === 'all' ? umState.waGroups.map(g => g.id) : [];
-
-                        await umApi('/api/users/' + createdUser.id + '/access', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ permissionGroupIds, allowedGroupIds, settings: {} })
-                        });
-                    }
-
-                    umSetStatus('um_create_status', currentLang === 'en' ? 'User created and configured successfully' : 'تم إنشاء المستخدم وضبط الصلاحيات بنجاح');
-                    document.getElementById('um_create_password').value = '';
-                    await umLoadData(true);
-                } catch (e) {
-                    umSetStatus('um_create_status', e.message, true);
-                }
-            }
-
-            async function umCreatePermissionGroup() {
-                try {
-                    const permissions = Array.from(umCreatePermSet);
-                    if (!permissions.length) {
-                        throw new Error(currentLang === 'en' ? 'Select at least one permission' : 'اختر صلاحية واحدة على الأقل');
-                    }
-                    const isEditMode = umEditingPermGroupId !== null;
-                    await umApi(isEditMode ? '/api/access/permission-groups/update' : '/api/access/permission-groups/create', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            id: isEditMode ? umEditingPermGroupId : undefined,
-                            name: document.getElementById('um_perm_name').value,
-                            description: document.getElementById('um_perm_desc').value,
-                            permissions
-                        })
-                    });
-                    umResetPermissionForm(false);
-                    umSetStatus('um_perm_status', isEditMode
-                        ? (currentLang === 'en' ? 'Permission group updated' : 'تم تحديث مجموعة الصلاحيات')
-                        : (currentLang === 'en' ? 'Permission group created' : 'تم إنشاء مجموعة الصلاحيات'));
-                    await umLoadData(true);
-                } catch (e) {
-                    umSetStatus('um_perm_status', e.message, true);
-                }
-            }
-
-            async function umDeletePermissionGroup(id) {
-                if (!await showConfirmModal(currentLang === 'en' ? 'Delete this permission group?' : 'هل تريد حذف مجموعة الصلاحيات؟')) return;
-                try {
-                    await umApi('/api/access/permission-groups/delete', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id })
-                    });
-                    if (umEditingPermGroupId !== null && Number(umEditingPermGroupId) === Number(id)) {
-                        umResetPermissionForm(false);
-                    }
-                    umSetStatus('um_perm_status', currentLang === 'en' ? 'Permission group deleted' : 'تم حذف مجموعة الصلاحيات');
-                    await umLoadData(true);
-                } catch (e) {
-                    umSetStatus('um_perm_status', e.message, true);
-                }
-            }
-
-            async function umSaveSelectedUserAccess() {
-                if (!umState.selectedUserId) {
-                    umSetStatus('um_access_status', currentLang === 'en' ? 'Select a user first' : 'اختر مستخدماً أولاً', true);
-                    return;
-                }
-                try {
-                    const permissionGroupIds = Array.from(document.querySelectorAll('input[data-role="um-perm"]:checked')).map(cb => Number(cb.value));
-                    const allowedGroupIds = Array.from(document.querySelectorAll('input[data-role="um-wa"]:checked')).map(cb => cb.value);
-                    await umApi('/api/users/' + umState.selectedUserId + '/access', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ permissionGroupIds, allowedGroupIds, settings: {} })
-                    });
-                    umSetStatus('um_access_status', currentLang === 'en' ? 'Access saved successfully' : 'تم حفظ الوصول بنجاح');
-                    await umSelectUser(umState.selectedUserId);
-                    await umLoadData(true);
-                } catch (e) {
-                    umSetStatus('um_access_status', e.message, true);
-                }
-            }
-
-            async function umDeleteSelectedUser() {
-                if (!umState.selectedUserId) {
-                    umSetStatus('um_access_status', currentLang === 'en' ? 'Select a user first' : 'اختر مستخدماً أولاً', true);
-                    return;
-                }
-                if (!await showConfirmModal(currentLang === 'en' ? 'Delete selected user?' : 'هل تريد حذف المستخدم المحدد؟')) return;
-                try {
-                    await umApi('/api/users/delete', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ userId: umState.selectedUserId })
-                    });
-                    umSetStatus('um_access_status', currentLang === 'en' ? 'User deleted' : 'تم حذف المستخدم');
-                    umState.selectedUserId = null;
-                    umState.selectedUserAccess = null;
-                    await umLoadData(true);
-                } catch (e) {
-                    umSetStatus('um_access_status', e.message, true);
-                }
-            }
-
-            function umUsePermPreset(preset) {
-                const presets = {
-                    viewer: ['dashboard:read', 'groups:view', 'logs:view'],
-                    operator: ['dashboard:read', 'groups:view', 'config:write', 'security:manage', 'media:manage', 'import-export:manage', 'bot:logout', 'logs:view', 'users:manage'],
-                    admin: ['*']
-                };
-                const lines = presets[preset] || [];
-                umCreatePermSet = new Set(lines);
-                umRenderCreatePermPicker();
-                umRenderCreatePermSelection();
-            }
-
-            function umTogglePermissionGroupsDrawer(forceOpen = null) {
-                const drawer = document.getElementById('um_perm_drawer');
-                const icon = document.getElementById('um_perm_drawer_icon');
-                if (!drawer || !icon) return;
-
-                const shouldOpen = typeof forceOpen === 'boolean' ? forceOpen : !drawer.classList.contains('open');
-                drawer.classList.toggle('open', shouldOpen);
-                icon.className = shouldOpen ? 'fas fa-chevron-up' : 'fas fa-chevron-down';
-            }
-
-            function umRenderCreatePermPicker() {
-                const picker = document.getElementById('um_perm_picker');
-                if (!picker) return;
-                picker.innerHTML = '';
-                umCreatePermCatalog.forEach(permission => {
-                    const label = document.createElement('label');
-                    label.className = 'cb-label';
-                    label.style.margin = '0';
-
-                    const checkbox = document.createElement('input');
-                    checkbox.type = 'checkbox';
-                    checkbox.checked = umCreatePermSet.has(permission);
-                    checkbox.addEventListener('change', () => umToggleCreatePerm(permission, checkbox.checked));
-                    label.appendChild(checkbox);
-
-                    const text = document.createElement('span');
-                    text.textContent = ' ' + permission;
-                    label.appendChild(text);
-
-                    picker.appendChild(label);
-                });
-            }
-
-            function umRenderPermissionHelp() {
-                const helpBox = document.getElementById('um_perm_help');
-                if (!helpBox) return;
-                helpBox.innerHTML = umCreatePermCatalog.map(permission => {
-                    const desc = umPermissionDescriptions[permission] || {
-                        ar: 'صلاحية مخصصة.',
-                        en: 'Custom permission.'
-                    };
-                    const text = currentLang === 'en' ? desc.en : desc.ar;
-                    return '<div class="um-perm-help-item">' +
-                        '<div class="um-perm-help-key">' + umEscapeHtml(permission) + '</div>' +
-                        '<div class="um-perm-help-desc">' + umEscapeHtml(text) + '</div>' +
-                    '</div>';
-                }).join('');
-            }
-
-            function umRenderCreatePermSelection() {
-                const selected = document.getElementById('um_perm_selected');
-                if (!selected) return;
-                const permissions = Array.from(umCreatePermSet);
-                if (!permissions.length) {
-                    selected.innerHTML = '<span style="color:var(--text-muted);font-size:13px;">' + umNoCreatePermsText + '</span>';
-                    return;
-                }
-                selected.innerHTML = '';
-                permissions.forEach(permission => {
-                    const chip = document.createElement('span');
-                    chip.className = 'chip';
-                    chip.textContent = permission;
-
-                    const remove = document.createElement('span');
-                    remove.className = 'chip-remove';
-                    remove.innerHTML = '&times;';
-                    remove.addEventListener('click', () => umRemoveCreatePerm(permission));
-                    chip.appendChild(document.createTextNode(' '));
-                    chip.appendChild(remove);
-
-                    selected.appendChild(chip);
-                });
-            }
-
-            function umResetPermissionForm(clearStatus = true) {
-                umEditingPermGroupId = null;
-                const nameEl = document.getElementById('um_perm_name');
-                const descEl = document.getElementById('um_perm_desc');
-                const customEl = document.getElementById('um_perm_custom');
-                const submitBtn = document.getElementById('um_perm_submit_btn');
-                const cancelBtn = document.getElementById('um_perm_cancel_btn');
-
-                if (nameEl) nameEl.value = '';
-                if (descEl) descEl.value = '';
-                if (customEl) customEl.value = '';
-
-                umCreatePermSet = new Set();
-                umRenderCreatePermPicker();
-                umRenderCreatePermSelection();
-
-                if (submitBtn) {
-                    submitBtn.innerHTML = '<i class="fas fa-plus"></i> ' + (currentLang === 'en' ? 'Create Group' : 'إضافة المجموعة');
-                }
-                if (cancelBtn) cancelBtn.style.display = 'none';
-                if (clearStatus) umSetStatus('um_perm_status', '');
-            }
-
-            function umEditPermissionGroup(id) {
-                const group = umState.permissionGroups.find(g => Number(g.id) === Number(id));
-                if (!group) {
-                    umSetStatus('um_perm_status', currentLang === 'en' ? 'Permission group not found' : 'لم يتم العثور على مجموعة الصلاحيات', true);
-                    return;
-                }
-
-                umEditingPermGroupId = Number(group.id);
-
-                const nameEl = document.getElementById('um_perm_name');
-                const descEl = document.getElementById('um_perm_desc');
-                const submitBtn = document.getElementById('um_perm_submit_btn');
-                const cancelBtn = document.getElementById('um_perm_cancel_btn');
-
-                if (nameEl) nameEl.value = group.name || '';
-                if (descEl) descEl.value = group.description || '';
-                umCreatePermSet = new Set(Array.isArray(group.permissions) ? group.permissions : []);
-
-                umRenderCreatePermPicker();
-                umRenderCreatePermSelection();
-
-                if (submitBtn) {
-                    submitBtn.innerHTML = '<i class="fas fa-save"></i> ' + (currentLang === 'en' ? 'Save Changes' : 'حفظ التعديلات');
-                }
-                if (cancelBtn) cancelBtn.style.display = 'inline-flex';
-
-                umTogglePermissionGroupsDrawer(true);
-                umSetStatus('um_perm_status', currentLang === 'en' ? 'Editing permission group' : 'جاري تعديل مجموعة الصلاحيات');
-            }
-
-            function umToggleCreatePerm(permission, checked) {
-                if (checked) umCreatePermSet.add(permission);
-                else umCreatePermSet.delete(permission);
-                umRenderCreatePermSelection();
-            }
-
-            function umRemoveCreatePerm(permission) {
-                umCreatePermSet.delete(permission);
-                umRenderCreatePermPicker();
-                umRenderCreatePermSelection();
-            }
-
-            function umAddCustomCreatePerm() {
-                const input = document.getElementById('um_perm_custom');
-                if (!input) return;
-                const permission = String(input.value || '').trim();
-                if (!permission) return;
-                umCreatePermSet.add(permission);
-                input.value = '';
-                umRenderCreatePermPicker();
-                umRenderCreatePermSelection();
-            }
-
-            function umSetAllCreatePerms(checked) {
-                umCreatePermSet = checked ? new Set(umCreatePermCatalog) : new Set();
-                umRenderCreatePermPicker();
-                umRenderCreatePermSelection();
-            }
-
-            function umToggleAll(role, checked) {
-                document.querySelectorAll('input[data-role="' + role + '"]').forEach(el => {
-                    el.checked = checked;
-                });
-            }
-
-            function umHandleQuickRoleChange() {
-                const roleEl = document.getElementById('um_create_quick_role');
-                const superEl = document.getElementById('um_create_superadmin');
-                if (!roleEl || !superEl) return;
-                if (roleEl.value === 'admin') superEl.checked = true;
-                if (roleEl.value === 'viewer' || roleEl.value === 'operator') superEl.checked = false;
-            }
-
-            const umQuickRoleEl = document.getElementById('um_create_quick_role');
-            if (umQuickRoleEl) umQuickRoleEl.addEventListener('change', umHandleQuickRoleChange);
-            umRenderCreatePermPicker();
-            umRenderPermissionHelp();
-            umRenderCreatePermSelection();
-
-            let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
-            let aiFilterTriggerWordsArr = ${JSON.stringify(config.aiFilterTriggerWords || ['نعم'])};
-            let globalQAArr = ${JSON.stringify(config.globalQA || [])};
-            let globalQAEditingIndex = null;
-            let globalQAQuestionsDraft = [];
-            let globalQAEventDatesDraft = [];
-            let globalQALegacyEventDate = '';
-            let globalQACurrentAnswer = '';
-            let globalQAPendingMediaFile = '';
-            let globalQALanguage = 'ar';
-            let globalQAMediaLoaded = false;
-            let blacklistArr = ${JSON.stringify(blacklistArr)}; 
-            let blockedExtensionsArr = ${JSON.stringify(blockedExtensionsArr)}; 
-            let whitelistArr = ${JSON.stringify(whitelistArr)}; 
-            let groupsConfigObj = ${JSON.stringify(config.groupsConfig)};
-            const metaTypes = ${JSON.stringify(mediaTypesMeta)};
-            
-            let groupsArr = Object.keys(groupsConfigObj).map(key => ({
-                id: key,
-                adminGroup: groupsConfigObj[key].adminGroup || '',
-                adminLanguage: groupsConfigObj[key].adminLanguage || 'default',
-                words: groupsConfigObj[key].words || [],
-                aiFilterTriggerWords: groupsConfigObj[key].aiFilterTriggerWords || [],
-                useDefaultWords: groupsConfigObj[key].useDefaultWords !== false,
-                enableJoinProfileScreening: groupsConfigObj[key].enableJoinProfileScreening || false,
-                enableWordFilter: groupsConfigObj[key].enableWordFilter !== false,
-                enableAIFilter: groupsConfigObj[key].enableAIFilter || false,
-                enableAIMedia: groupsConfigObj[key].enableAIMedia || false,
-                autoAction: groupsConfigObj[key].autoAction || false,
-                enableBlacklist: groupsConfigObj[key].enableBlacklist !== false,
-                enableWhitelist: groupsConfigObj[key].enableWhitelist !== false,
-                useGlobalBlacklist: groupsConfigObj[key].useGlobalBlacklist !== false,
-                useGlobalWhitelist: groupsConfigObj[key].useGlobalWhitelist !== false,
-                useGlobalQA: groupsConfigObj[key].useGlobalQA === true,
-                customBlacklist: groupsConfigObj[key].customBlacklist || [],
-                customWhitelist: groupsConfigObj[key].customWhitelist || [],
-                enableAntiSpam: groupsConfigObj[key].enableAntiSpam || false,
-                spamDuplicateLimit: groupsConfigObj[key].spamDuplicateLimit || 3,
-                spamAction: groupsConfigObj[key].spamAction || 'poll',
-                enableWelcomeMessage: groupsConfigObj[key].enableWelcomeMessage || false, 
-                welcomeMessageText: groupsConfigObj[key].welcomeMessageText || '${t("مرحباً بك يا {user} في مجموعتنا!", "Welcome {user} to our group!")}',
-                blockedTypes: groupsConfigObj[key].blockedTypes || [],
-                blockedAction: groupsConfigObj[key].blockedAction || 'delete',
-                spamTypes: groupsConfigObj[key].spamTypes || ['text', 'image', 'video', 'audio', 'document', 'sticker'],
-                spamLimits: groupsConfigObj[key].spamLimits || {text:7, image:3, video:2, audio:3, document:3, sticker:3},
-                enablePanicMode: groupsConfigObj[key].enablePanicMode || false,
-                panicMessageLimit: groupsConfigObj[key].panicMessageLimit || 10,
-                panicTimeWindow: groupsConfigObj[key].panicTimeWindow || 5,
-                panicLockoutDuration: groupsConfigObj[key].panicLockoutDuration || 10,
-                panicAlertTarget: groupsConfigObj[key].panicAlertTarget || 'both',
-                panicAlertMessage: groupsConfigObj[key].panicAlertMessage || '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}',
-                enableQAFeature: groupsConfigObj[key].enableQAFeature || false,
-                qaList: groupsConfigObj[key].qaList || [],
-                eventDate: groupsConfigObj[key].eventDate || '',
-                eventDates: groupsConfigObj[key].eventDates || [],
-                qaLanguage: groupsConfigObj[key].qaLanguage || 'ar',
-                currentQAQuestions: [],
-                currentQAAnswer: '',
-                editingQAIndex: null
-            }));
-
-            let currentDetailIndex = null;
-
-            function switchGroupTab(groupIndex, tabName, btn) {
-                document.querySelectorAll('#gtabs_' + groupIndex + ' .group-tab').forEach(t => t.classList.remove('active'));
-                document.querySelectorAll('[id^="gtab_' + groupIndex + '_"]').forEach(p => p.classList.remove('active'));
-                btn.classList.add('active');
-                const panel = document.getElementById('gtab_' + groupIndex + '_' + tabName);
-                if (panel) panel.classList.add('active');
-            }
-
-            function renderGroups() {
-                const container = document.getElementById('groupsContainer');
-                container.innerHTML = '';
-
-                if (groupsArr.length === 0) {
-                    container.innerHTML = \`<div style="text-align:center; padding:60px 20px; color:var(--text-muted);">
-                        <i class="fas fa-users-cog" style="font-size:48px; margin-bottom:16px; display:block; opacity:0.3;"></i>
-                        <div style="font-size:16px; font-weight:600;">\${currentLang === 'en' ? 'No custom groups yet' : 'لا توجد مجموعات مخصصة بعد'}</div>
-                        <div style="font-size:13px; margin-top:6px;">\${currentLang === 'en' ? 'Click "Add Group" to get started' : 'اضغط على "إضافة مجموعة" للبدء'}</div>
-                    </div>\`;
-                    return;
-                }
-
-                groupsArr.forEach((group, groupIndex) => {
-                    const knownGroup = fetchedGroups.find(g => g.id === group.id);
-                    const groupName = knownGroup ? knownGroup.name : (group.id ? group.id.split('@')[0].slice(-10) + '...' : dict.no_id);
-                    const initials = groupName.replace(/[^\u0600-\u06FFa-zA-Z]/g, '').slice(0, 2) || '؟';
-                    const shortGroupId = group.id ? group.id.split('@')[0] : '';
-
-                    let chips = '';
-                    if (group.enablePanicMode) chips += \`<span class="glc-chip orange"><i class="fas fa-radiation"></i> \${currentLang==='en'?'Panic Mode':'طوارئ'}</span>\`;
-                    if (group.enableAntiSpam)  chips += \`<span class="glc-chip orange"><i class="fas fa-shield-alt"></i> Anti-Spam</span>\`;
-                    if (group.enableAIFilter)  chips += \`<span class="glc-chip blue"><i class="fas fa-brain"></i> AI</span>\`;
-                    if (group.enableWordFilter) chips += \`<span class="glc-chip green"><i class="fas fa-filter"></i> \${currentLang==='en'?'Word Filter':'فلتر كلمات'}</span>\`;
-                    if (group.enableWelcomeMessage) chips += \`<span class="glc-chip green"><i class="fas fa-door-open"></i> \${currentLang==='en'?'Welcome':'ترحيب'}</span>\`;
-                    if (group.blockedTypes && group.blockedTypes.length > 0) chips += \`<span class="glc-chip red"><i class="fas fa-ban"></i> \${group.blockedTypes.length} \${currentLang==='en'?'blocked':'ممنوع'}</span>\`;
-
-                    const enabledCount = [
-                        group.enablePanicMode,
-                        group.enableAntiSpam,
-                        group.enableAIFilter,
-                        group.enableWordFilter,
-                        group.enableWelcomeMessage,
-                        group.enableJoinProfileScreening,
-                        group.enableWhitelist,
-                        group.enableBlacklist
-                    ].filter(Boolean).length;
-
-                    const card = document.createElement('div');
-                    card.className = 'group-list-card';
-                    card.onclick = () => openGroupDetail(groupIndex);
-                    card.innerHTML = \`
-                        <div class="glc-avatar">\${initials}</div>
-                        <div class="glc-info">
-                            <div class="glc-name">\${groupName}</div>
-                            \${group.id ? \`<span class="glc-id" title="\${umEscapeHtml(group.id)}">\${shortGroupId}</span>\` : \`<span style="color:var(--orange);font-size:12px;">\${dict.no_id}</span>\`}
-                            \${chips ? \`<div class="glc-chips">\${chips}</div>\` : ''}
-                        </div>
-                        <div class="glc-side">
-                            <div class="glc-stats">
-                                <strong>\${enabledCount}</strong>
-                                <span>\${currentLang === 'en' ? 'active' : 'مفعل'}</span>
-                            </div>
-                            <i class="fas fa-chevron-\${currentLang==='en'?'right':'left'} glc-arrow"></i>
-                        </div>
-                    \`;
-                    container.appendChild(card);
-                });
-            }
-
-            function openGroupDetail(groupIndex) {
-                currentDetailIndex = groupIndex;
-                const group = groupsArr[groupIndex];
-                const knownGroup = fetchedGroups.find(g => g.id === group.id);
-                const groupName = knownGroup ? knownGroup.name : (group.id || dict.no_id);
-                const initials = groupName.replace(/[^\u0600-\u06FFa-zA-Z]/g, '').slice(0, 2) || '؟';
-
-                const av = document.getElementById('detailGroupAvatar');
-                av.textContent = initials;
-                document.getElementById('detailGroupName').textContent = groupName;
-                document.getElementById('detailGroupId').textContent = group.id || dict.no_id;
-
-                document.getElementById('detailDeleteBtn').onclick = async () => {
-                    if (await showConfirmModal(dict.delete_confirm.replace(/<[^>]*>?/gm, ''))) {
-                        groupsArr.splice(groupIndex, 1);
-                        closeGroupDetail();
-                    }
-                };
-
-                renderGroupDetailBody(groupIndex);
-
-                document.getElementById('groupsListView').style.display = 'none';
-                document.getElementById('groupsDetailView').style.display = 'block';
-            }
-
-            function closeGroupDetail() {
-                document.getElementById('groupsDetailView').style.display = 'none';
-                document.getElementById('groupsListView').style.display = 'block';
-                currentDetailIndex = null;
-                renderGroups();
-            }
-
-            function renderGroupChips(groupIndex, type) {
-                const group = groupsArr[groupIndex];
-                let html = '';
-                let containerId = '';
-                if (type === 'words') {
-                    html = group.words.map((word, wordIndex) => \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`).join('');
-                    containerId = 'chip_container_words_' + groupIndex;
-                } else if (type === 'blacklist') {
-                    html = group.customBlacklist.map((num, idx) => \`<div class="chip red-chip">\${num} <span class="chip-remove" onclick="removeGroupBlacklist(\${groupIndex}, \${idx})">&times;</span></div>\`).join('');
-                    containerId = 'chip_container_bl_' + groupIndex;
-                } else if (type === 'whitelist') {
-                    html = group.customWhitelist.map((num, idx) => \`<div class="chip">\${num} <span class="chip-remove" onclick="removeGroupWhitelist(\${groupIndex}, \${idx})">&times;</span></div>\`).join('');
-                    containerId = 'chip_container_wl_' + groupIndex;
-                }
-                const container = document.getElementById(containerId);
-                if (container) container.innerHTML = html;
-            }
-
-            function renderGroupDetailBody(groupIndex, activeTab = 'general') {
-                const group = groupsArr[groupIndex];
-                const container = document.getElementById('groupDetailBody');
-
-                let wordsHtml = group.words.map((word, wordIndex) => 
-                    \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`
-                ).join('');
-
-                let aiWordsHtml = (group.aiFilterTriggerWords || []).map((word, wordIndex) =>
-                    \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupAITriggerWord(\${groupIndex}, \${wordIndex})">&times;</span></div>\`
-                ).join('');
-
-                let blHtml = group.customBlacklist.map((num, idx) => 
-                    \`<div class="chip red-chip">\${num} <span class="chip-remove" onclick="removeGroupBlacklist(\${groupIndex}, \${idx})">&times;</span></div>\`
-                ).join('');
-
-                let wlHtml = group.customWhitelist.map((num, idx) => 
-                    \`<div class="chip">\${num} <span class="chip-remove" onclick="removeGroupWhitelist(\${groupIndex}, \${idx})">&times;</span></div>\`
-                ).join('');
-
-                const blockedChecks = metaTypes.map(t => 
-                    \`<label class="cb-label"><input type="checkbox" value="\${t.id}" \${group.blockedTypes.includes(t.id)?'checked':''} onchange="updateGroupArray(\${groupIndex}, 'blockedTypes', '\${t.id}', this.checked)"> \${t.icon} \${t.name}</label>\`
-                ).join('');
-
-                const spamLimitGrid = metaTypes.map(t => {
-                    const isChecked = group.spamTypes.includes(t.id) ? 'checked' : '';
-                    const limitVal = group.spamLimits[t.id] || 5;
-                    return \`<div class="limit-item">
-                        <input type="checkbox" value="\${t.id}" \${isChecked} onchange="updateGroupArray(\${groupIndex}, 'spamTypes', '\${t.id}', this.checked)">
-                        <span style="font-size:13px;width:70px;">\${t.icon} \${t.name}</span>
-                        <input type="number" value="\${limitVal}" min="1" onchange="updateSpamLimit(\${groupIndex}, '\${t.id}', this.value)">
-                    </div>\`;
-                }).join('');
-
-                const tabs = [
-                    { id: 'general', icon: 'fa-cog',        label: currentLang==='en'?'General':'عام' },
-                    { id: 'filters', icon: 'fa-filter',     label: currentLang==='en'?'Filters':'فلاتر' },
-                    { id: 'qa',      icon: 'fa-question',   label: currentLang==='en'?'Q&A':'س و ج' },
-                    { id: 'spam',    icon: 'fa-shield-alt', label: currentLang==='en'?'Anti-Spam':'سبام' },
-                    { id: 'panic',   icon: 'fa-radiation',  label: currentLang==='en'?'Panic':'طوارئ' },
-                    { id: 'lists',   icon: 'fa-list',       label: currentLang==='en'?'Lists':'القوائم' },
-                ];
-                const tabButtons = tabs.map((tab) => {
-                    const extraAction = tab.id === 'qa' ? ';loadGroupMedia(' + groupIndex + ')' : '';
-                    return '<button type="button" class="group-tab ' + (tab.id === activeTab ? 'active' : '') + '" onclick=\\'switchGroupTab(' + groupIndex + ', "' + tab.id + '", this)' + extraAction + '\\'><i class="fas ' + tab.icon + '"></i> ' + tab.label + '</button>';
-                }).join('');
-
-                container.innerHTML = \`
-                    <div class="field-row" style="margin-bottom:20px;">
-                        <div class="field-group" style="margin-bottom:0;">
-                            <label class="field-label">\${dict.target_group}</label>
-                            \${createGroupSelectHTML(group.id, \`updateGroupData(\${groupIndex}, 'id', this.value)\`, false)}
-                        </div>
-                        <div class="field-group" style="margin-bottom:0;">
-                            <label class="field-label">\${dict.admin_group}</label>
-                            \${createGroupSelectHTML(group.adminGroup, \`updateGroupData(\${groupIndex}, 'adminGroup', this.value)\`, true)}
-                        </div>
-                        <div class="field-group" style="margin-bottom:0;">
-                            <label class="field-label">\${dict.admin_msg_lang}</label>
-                            <select onchange="updateGroupData(\${groupIndex}, 'adminLanguage', this.value)">
-                                <option value="default" \${group.adminLanguage==='default'?'selected':''}>\${dict.use_default_lang}</option>
-                                <option value="ar" \${group.adminLanguage==='ar'?'selected':''}>\${dict.lang_ar}</option>
-                                <option value="en" \${group.adminLanguage==='en'?'selected':''}>\${dict.lang_en}</option>
-                            </select>
-                        </div>
-                    </div>
-
-                    <div class="group-tabs" id="gtabs_\${groupIndex}">\${tabButtons}</div>
-
-                    <div class="group-tab-panel \${activeTab==='general'?'active':''}" id="gtab_\${groupIndex}_general">
-                        <div class="sub-panel red" style="margin-bottom:16px;">
-                            <h4 style="color:var(--red);">\${dict.blocked_types}</h4>
-                            <div class="cb-group" style="margin-bottom:10px;">\${blockedChecks}</div>
-                            <label class="field-label">\${dict.block_action}</label>
-                            <select onchange="updateGroupData(\${groupIndex}, 'blockedAction', this.value)">
-                                <option value="delete" \${group.blockedAction==='delete'?'selected':''}>\${dict.act_del}</option>
-                                <option value="poll" \${group.blockedAction==='poll'?'selected':''}>\${dict.act_poll}</option>
-                                <option value="auto" \${group.blockedAction==='auto'?'selected':''}>\${dict.act_auto}</option>
-                            </select>
-                        </div>
-                        <div class="card success">
-                            <div class="toggle-row green" style="margin-bottom:0;border-radius:10px;">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enableWelcomeMessage?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'welcome',this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label green">\${dict.welcome_msg}<small>\${dict.welcome_desc}</small></div>
-                                </div>
-                            </div>
-                            <div id="group_welcome_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enableWelcomeMessage?'200px':'0px'};opacity:\${group.enableWelcomeMessage?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableWelcomeMessage?'20px':'0px'};">
-                                <label class="field-label">\${dict.msg_text}</label>
-                                <textarea rows="2" onchange="updateGroupData(\${groupIndex}, 'welcomeMessageText', this.value)">\${group.welcomeMessageText}</textarea>
-                            </div>
-                        </div>
-                        <div class="toggle-row pink" style="margin-bottom:0;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" \${group.autoAction?'checked':''} onchange="updateGroupToggle(\${groupIndex},'autoAction',this.checked)"><span class="slider"></span></label>
-                                <div class="toggle-label pink">\${dict.direct_del}</div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="group-tab-panel \${activeTab==='filters'?'active':''}" id="gtab_\${groupIndex}_filters">
-                        <div class="card warning">
-                            <div class="toggle-row warning" style="margin-bottom:0;border-radius:10px;">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enableWordFilter?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'words',this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label warning">\${dict.word_filter}<small>\${dict.wf_desc}</small></div>
-                                </div>
-                            </div>
-                            <div id="group_words_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enableWordFilter?'600px':'0px'};opacity:\${group.enableWordFilter?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableWordFilter?'20px':'0px'};">
-                                <div class="toggle-row" style="margin-bottom:14px;background:rgba(255,255,255,0.04);border-color:rgba(255,171,64,0.25);">
-                                    <div class="toggle-left">
-                                        <label class="switch"><input type="checkbox" \${group.useDefaultWords?'checked':''} onchange="updateGroupToggle(\${groupIndex},'useDefaultWords',this.checked)"><span class="slider"></span></label>
-                                        <div class="toggle-label">\${dict.use_global}<small>\${dict.ug_desc}</small></div>
-                                    </div>
-                                </div>
-                                <label class="field-label">\${dict.custom_words}</label>
-                                <div class="input-with-btn" style="margin-bottom:10px;">
-                                    <input type="text" id="newGroupWord_\${groupIndex}" placeholder="..." onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupWord(\${groupIndex});}">
-                                    <button type="button" class="btn btn-primary btn-sm" onclick="addGroupWord(\${groupIndex})"><i class="fas fa-plus"></i> \${dict.add}</button>
-                                </div>
-                                <div class="chip-container" id="chip_container_words_\${groupIndex}">\${wordsHtml}</div>
-                            </div>
-                        </div>
-                        <div class="toggle-row blue" style="margin-bottom:12px;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" \${group.enableAIFilter?'checked':''} onchange="updateGroupToggle(\${groupIndex},'enableAIFilter',this.checked)"><span class="slider"></span></label>
-                                <div class="toggle-label blue">\${dict.ai_text}</div>
-                            </div>
-                        </div>
-                        <div style="margin-bottom:12px; padding:14px; background:var(--input-bg); border:1.5px dashed var(--card-border); border-radius:10px;">
-                            <label class="field-label">\${dict.ai_trigger_words_group}</label>
-                            <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">\${dict.ai_trigger_words_desc_group}</p>
-                            <div class="input-with-btn" style="margin-bottom:10px;">
-                                <input type="text" id="newGroupAITriggerWord_\${groupIndex}" placeholder="..." onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupAITriggerWord(\${groupIndex});}">
-                                <button type="button" class="btn btn-primary btn-sm" onclick="addGroupAITriggerWord(\${groupIndex})"><i class="fas fa-plus"></i> \${dict.add}</button>
-                            </div>
-                            <div class="chip-container" id="chip_container_ai_words_\${groupIndex}">\${aiWordsHtml}</div>
-                        </div>
-                        <div class="toggle-row purple" style="margin-bottom:0;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" \${group.enableAIMedia?'checked':''} onchange="updateGroupToggle(\${groupIndex},'enableAIMedia',this.checked)"><span class="slider"></span></label>
-                                <div class="toggle-label purple">\${dict.ai_vision}</div>
-                            </div>
-                        </div>
-                        <div class="toggle-row blue" style="margin-top:12px; margin-bottom:0;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" \${group.enableJoinProfileScreening?'checked':''} onchange="updateGroupToggle(\${groupIndex},'enableJoinProfileScreening',this.checked)"><span class="slider"></span></label>
-                                <div class="toggle-label blue">\${dict.join_profile_screening}<small>\${dict.join_profile_screening_desc}</small></div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="group-tab-panel \${activeTab==='qa'?'active':''}" id="gtab_\${groupIndex}_qa">
-                        <div class="card info">
-                            <div class="toggle-row blue" style="margin-bottom:0;border-radius:10px;">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enableQAFeature?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'qa',this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label blue">\${currentLang==='en'?'Enable Q&A Feature':'تفعيل ميزة الأسئلة والأجوبة'}<small>\${currentLang==='en'?'Auto-respond to predefined questions with dynamic fields':'الإجابة التلقائية على الأسئلة المحددة مع حقول ديناميكية'}</small></div>
-                                </div>
-                            </div>
-                            <div class="toggle-row" style="margin-top:12px; margin-bottom:0; border-color:rgba(64,196,255,0.25); background:rgba(64,196,255,0.05);">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.useGlobalQA?'checked':''} onchange="updateGroupToggle(\${groupIndex},'useGlobalQA',this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label">\${currentLang==='en'?'Apply Global Q&A in this group':'تطبيق Q&A العام في هذه المجموعة'}<small>\${currentLang==='en'?'Uses entries from the Global Q&A page when no custom Q&A match is found':'يستخدم الأزواج الموجودة في صفحة Q&A العامة عند عدم تطابق س و ج المخصص'}</small></div>
-                                </div>
-                            </div>
-                            <div id="group_qa_panel_\${groupIndex}" style="overflow-y:auto;max-height:\${group.enableQAFeature?'600px':'0px'};opacity:\${group.enableQAFeature?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableQAFeature?'20px':'0px'};padding-right:8px;">
-                                <div class="sub-panel blue" style="margin-bottom:16px;">
-                                    <h4 style="color:var(--blue);">\${currentLang==='en'?'Dynamic Fields Reference':'مرجع الحقول الديناميكية'}</h4>
-                                    <div style="font-size:13px;color:var(--text-muted);line-height:1.8;">
-                                        <div><strong style="color:var(--blue);">{eventdate}</strong> - \${currentLang==='en'?'Primary event/deadline (first in list)':'الحدث الأساسي (الأول في القائمة)'}</div>
-                                        <div><strong style="color:var(--blue);">{eventdate:Label}</strong> - \${currentLang==='en'?'Specific event by label':'حدث معين حسب العنوان'}</div>
-                                        <div><strong style="color:var(--blue);">{user}</strong> - \${currentLang==='en'?'Sender username':'اسم المرسل'}</div>
-                                    </div>
-                                </div>
-                                
-                                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                                    <label class="field-label" style="margin-bottom:0;">\${currentLang==='en'?'Manage Events/Deadlines':'إدارة الأحداث والمواعيد'}</label>
-                                    <button type="button" class="btn btn-primary btn-sm" onclick="addEventDate(\${groupIndex})"><i class="fas fa-plus"></i> \${currentLang==='en'?'Add Event':'إضافة حدث'}</button>
-                                </div>
-                                <div id="event_dates_container_\${groupIndex}" style="margin-bottom: 20px;">
-                                    \${(group.currentQAEventDates || []).map((ed, edIdx) => {
-                                        return \`<div class="field-row" style="margin-bottom:10px; background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; border: 1px solid var(--card-border); align-items: flex-end; gap: 12px;">
-                                            <div class="field-group" style="margin-bottom:0; flex: 1.5;">
-                                                <label class="field-label" style="font-size:10px;">\${currentLang==='en'?'Label (e.g. Exam)':'العنوان (مثل: اختبار)'}</label>
-                                                <input type="text" value="\${ed.label || ''}" placeholder="..." onchange="updateEventDate(\${groupIndex}, \${edIdx}, \\'label\\', this.value)">
-                                            </div>
-                                            <div class="field-group" style="margin-bottom:0; flex: 1.5;">
-                                                <label class="field-label" style="font-size:10px;">\${currentLang==='en'?'Date':'التاريخ'}</label>
-                                                <input type="date" value="\${ed.date || ''}" onchange="updateEventDate(\${groupIndex}, \${edIdx}, \\'date\\', this.value)" style="color-scheme: dark;">
-                                            </div>
-                                            <button type="button" class="icon-btn" onclick="removeEventDate(\${groupIndex}, \${edIdx})" style="border-color:rgba(255,82,82,0.3);color:var(--red);" title="\${currentLang==='en'?'Delete event':'حذف الحدث'}"><i class="fas fa-trash"></i></button>
-                                        </div>\`;
-                                    }).join('')}
-                                    \${(!group.currentQAEventDates || group.currentQAEventDates.length === 0) ? \`<div style="font-size:12px; color:var(--text-muted); padding:10px; text-align:center; border: 1px dashed var(--card-border); border-radius: 8px;">\${currentLang==='en'?'No extra events added yet.':'لم يتم إضافة أحداث إضافية بعد.'}</div>\` : ''}
-                                </div>
-
-                                <div class="field-row" style="margin-bottom:16px;">
-                                    <div class="field-group" style="margin-bottom:0;">
-                                        <label class="field-label" style="margin-bottom:4px;">\${currentLang==='en'?'Legacy Event Date (for {eventdate})':'تاريخ الحدث القديم (لحقل {eventdate})'}</label>
-                                        <input type="date" id="newQAEventDate_\${groupIndex}" value="\${group.currentQAEventDate || ''}" onchange="updateGroupData(\${groupIndex}, 'currentQAEventDate', this.value)" style="color-scheme: dark; font-family: var(--font);">
-                                    </div>
-                                    <div class="field-group" style="margin-bottom:0;">
-                                        <label class="field-label" style="margin-bottom:4px;">\${currentLang==='en'?'Days-Left Language':'لغة عرض الأيام المتبقية'}</label>
-                                        <select id="qaLang_\${groupIndex}" onchange="updateGroupData(\${groupIndex}, 'qaLanguage', this.value)">
-                                            <option value="ar" \${(group.qaLanguage||'ar')==='ar'?'selected':''}>\${currentLang==='en'?'Arabic (عربي)':'العربية'}</option>
-                                            <option value="en" \${(group.qaLanguage||'ar')==='en'?'selected':''}>English</option>
-                                        </select>
-                                    </div>
-                                </div>
-
-                                <label class="field-label">\${currentLang==='en'?'Add Questions for This Answer':'أضف أسئلة لهذه الإجابة'}</label>
-                                <div class="field-group" style="margin-bottom:10px;">
-                                    <input type="text" id="newQAQuestion_\${groupIndex}" placeholder="\${currentLang==='en'?'Enter a question variant (e.g., when is the test)...':'أدخل صيغة السؤال...'}" style="margin-bottom:10px;" onkeypress="if(event.key==='Enter'){event.preventDefault();addQuestionToQA(\${groupIndex});}">
-                                    <button type="button" class="btn btn-full" onclick="addQuestionToQA(\${groupIndex})" style="margin-bottom:10px;background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700;"><i class="fas fa-plus"></i> \${currentLang==='en'?'Add Question Variant':'إضافة صيغة سؤال'}</button>
-                                    <div class="chip-container" id="qa_questions_container_\${groupIndex}" style="min-height:40px;">\${(group.currentQAQuestions || []).map((q, qIdx) => \`<div class="chip"><span>\${q}</span><span class="chip-remove" onclick="removeQuestionFromQA(\${groupIndex}, \${qIdx})">×</span></div>\`).join('')}</div>
-                                </div>
-                                <label class="field-label">\${currentLang==='en'?'Answer (Use {date}, {eventdate}, {user} for dynamic values)':'الإجابة (استخدم {date}, {eventdate}, {user} للحقول الديناميكية)'}</label>
-                                <div class="field-group" style="margin-bottom:10px;">
-                                    <textarea id="newQAAnswer_\${groupIndex}" placeholder="\${currentLang==='en'?'Enter answer with optional dynamic fields...':'أدخل الإجابة مع الحقول الديناميكية الاختيارية...'}" rows="3" style="margin-bottom:10px;" oninput="updateGroupData(\${groupIndex}, 'currentQAAnswer', this.value)" onchange="updateGroupData(\${groupIndex}, 'currentQAAnswer', this.value)">\${group.currentQAAnswer || ''}</textarea>
-                                    <button type="button" id="saveQABtn_\${groupIndex}" class="btn btn-full" onclick="addGroupQA(\${groupIndex})" style="background:var(--accent-dim);border-color:rgba(0,230,118,0.4);color:var(--accent);font-weight:700;"><i class="fas fa-save"></i> \${currentLang==='en'?'Save Q&A Pair':'حفظ زوج س و ج'}</button>
-                                </div>
-
-                                <div class="sub-panel" style="margin-bottom:16px;border-color:rgba(100,220,150,0.3);background:rgba(100,220,150,0.04);">
-                                    <h4 style="color:#64dc96;margin-bottom:12px;"><i class="fas fa-paperclip"></i> \${currentLang==='en'?'Attach Media to This Answer':'إرفاق وسائط بهذه الإجابة'}</h4>
-                                    <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">\${currentLang==='en'?'Select a file to automatically attach it when saving the Q&A pair. The bot will send the file + answer caption.':'اختر ملفاً ليُرفق تلقائياً عند حفظ الزوج. سيرسل البوت الملف مع نص الإجابة كتعليق.'}</p>
-                                    <div id="qa_media_selected_\${groupIndex}" style="display:none;align-items:center;gap:10px;background:rgba(100,220,150,0.1);border:1px solid rgba(100,220,150,0.3);border-radius:8px;padding:10px 14px;margin-bottom:12px;">
-                                        <i class="fas fa-paperclip" style="color:#64dc96;"></i>
-                                        <span id="qa_media_selected_name_\${groupIndex}" style="font-size:13px;color:#64dc96;flex:1;"></span>
-                                        <button type="button" onclick="clearQAMedia(\${groupIndex})" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:16px;">×</button>
-                                    </div>
-                                    <div style="display:flex;gap:10px;margin-bottom:14px;">
-                                        <label style="flex:1;display:flex;align-items:center;justify-content:center;gap:8px;padding:12px;background:var(--input-bg);border:1.5px dashed rgba(100,220,150,0.4);border-radius:10px;cursor:pointer;font-size:13px;color:var(--text-muted);transition:all 0.2s;" onmouseover="this.style.borderColor='#64dc96'" onmouseout="this.style.borderColor='rgba(100,220,150,0.4)'">
-                                            <i class="fas fa-cloud-upload-alt" style="color:#64dc96;font-size:18px;"></i>
-                                            <span>\${currentLang==='en'?'Click to upload a file':'انقر لرفع ملف'}</span>
-                                            <input type="file" id="qa_file_input_\${groupIndex}" style="display:none;" accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.zip,.rar" onchange="uploadGroupMedia(\${groupIndex}, this)">
-                                        </label>
-                                    </div>
-                                    <div id="qa_upload_status_\${groupIndex}" style="display:none;font-size:12px;color:var(--text-muted);margin-bottom:10px;"></div>
-                                    <div id="qa_media_grid_\${groupIndex}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:10px;"></div>
-                                </div>
-
-                                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;margin-bottom:8px;">
-                                    <label class="field-label" style="margin:0;">\${currentLang==='en'?'Q&A Pairs':'أزواج الأسئلة والأجوبة'}</label>
-                                    <button type="button" class="btn btn-sm" onclick="pasteQA(\${groupIndex})" style="background:var(--accent-dim);color:var(--accent);border-color:rgba(0,230,118,0.3);"><i class="fas fa-paste"></i> \${currentLang==='en'?'Paste Q&A':'لصق س و ج'}</button>
-                                </div>
-                                <div id="qa_container_\${groupIndex}">
-                                    \${(group.qaList || []).map((qa, qaIdx) => \`
-                                        <div class="group-card" style="margin-bottom:10px;">
-                                            <div class="group-card-header" style="padding:12px;">
-                                                <div class="group-card-title" style="font-size:14px;">
-                                                    <i class="fas fa-question" style="color:var(--blue);"></i> \${currentLang==='en'?'Question Variations':'صيغ الأسئلة'} (\${(qa.questions || []).length})
-                                                </div>
-                                                <div style="display:flex;gap:8px;">
-                                                    <button type="button" class="icon-btn" onclick="copyQA(\${groupIndex}, \${qaIdx})" style="background:rgba(255,160,0,0.1);color:#ffa000;border-color:rgba(255,160,0,0.3);" title="\${currentLang==='en'?'Copy':'نسخ'}">
-                                                        <i class="fas fa-copy"></i>
-                                                    </button>
-                                                    <button type="button" class="icon-btn" onclick="editGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--blue-dim);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="\${currentLang==='en'?'Edit':'تعديل'}">
-                                                        <i class="fas fa-edit"></i>
-                                                    </button>
-                                                    <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" style="background:var(--red-dim);color:var(--red);border-color:rgba(255,82,82,0.3);" title="\${currentLang==='en'?'Delete':'حذف'}">
-                                                        <i class="fas fa-trash"></i>
-                                                    </button>
-                                                </div>
-                                            </div>
-                                            <div class="group-card-body" style="padding:12px;">
-                                                <div style="margin-bottom:10px;">
-                                                    <div class="chip-container" style="background:rgba(64,196,255,0.05);border-color:rgba(64,196,255,0.2);">\${(qa.questions || []).map((q) => \`<div class="chip" style="background:rgba(64,196,255,0.15);color:var(--blue);border-color:rgba(64,196,255,0.3);"><i class="fas fa-search"></i> \${q}</div>\`).join('')}</div>
-                                                </div>
-                                                <div style="color:var(--text-muted);font-size:13px;">
-                                                    <strong>\${currentLang==='en'?'Answer':'الإجابة'}:</strong> \${qa.answer || '(empty)'}
-                                                </div>
-                                                \${qa.mediaFile ? \`<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:12px;color:#64dc96;"><i class="fas fa-paperclip"></i> \${qa.mediaFile}</div>\` : ''}
-                                            </div>
-                                        </div>
-                                    \`).join('')}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="group-tab-panel" id="gtab_\${groupIndex}_spam">
-                        <div class="card warning">
-                            <div class="toggle-row warning" style="margin-bottom:0;border-radius:10px;">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enableAntiSpam?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'spam',this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label warning">\${dict.anti_spam}<small>\${dict.spam_desc}</small></div>
-                                </div>
-                            </div>
-                            <div id="group_spam_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enableAntiSpam?'800px':'0px'};opacity:\${group.enableAntiSpam?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableAntiSpam?'20px':'0px'};">
-                                <div style="border-top:1px dashed rgba(255,171,64,0.3);padding-top:20px;">
-                                    <div class="field-row" style="margin-bottom:20px;">
-                                        <div class="field-group" style="margin-bottom:0;">
-                                            <label class="field-label">\${dict.action}</label>
-                                            <select onchange="updateGroupData(\${groupIndex}, 'spamAction', this.value)">
-                                                <option value="poll" \${group.spamAction==='poll'?'selected':''}>\${dict.poll}</option>
-                                                <option value="auto" \${group.spamAction==='auto'?'selected':''}>\${dict.auto_kick}</option>
-                                            </select>
-                                        </div>
-                                        <div class="field-group" style="margin-bottom:0;">
-                                            <label class="field-label">\${dict.text_dup}</label>
-                                            <input type="number" value="\${group.spamDuplicateLimit}" min="2" max="15" onchange="updateGroupData(\${groupIndex},'spamDuplicateLimit',parseInt(this.value))">
-                                        </div>
-                                    </div>
-                                    <label class="field-label" style="margin-bottom:12px;"><i class="fas fa-stopwatch"></i> \${dict.limits_15s}</label>
-                                    <div class="limit-grid">\${spamLimitGrid}</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="group-tab-panel" id="gtab_\${groupIndex}_panic">
-                        <div class="card danger">
-                            <div class="toggle-row danger" style="margin-bottom:0;border-radius:10px;">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enablePanicMode?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'panic',this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label danger">\${dict.panic_mode}<small>\${dict.panic_desc}</small></div>
-                                </div>
-                            </div>
-                            <div id="group_panic_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enablePanicMode?'800px':'0px'};opacity:\${group.enablePanicMode?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enablePanicMode?'20px':'0px'};">
-                                <div style="border-top:1px dashed rgba(255,82,82,0.3);padding-top:20px;">
-                                    <div class="field-row" style="margin-bottom:12px;">
-                                        <div class="field-group" style="margin-bottom:0;"><label class="field-label">\${dict.panic_msg_limit}</label><input type="number" value="\${group.panicMessageLimit}" min="2" onchange="updateGroupData(\${groupIndex},'panicMessageLimit',parseInt(this.value))"></div>
-                                        <div class="field-group" style="margin-bottom:0;"><label class="field-label">\${dict.panic_time_window}</label><input type="number" value="\${group.panicTimeWindow}" min="1" onchange="updateGroupData(\${groupIndex},'panicTimeWindow',parseInt(this.value))"></div>
-                                        <div class="field-group" style="margin-bottom:0;"><label class="field-label">\${dict.panic_lock_dur}</label><input type="number" value="\${group.panicLockoutDuration}" min="1" onchange="updateGroupData(\${groupIndex},'panicLockoutDuration',parseInt(this.value))"></div>
-                                    </div>
-                                    <div class="field-group">
-                                        <label class="field-label">\${dict.panic_target}</label>
-                                        <select onchange="updateGroupData(\${groupIndex},'panicAlertTarget',this.value)">
-                                            <option value="both" \${group.panicAlertTarget==='both'?'selected':''}>\${dict.target_both}</option>
-                                            <option value="group" \${group.panicAlertTarget==='group'?'selected':''}>\${dict.target_group_only}</option>
-                                            <option value="admin" \${group.panicAlertTarget==='admin'?'selected':''}>\${dict.admin_group_only}</option>
-                                        </select>
-                                    </div>
-                                    <div class="field-group" style="margin-bottom:0;">
-                                        <label class="field-label">\${dict.panic_msg_text}</label>
-                                        <textarea rows="2" onchange="updateGroupData(\${groupIndex},'panicAlertMessage',this.value)">\${group.panicAlertMessage}</textarea>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="group-tab-panel" id="gtab_\${groupIndex}_lists">
-                        <div class="card danger">
-                            <div class="toggle-row danger" style="margin-bottom:0;border-radius:10px;">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enableBlacklist?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'blacklist',this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label danger">\${dict.enable_bl}<small>\${dict.bl_desc}</small></div>
-                                </div>
-                            </div>
-                            <div id="group_blacklist_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enableBlacklist?'600px':'0px'};opacity:\${group.enableBlacklist?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableBlacklist?'20px':'0px'};">
-                                <div class="toggle-row" style="margin-bottom:14px;background:rgba(255,255,255,0.04);border-color:rgba(255,82,82,0.25);">
-                                    <div class="toggle-left">
-                                        <label class="switch"><input type="checkbox" \${group.useGlobalBlacklist?'checked':''} onchange="updateGroupToggle(\${groupIndex},'useGlobalBlacklist',this.checked)"><span class="slider"></span></label>
-                                        <div class="toggle-label">\${dict.use_global_bl}<small>\${dict.ug_bl_desc}</small></div>
-                                    </div>
-                                </div>
-                                <label class="field-label">\${dict.custom_bl}</label>
-                                <div class="input-with-btn" style="margin-bottom:10px;">
-                                    <input type="text" id="newGroupBl_\${groupIndex}" placeholder="Ex: 966512345678" onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupBlacklist(\${groupIndex});}">
-                                    <button type="button" class="btn btn-danger btn-sm" onclick="addGroupBlacklist(\${groupIndex})"><i class="fas fa-plus"></i> \${dict.add}</button>
-                                </div>
-                                <div class="chip-container" id="chip_container_bl_\${groupIndex}">\${blHtml}</div>
-                            </div>
-                        </div>
-                        <div class="card success">
-                            <div class="toggle-row green" style="margin-bottom:0;border-radius:10px;">
-                                <div class="toggle-left">
-                                    <label class="switch"><input type="checkbox" \${group.enableWhitelist?'checked':''} onchange="toggleGroupPanel(\${groupIndex},'whitelist',this.checked)"><span class="slider"></span></label>
-                                    <div class="toggle-label green">\${dict.enable_wl}<small>\${dict.wl_desc}</small></div>
-                                </div>
-                            </div>
-                            <div id="group_whitelist_panel_\${groupIndex}" style="overflow:hidden;max-height:\${group.enableWhitelist?'600px':'0px'};opacity:\${group.enableWhitelist?'1':'0'};transition:max-height 0.45s ease,opacity 0.35s ease,margin-top 0.35s ease;margin-top:\${group.enableWhitelist?'20px':'0px'};">
-                                <div class="toggle-row" style="margin-bottom:14px;background:rgba(255,255,255,0.04);border-color:rgba(0,230,118,0.25);">
-                                    <div class="toggle-left">
-                                        <label class="switch"><input type="checkbox" \${group.useGlobalWhitelist?'checked':''} onchange="updateGroupToggle(\${groupIndex},'useGlobalWhitelist',this.checked)"><span class="slider"></span></label>
-                                        <div class="toggle-label">\${dict.use_global_wl}<small>\${dict.ug_wl_desc}</small></div>
-                                    </div>
-                                </div>
-                                <label class="field-label">\${dict.custom_wl}</label>
-                                <div class="input-with-btn" style="margin-bottom:10px;">
-                                    <input type="text" id="newGroupWl_\${groupIndex}" placeholder="Ex: 966512345678" onkeypress="if(event.key==='Enter'){event.preventDefault();addGroupWhitelist(\${groupIndex});}">
-                                    <button type="button" class="btn btn-primary btn-sm" onclick="addGroupWhitelist(\${groupIndex})"><i class="fas fa-plus"></i> \${dict.add}</button>
-                                </div>
-                                <div class="chip-container" id="chip_container_wl_\${groupIndex}">\${wlHtml}</div>
-                            </div>
-                        </div>
-                    </div>
-                \`;
-            }
-
-            function updateGroupArray(gIndex, arrName, val, isChecked) {
-                let arr = groupsArr[gIndex][arrName];
-                if (isChecked && !arr.includes(val)) arr.push(val);
-                if (!isChecked) {
-                    let idx = arr.indexOf(val);
-                    if (idx > -1) arr.splice(idx, 1);
-                }
-            }
-
-            function updateSpamLimit(gIndex, type, val) {
-                if (!groupsArr[gIndex].spamLimits) groupsArr[gIndex].spamLimits = {};
-                groupsArr[gIndex].spamLimits[type] = parseInt(val) || 5;
-            }
-
-            function getCheckedValues(containerId) {
-                const checkboxes = document.querySelectorAll(\`#\${containerId} input[type="checkbox"]:checked\`);
-                return Array.from(checkboxes).map(cb => cb.value);
-            }
-
-            function renderBlacklist() {
-                const container = document.getElementById('blacklistContainer');
-                container.innerHTML = '';
-                blacklistArr.forEach((number, index) => {
-                    container.innerHTML += \`<div class="chip red-chip">\${number} <span class="chip-remove" onclick="removeBlacklistNumber(\${index})">&times;</span></div>\`;
-                });
-                document.getElementById('blacklist-count').innerText = blacklistArr.length;
-            }
-
-            function renderWhitelist() {
-                const container = document.getElementById('whitelistContainer');
-                container.innerHTML = '';
-                whitelistArr.forEach((number, index) => {
-                    container.innerHTML += \`<div class="chip">\${number} <span class="chip-remove" onclick="removeWhitelistNumber(\${index})">&times;</span></div>\`;
-                });
-            }
-
-            function renderBlockedExtensions() {
-                const container = document.getElementById('blockedExtensionsContainer');
-                if(!container) return;
-                container.innerHTML = '';
-                blockedExtensionsArr.forEach((ext, index) => {
-                    container.innerHTML += \`<div class="chip red-chip">+\${ext} <span class="chip-remove" onclick="removeBlockedExtension(\${index})">&times;</span></div>\`;
-                });
-            }
-            window.addEventListener('DOMContentLoaded', () => { renderBlockedExtensions(); });
-
-            async function addBlacklistNumber() {
-                const input = document.getElementById('newBlacklistNumber');
-                let justNumbers = input.value.replace(/\\D/g, ''); 
-                if (justNumbers) {
-                    let finalId = justNumbers + '@c.us';
-                    if (!blacklistArr.includes(finalId)) {
-                        blacklistArr.push(finalId);
-                        renderBlacklist(); 
+            window.location.href = '/';
+        });
+
+        function switchLanguage() {
+            const current = '${lang}';
+            const next = current === 'en' ? 'ar' : 'en';
+            document.cookie = 'bot_lang=' + next + '; path=/; max-age=31536000';
+            location.reload();
+        }
+    </script>
+</body>
+</html>`;
+    res.send(html);
+});
+
+app.post('/auth/login', (req, res) => {
+    const username = sanitizeUsername(req.body.username);
+    const password = String(req.body.password || '');
+
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Username and password are required' });
+    }
+
+    const user = getUserByUsername(username);
+    if (!user || user.is_active !== 1 || !verifyPassword(password, user.password_hash)) {
+        return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const rememberMe = req.body && (req.body.rememberMe === true || req.body.rememberMe === 'true');
+    const ttlMs = rememberMe ? REMEMBER_ME_TTL_MS : SESSION_TTL_MS;
+    const token = createSession(user.id, ttlMs);
+    setSessionCookie(res, token, ttlMs);
+    return res.json({ success: true, rememberMe, mustChangeCredentials: isDefaultCredentialChangeRequired(user.id) });
+});
+
+app.post('/auth/logout', requireAuthApi, (req, res) => {
+    destroySession(req, res);
+    return res.sendStatus(200);
+});
+
+app.get('/auth/me', requireAuthApi, (req, res) => {
+    const allowedSet = getAllowedGroupIds(req.authUser);
+    res.json({
+        id: req.authUser.id,
+        username: req.authUser.username,
+        displayName: req.authUser.display_name,
+        isSuperadmin: req.authUser.is_superadmin === 1,
+        permissions: req.authPermissions,
+        allowedGroupIds: allowedSet ? Array.from(allowedSet) : null,
+        mustChangeCredentials: isDefaultCredentialChangeRequired(req.authUser.id)
+    });
+});
+
+app.post('/auth/first-login-change', requireAuthApi, (req, res) => {
+    if (!isDefaultCredentialChangeRequired(req.authUser.id)) {
+        return res.status(400).json({ error: 'Credential change not required' });
+    }
+
+    const username = sanitizeUsername(req.body.username);
+    const password = String(req.body.password || '');
+    const confirmPassword = String(req.body.confirmPassword || '');
+
+    if (!username || username.length < 3 || !/^[a-z0-9._-]+$/.test(username)) {
+        return res.status(400).json({ error: 'Username must be at least 3 chars and contain only a-z, 0-9, dot, underscore, hyphen' });
+    }
+    if (password.length < 8) {
+        return res.status(400).json({ error: 'Password must be at least 8 chars' });
+    }
+    if (password !== confirmPassword) {
+        return res.status(400).json({ error: 'Passwords do not match' });
+    }
+
+    const existing = db.prepare('SELECT id FROM app_users WHERE username = ?').get(username);
+    if (existing && existing.id !== req.authUser.id) {
+        return res.status(400).json({ error: 'Username already exists' });
+    }
+
+    const tx = db.transaction(() => {
+        db.prepare('UPDATE app_users SET username = ?, password_hash = ?, updated_at = ? WHERE id = ?')
+            .run(username, hashPassword(password), nowIso(), req.authUser.id);
+        setDefaultCredentialChangeRequired(req.authUser.id, false);
+    });
+    tx();
+
+    return res.json({ success: true });
+});
+
+app.get('/', requireAuthPage, requirePermission('dashboard:read'), (req, res) => {
+    const html = renderDashboard(req, db, config);
+    res.send(html);
+});
+
+app.get('/api/groups', requireAuthApi, requirePermission('groups:view'), (req, res) => {
+    try {
+        let groups = db.prepare('SELECT * FROM whatsapp_groups').all();
+        const allowedSet = getAllowedGroupIds(req.authUser);
+        if (allowedSet) groups = groups.filter(g => allowedSet.has(g.id));
+        res.json(groups);
+    } catch (e) { res.json([]); }
+});
+
+app.post('/api/blacklist/add', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    if (req.body.number) {
+        try {
+            db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(req.body.number);
+            console.log(`[أمان] تم إضافة رقم للقائمة السوداء عبر اللوحة: ${req.body.number}`);
+        } catch (e) { }
+    }
+    res.sendStatus(200);
+});
+
+app.post('/api/whitelist/add', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    if (req.body.number) {
+        try {
+            db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)').run(req.body.number);
+            console.log(`[أمان] تم إضافة رقم موثوق للقائمة البيضاء عبر اللوحة: ${req.body.number}`);
+        } catch (e) { }
+    }
+    res.sendStatus(200);
+});
+
+app.post('/api/blacklist/remove', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    if (req.body.number) {
+        try {
+            db.prepare('DELETE FROM blacklist WHERE number = ?').run(req.body.number);
+            console.log(`[أمان] تم إزالة رقم من القائمة السوداء عبر اللوحة: ${req.body.number}`);
+        } catch (e) { }
+    }
+    res.sendStatus(200);
+});
+
+app.post('/api/extensions/add', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    if (req.body.ext) {
+        try {
+            db.prepare('INSERT OR IGNORE INTO blocked_extensions (ext) VALUES (?)').run(String(req.body.ext));
+            console.log(`[أمان] تم إضافة رمز دولة للقائمة السوداء: ${req.body.ext}`);
+        } catch (e) { }
+    }
+    res.sendStatus(200);
+});
+
+app.post('/api/extensions/remove', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    if (req.body.ext) {
+        try {
+            db.prepare('DELETE FROM blocked_extensions WHERE ext = ?').run(String(req.body.ext));
+            console.log(`[أمان] تم إزالة رمز دولة من القائمة السوداء: ${req.body.ext}`);
+        } catch (e) { }
+    }
+    res.sendStatus(200);
+});
+
+app.post('/api/whitelist/remove', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    if (req.body.number) {
+        try {
+            db.prepare('DELETE FROM whitelist WHERE number = ?').run(req.body.number);
+            console.log(`[أمان] تم إزالة رقم من القائمة البيضاء عبر اللوحة: ${req.body.number}`);
+        } catch (e) { }
+    }
+    res.sendStatus(200);
+});
+
+function getScheduleIntervalMs(minutesValue, fallbackMinutes = 60) {
+    const parsed = parseInt(minutesValue, 10);
+    const safeMinutes = Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMinutes;
+    return safeMinutes * 60 * 1000;
+}
+
+async function runGlobalBlacklistPurge() {
+    if (!client.info || !client.info.wid) {
+        const err = new Error('البوت غير متصل حالياً، يرجى الانتظار. / Bot disconnected, please wait.');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    console.log('[تنظيف] بدأت عملية المسح الشامل للمجموعات...');
+    const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
+    const blacklistArr = blacklistRows.map(r => r.number);
+    const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+    const blockedExtensionsArr = blockedExtensionsRows.map(r => r.ext);
+
+    if (blacklistArr.length === 0 && blockedExtensionsArr.length === 0) {
+        return { kickedCount: 0, rejectedCount: 0, message: 'القائمة السوداء فارغة. / Blacklist is empty.' };
+    }
+
+    const chats = await client.getChats();
+    const botId = client.info.wid._serialized;
+    let kickedCount = 0;
+    let rejectedCount = 0;
+
+    for (const chat of chats) {
+        if (!chat.isGroup) continue;
+
+        const botData = chat.participants.find(p => p.id._serialized === botId);
+        const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
+        if (!botIsAdmin) continue;
+
+        const usersToKick = chat.participants
+            .map(p => p.id._serialized)
+            .filter(id => {
+                const cleanId = id.replace(/:[0-9]+/, '');
+                const finalCleanId = cleanId.replace('@c.us', '');
+                const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(id);
+            });
+
+        if (usersToKick.length > 0) {
+            try {
+                await chat.removeParticipants(usersToKick);
+                kickedCount += usersToKick.length;
+                console.log(`[أمان] تم طرد ${usersToKick.length} محظورين من: ${chat.name}`);
+                await new Promise(resolve => setTimeout(resolve, 1500));
+            } catch (e) { }
+        }
+
+        try {
+            const pendingReqs = await chat.getGroupMembershipRequests();
+            if (pendingReqs && pendingReqs.length > 0) {
+                const usersToReject = [];
+                for (const req of pendingReqs) {
+                    const rawId = typeof req.id === 'string' ? req.id : (req.id._serialized || (req.id.user && req.id.server ? `${req.id.user}@${req.id.server}` : null));
+                    if (!rawId) continue;
+
+                    let cleanId = rawId.replace(/:[0-9]+/, '');
+                    if (cleanId.includes('@lid')) {
                         try {
-                            await fetch('/api/blacklist/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({number: finalId}) });
-                        } catch(e) {}
+                            const contact = await client.getContactById(rawId);
+                            if (contact && contact.number) cleanId = `${contact.number}@c.us`;
+                        } catch (err) { }
+                    }
+
+                    const finalCleanId = cleanId.replace(/:[0-9]+/, '').replace('@c.us', '');
+                    const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                    if (isExtBlocked || blacklistArr.includes(finalCleanId) || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId)) {
+                        usersToReject.push(rawId);
                     }
                 }
-                input.value = '';
-            }
 
-            async function addBlockedExtension() {
-                const input = document.getElementById('newBlockedExtension');
-                let justNumbers = input.value.replace(/\\D/g, '');
-                if (justNumbers) {
-                    if (!blockedExtensionsArr.includes(justNumbers)) {
-                        blockedExtensionsArr.push(justNumbers);
-                        renderBlockedExtensions();
-                        try {
-                            await fetch('/api/extensions/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ext: justNumbers}) });
-                        } catch(e) {}
-                    }
+                if (usersToReject.length > 0) {
+                    await chat.rejectGroupMembershipRequests({ requesterIds: usersToReject });
+                    rejectedCount += usersToReject.length;
+                    console.log(`[أمان] تم رفض ${usersToReject.length} طلبات انضمام لمحظورين في: ${chat.name}`);
+                    await new Promise(resolve => setTimeout(resolve, 1500));
                 }
-                input.value = '';
+            }
+        } catch (e) {
+            console.error(`[خطأ] فشل رفض طلبات الانضمام في ${chat.name}:`, e.message);
+        }
+    }
+
+    console.log(`[تنظيف] انتهت عملية المسح. طرد ${kickedCount} شخص ورفض ${rejectedCount} طلبات.`);
+    return {
+        kickedCount,
+        rejectedCount,
+        message: `تمت عملية المسح بنجاح! تم طرد (${kickedCount}) محظور ورفض (${rejectedCount}) طلب. / Purge complete! Kicked (${kickedCount}), rejected (${rejectedCount}).`
+    };
+}
+
+async function runAdminWhitelistSync() {
+    if (!client.info || !client.info.wid) {
+        const err = new Error('البوت غير متصل حالياً، يرجى الانتظار. / Bot disconnected, please wait.');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    const chats = await client.getChats();
+    const botId = client.info.wid._serialized;
+    const botIdClean = botId.replace(/:[0-9]+/, '');
+    let scannedGroups = 0;
+    let skippedGroups = 0;
+    let updatedGroups = 0;
+    let addedMembers = 0;
+
+    for (const chat of chats) {
+        if (!chat.isGroup) continue;
+        scannedGroups += 1;
+
+        try {
+            if (!Array.isArray(chat.participants) || chat.participants.length === 0) {
+                skippedGroups += 1;
+                continue;
             }
 
-            async function removeBlockedExtension(index) {
-                const extToRemove = blockedExtensionsArr[index];
-                blockedExtensionsArr.splice(index, 1);
-                renderBlockedExtensions();
-                try {
-                    await fetch('/api/extensions/remove', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ext: extToRemove}) });
-                } catch(e) {}
-            }
+            const groupId = chat.id && chat.id._serialized ? chat.id._serialized : '';
+            if (!groupId || !config.groupsConfig[groupId]) continue;
 
-            async function addWhitelistNumber() {
-                const input = document.getElementById('newWhitelistNumber');
-                let justNumbers = input.value.replace(/\\D/g, ''); 
-                if (justNumbers) {
-                    let finalId = justNumbers + '@c.us';
-                    if (!whitelistArr.includes(finalId)) {
-                        whitelistArr.push(finalId);
-                        renderWhitelist(); 
-                        try {
-                            await fetch('/api/whitelist/add', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({number: finalId}) });
-                        } catch(e) {}
-                    }
-                }
-                input.value = '';
-            }
+            const groupConfig = config.groupsConfig[groupId];
+            const currentWhitelist = Array.isArray(groupConfig.customWhitelist) ? groupConfig.customWhitelist : [];
+            const toAdd = [];
 
-            async function removeBlacklistNumber(index) {
-                const numberToRemove = blacklistArr[index];
-                blacklistArr.splice(index, 1);
-                renderBlacklist();
-                try {
-                    await fetch('/api/blacklist/remove', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({number: numberToRemove}) });
-                } catch(e) {}
-            }
+            for (const participant of chat.participants) {
+                if (!participant || !participant.id || !participant.id._serialized) continue;
+                if (!(participant.isAdmin || participant.isSuperAdmin)) continue;
 
-            async function removeWhitelistNumber(index) {
-                const numberToRemove = whitelistArr[index];
-                whitelistArr.splice(index, 1);
-                renderWhitelist();
-                try {
-                    await fetch('/api/whitelist/remove', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({number: numberToRemove}) });
-                } catch(e) {}
-            }
-
-            async function purgeBlacklisted() {
-                if(!await showConfirmModal(dict.purge_warn.replace(/<[^>]*>?/gm, ''))) return;
-                const btn = document.getElementById('purgeBtn');
-                const originalHTML = btn.innerHTML;
-                btn.innerHTML = dict.purging;
-                btn.disabled = true;
-                try {
-                    const res = await fetch('/api/blacklist/purge', { method: 'POST' });
-                    const data = await res.json();
-                    if(data.error) showToast('Error: ' + data.error);
-                    else showToast('Success: ' + data.message);
-                } catch(e) {
-                    showToast(dict.conn_err.replace(/<[^>]*>?/gm, ''));
-                }
-                btn.innerHTML = originalHTML;
-                btn.disabled = false;
-            }
-
-            async function loadScheduleSettings() {
-                try {
-                    const res = await fetch('/api/schedules', { cache: 'no-store' });
-                    if (!res.ok) return;
-                    const data = await res.json();
-
-                    const autoToggle = document.getElementById('autoPurgeScheduleEnabled');
-                    const autoInterval = document.getElementById('autoPurgeIntervalMinutes');
-                    const adminToggle = document.getElementById('adminWhitelistSyncEnabled');
-                    const adminInterval = document.getElementById('adminWhitelistSyncIntervalMinutes');
-
-                    if (autoToggle) autoToggle.checked = Boolean(data.autoPurgeScheduleEnabled);
-                    if (autoInterval) autoInterval.value = Math.max(1, parseInt(data.autoPurgeIntervalMinutes, 10) || 60);
-                    if (adminToggle) adminToggle.checked = Boolean(data.adminWhitelistSyncEnabled);
-                    if (adminInterval) adminInterval.value = Math.max(1, parseInt(data.adminWhitelistSyncIntervalMinutes, 10) || 60);
-                } catch (e) {
-                    showToast(dict.schedule_load_fail);
+                const normalized = participant.id._serialized.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                if (!normalized || normalized === botId || normalized === botIdClean) continue;
+                if (!currentWhitelist.includes(normalized) && !toAdd.includes(normalized)) {
+                    toAdd.push(normalized);
                 }
             }
 
-            async function saveScheduleSettings() {
-                const autoToggle = document.getElementById('autoPurgeScheduleEnabled');
-                const autoInterval = document.getElementById('autoPurgeIntervalMinutes');
-                const adminToggle = document.getElementById('adminWhitelistSyncEnabled');
-                const adminInterval = document.getElementById('adminWhitelistSyncIntervalMinutes');
-
-                const payload = {
-                    autoPurgeScheduleEnabled: autoToggle ? autoToggle.checked : false,
-                    autoPurgeIntervalMinutes: Math.max(1, parseInt(autoInterval ? autoInterval.value : '60', 10) || 60),
-                    adminWhitelistSyncEnabled: adminToggle ? adminToggle.checked : false,
-                    adminWhitelistSyncIntervalMinutes: Math.max(1, parseInt(adminInterval ? adminInterval.value : '60', 10) || 60)
-                };
-
-                const res = await fetch('/api/schedules', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
-                });
-
-                if (!res.ok) {
-                    const errData = await res.json().catch(() => ({}));
-                    throw new Error(errData.error || dict.conn_err.replace(/<[^>]*>?/gm, ''));
-                }
-
-                await loadScheduleSettings();
+            if (toAdd.length > 0) {
+                groupConfig.customWhitelist = currentWhitelist.concat(toAdd);
+                updatedGroups += 1;
+                addedMembers += toAdd.length;
             }
+        } catch (groupErr) {
+            skippedGroups += 1;
+            console.error(`[خطأ] تعذر فحص المجموعة أثناء مزامنة القائمة البيضاء: ${chat && chat.name ? chat.name : 'unknown'} | ${groupErr.message || groupErr}`);
+        }
+    }
 
-            async function saveAutoPurgeSchedule() {
-                const btn = document.getElementById('saveAutoPurgeScheduleBtn');
-                if (!btn) return;
-                const original = btn.innerHTML;
-                btn.innerHTML = dict.saving_schedule;
-                btn.disabled = true;
-                try {
-                    await saveScheduleSettings();
-                    showToast(dict.schedule_saved);
-                } catch (e) {
-                    showToast('❌ ' + (e.message || dict.conn_err.replace(/<[^>]*>?/gm, '')));
-                }
-                btn.innerHTML = original;
-                btn.disabled = false;
+    if (updatedGroups > 0) {
+        saveConfigToDB(config);
+        config = loadConfigFromDB();
+    }
+
+    console.log(`[أمان] مزامنة القوائم البيضاء للمجموعات: مجموعات مفحوصة ${scannedGroups} (تخطي ${skippedGroups})، مجموعات تم تحديثها ${updatedGroups}، أعضاء تمت إضافتهم ${addedMembers}.`);
+    return {
+        scannedGroups,
+        skippedGroups,
+        updatedGroups,
+        addedMembers,
+        message: `تمت مزامنة مشرفي كل مجموعة داخل القائمة البيضاء المخصصة لها. / Group whitelist sync complete. Groups scanned: ${scannedGroups}, groups updated: ${updatedGroups}, members added: ${addedMembers}.`
+    };
+}
+
+function refreshSchedulers() {
+    if (autoPurgeTimer) {
+        clearInterval(autoPurgeTimer);
+        autoPurgeTimer = null;
+    }
+    if (adminWhitelistSyncTimer) {
+        clearInterval(adminWhitelistSyncTimer);
+        adminWhitelistSyncTimer = null;
+    }
+
+    if (config.autoPurgeScheduleEnabled) {
+        const intervalMs = getScheduleIntervalMs(config.autoPurgeIntervalMinutes, 60);
+        autoPurgeTimer = setInterval(async () => {
+            if (isAutoPurgeRunning) return;
+            isAutoPurgeRunning = true;
+            try {
+                await runGlobalBlacklistPurge();
+            } catch (err) {
+                console.error('[خطأ] فشل تنفيذ Auto-Purge المجدول:', err.message || err);
+            } finally {
+                isAutoPurgeRunning = false;
             }
+        }, intervalMs);
+        autoPurgeTimer.unref();
+        console.log(`[تنظيف] تم تفعيل Auto-Purge كل ${Math.floor(intervalMs / 60000)} دقيقة.`);
+    }
 
-            async function saveAdminWhitelistSyncSchedule() {
-                const btn = document.getElementById('saveAdminWhitelistSyncScheduleBtn');
-                if (!btn) return;
-                const original = btn.innerHTML;
-                btn.innerHTML = dict.saving_schedule;
-                btn.disabled = true;
-                try {
-                    await saveScheduleSettings();
-                    showToast(dict.schedule_saved);
-                } catch (e) {
-                    showToast('❌ ' + (e.message || dict.conn_err.replace(/<[^>]*>?/gm, '')));
-                }
-                btn.innerHTML = original;
-                btn.disabled = false;
+    if (config.adminWhitelistSyncEnabled) {
+        const intervalMs = getScheduleIntervalMs(config.adminWhitelistSyncIntervalMinutes, 60);
+        adminWhitelistSyncTimer = setInterval(async () => {
+            if (isAdminWhitelistSyncRunning) return;
+            isAdminWhitelistSyncRunning = true;
+            try {
+                await runAdminWhitelistSync();
+            } catch (err) {
+                console.error('[خطأ] فشل تنفيذ Admin Whitelist Sync المجدول:', err.message || err);
+            } finally {
+                isAdminWhitelistSyncRunning = false;
             }
+        }, intervalMs);
+        adminWhitelistSyncTimer.unref();
+        console.log(`[أمان] تم تفعيل Admin Whitelist Sync كل ${Math.floor(intervalMs / 60000)} دقيقة.`);
+    }
+}
 
-            async function runAutoPurgeNow() {
-                const btn = document.getElementById('runAutoPurgeScheduleBtn');
-                if (!btn) return;
-                const original = btn.innerHTML;
-                btn.innerHTML = dict.running_sync;
-                btn.disabled = true;
-                try {
-                    const res = await fetch('/api/blacklist/purge', { method: 'POST' });
-                    const data = await res.json().catch(() => ({}));
-                    if (!res.ok || data.error) {
-                        showToast('❌ ' + (data.error || dict.conn_err.replace(/<[^>]*>?/gm, '')));
-                    } else {
-                        showToast('✅ ' + (data.message || 'OK'));
-                    }
-                } catch (e) {
-                    showToast(dict.conn_err.replace(/<[^>]*>?/gm, ''));
-                }
-                btn.innerHTML = original;
-                btn.disabled = false;
+app.post('/api/blacklist/purge', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    try {
+        const result = await runGlobalBlacklistPurge();
+        res.json({ message: result.message, kickedCount: result.kickedCount, rejectedCount: result.rejectedCount });
+    } catch (error) {
+        console.error('[خطأ]', error);
+        res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'حدث خطأ في السيرفر أثناء عملية المسح. / Server error during purge.' });
+    }
+});
+
+app.post('/api/whitelist/sync-admins', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    try {
+        const result = await runAdminWhitelistSync();
+        res.json(result);
+    } catch (error) {
+        console.error('[خطأ] فشل مزامنة مشرفي المجموعات للقائمة البيضاء:', error.message || error);
+        res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'حدث خطأ في مزامنة مشرفي المجموعات. / Server error during admin whitelist sync.' });
+    }
+});
+
+app.get('/api/schedules', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    res.json({
+        autoPurgeScheduleEnabled: Boolean(config.autoPurgeScheduleEnabled),
+        autoPurgeIntervalMinutes: Math.max(1, parseInt(config.autoPurgeIntervalMinutes, 10) || 60),
+        adminWhitelistSyncEnabled: Boolean(config.adminWhitelistSyncEnabled),
+        adminWhitelistSyncIntervalMinutes: Math.max(1, parseInt(config.adminWhitelistSyncIntervalMinutes, 10) || 60)
+    });
+});
+
+app.post('/api/schedules', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    const autoPurgeScheduleEnabled = req.body && (req.body.autoPurgeScheduleEnabled === true || req.body.autoPurgeScheduleEnabled === 'true');
+    const autoPurgeIntervalMinutes = Math.max(1, parseInt(req.body && req.body.autoPurgeIntervalMinutes, 10) || 60);
+    const adminWhitelistSyncEnabled = req.body && (req.body.adminWhitelistSyncEnabled === true || req.body.adminWhitelistSyncEnabled === 'true');
+    const adminWhitelistSyncIntervalMinutes = Math.max(1, parseInt(req.body && req.body.adminWhitelistSyncIntervalMinutes, 10) || 60);
+
+    config.autoPurgeScheduleEnabled = autoPurgeScheduleEnabled;
+    config.autoPurgeIntervalMinutes = autoPurgeIntervalMinutes;
+    config.adminWhitelistSyncEnabled = adminWhitelistSyncEnabled;
+    config.adminWhitelistSyncIntervalMinutes = adminWhitelistSyncIntervalMinutes;
+
+    saveConfigToDB(config);
+    config = loadConfigFromDB();
+    refreshSchedulers();
+
+    res.json({ success: true, autoPurgeScheduleEnabled, autoPurgeIntervalMinutes, adminWhitelistSyncEnabled, adminWhitelistSyncIntervalMinutes });
+});
+
+refreshSchedulers();
+
+function getDashboardStatusSnapshot(lang) {
+    let translatedStatus = botStatus;
+    if (lang === 'en') {
+        translatedStatus = translatedStatus
+            .replace('جاري تهيئة النظام وبدء التشغيل...', 'Initializing system and starting...')
+            .replace('بانتظار مسح رمز الاستجابة السريعة (QR Code)...', 'Waiting for QR Code scan...')
+            .replace('متصل وجاهز للعمل', 'Connected and ready')
+            .replace('تم تسجيل الدخول بنجاح، جاري جلب البيانات...', 'Logged in successfully, fetching data...')
+            .replace('تم تسجيل الخروج من الحساب...', 'Logged out of account...')
+            .replace('جاري إنهاء الجلسة...', 'Terminating session...');
+    }
+
+    return {
+        status: translatedStatus,
+        statusText: String(translatedStatus).replace(/<[^>]*>/g, '').trim(),
+        statusKind: botStatusKind,
+        qr: currentQR
+    };
+}
+
+app.get('/api/status', requireAuthApi, requirePermission('dashboard:read'), (req, res) => {
+    const l = req.query.lang === 'en' ? 'en' : 'ar';
+    const snapshot = getDashboardStatusSnapshot(l);
+    res.json(snapshot);
+});
+
+app.get('/api/logs', requireAuthApi, requirePermission('logs:view'), (req, res) => res.json(logsHistory));
+
+// Get connection/initialization logs for debugging
+app.get('/api/connection-logs', requireAuthApi, requirePermission('logs:view'), (req, res) => {
+    const connectionData = {
+        currentStatus: botStatus,
+        isConnected: botStatusKind === 'connected',
+        isInitializing,
+        connectionHistory: clientConnectionHistory,
+        lastConnectionTimestamp,
+        initializationStartTime,
+        uptime: initializationStartTime ? Math.floor((Date.now() - initializationStartTime) / 1000) : 'N/A',
+        totalConnectionLogs: clientConnectionHistory.length,
+        timestamp: new Date().toISOString()
+    };
+    res.json(connectionData);
+});
+
+app.post('/api/logout', requireAuthApi, requirePermission('bot:logout'), async (req, res) => {
+    try {
+        botStatus = '<i class="fas fa-spinner fa-pulse"></i> جاري إنهاء الجلسة...';
+        botStatusKind = 'terminating';
+        await client.logout();
+        res.sendStatus(200);
+    } catch (error) { res.sendStatus(500); }
+});
+
+app.post('/save', requireAuthApi, (req, res) => {
+    try {
+        const canWriteAll = hasPermission(req.authUser, 'config:write');
+        const canWriteScoped = hasPermission(req.authUser, 'config:write-scoped');
+        if (!canWriteAll && !canWriteScoped) return res.status(403).json({ error: 'Forbidden' });
+
+        if (canWriteAll) {
+            saveConfigToDB(req.body);
+        } else {
+            const current = loadConfigFromDB();
+            const incomingGroups = req.body && req.body.groupsConfig ? req.body.groupsConfig : {};
+            const allowedSet = getAllowedGroupIds(req.authUser) || new Set();
+            for (const [groupId, groupConfig] of Object.entries(incomingGroups)) {
+                if (allowedSet.has(groupId)) current.groupsConfig[groupId] = groupConfig;
             }
+            saveConfigToDB(current);
+        }
+        config = loadConfigFromDB();
+        setupPurgeSchedule();
+        setupAdminSyncSchedule();
+        refreshSchedulers();
+        console.log('[فحص] تم حفظ الإعدادات بنجاح.');
+        res.sendStatus(200);
+    } catch (e) {
+        console.error('[خطأ] تعذر الحفظ في قاعدة البيانات:', e.message);
+        res.sendStatus(500);
+    }
+});
 
-            async function runAdminWhitelistSyncNow() {
-                const btn = document.getElementById('runAdminWhitelistSyncBtn');
-                if (!btn) return;
-                const original = btn.innerHTML;
-                btn.innerHTML = dict.running_sync;
-                btn.disabled = true;
-                try {
-                    const res = await fetch('/api/whitelist/sync-admins', { method: 'POST' });
-                    const data = await res.json().catch(() => ({}));
-                    if (!res.ok || data.error) {
-                        showToast('❌ ' + (data.error || dict.conn_err.replace(/<[^>]*>?/gm, '')));
-                    } else {
-                        showToast(data.message || dict.sync_success);
-                        if (Array.isArray(data.whitelist)) {
-                            whitelistArr = data.whitelist;
-                            renderWhitelist();
+// ── Admin Sync: manual trigger API ────────────────────────────────────────────
+app.post('/api/admin-sync/run', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    if (!client.info || !client.info.wid) {
+        return res.status(400).json({ error: 'البوت غير متصل حالياً. / Bot disconnected.' });
+    }
+    try {
+        await runAdminSync();
+        res.json({ message: 'تمت مزامنة مشرفي المجموعات وتحديث القوائم البيضاء بنجاح. / Admin sync completed.' });
+    } catch (e) {
+        res.status(500).json({ error: e.message || 'خطأ في المزامنة.' });
+    }
+});
+
+app.listen(3000, () => console.log('لوحة التحكم تعمل عبر المنفذ 3000...'));
+
+// ── Media API ────────────────────────────────────────────────────────────────
+// Serve uploaded media files statically
+app.use('/media', express.static(path.join(__dirname, 'media')));
+
+// Copy a file from one group to another
+app.post('/api/media/copy/:fromGroupId/:toGroupId', requireAuthApi, requirePermission('media:manage'), (req, res) => {
+    const filename = req.body.filename;
+    if (!filename) return res.status(400).json({ error: 'Filename required' });
+    const fromPath = path.join('./media', req.params.fromGroupId, filename);
+    const toDir = path.join('./media', req.params.toGroupId);
+    const toPath = path.join(toDir, filename);
+
+    if (!fs.existsSync(fromPath)) return res.status(404).json({ error: 'Source file not found' });
+
+    try {
+        if (!fs.existsSync(toDir)) fs.mkdirSync(toDir, { recursive: true });
+        fs.copyFileSync(fromPath, toPath);
+        res.json({ success: true, filename: filename });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+// Upload a file for a group
+app.post('/api/media/upload/:groupId', requireAuthApi, requirePermission('media:manage'), upload.single('file'), (req, res) => {
+    const allowedSet = getAllowedGroupIds(req.authUser);
+    if (req.params.groupId !== 'global-qa' && allowedSet && !allowedSet.has(req.params.groupId)) return res.status(403).json({ error: 'Forbidden group' });
+    if (!req.file) return res.status(400).json({ error: 'No file received' });
+    res.json({ filename: req.file.filename, size: req.file.size });
+});
+
+// List files for a group
+app.get('/api/media/list/:groupId', requireAuthApi, requirePermission('media:manage'), (req, res) => {
+    const allowedSet = getAllowedGroupIds(req.authUser);
+    if (req.params.groupId !== 'global-qa' && allowedSet && !allowedSet.has(req.params.groupId)) return res.status(403).json({ error: 'Forbidden group' });
+    const dir = path.join('./media', req.params.groupId);
+    if (!fs.existsSync(dir)) return res.json([]);
+    try {
+        const files = fs.readdirSync(dir).map(name => {
+            const stat = fs.statSync(path.join(dir, name));
+            return { name, size: stat.size, modified: stat.mtimeMs };
+        });
+        res.json(files);
+    } catch (e) { res.json([]); }
+});
+
+// Delete a file for a group
+app.delete('/api/media/delete/:groupId/:filename', requireAuthApi, requirePermission('media:manage'), (req, res) => {
+    const allowedSet = getAllowedGroupIds(req.authUser);
+    if (req.params.groupId !== 'global-qa' && allowedSet && !allowedSet.has(req.params.groupId)) return res.status(403).json({ error: 'Forbidden group' });
+    const filePath = path.join('./media', req.params.groupId, req.params.filename);
+    try {
+        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+        res.sendStatus(200);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── Import/Export API ─────────────────────────────────────────────────────────
+// Export dataset with selected options
+app.post('/api/export', requireAuthApi, requirePermission('import-export:manage'), (req, res) => {
+    try {
+        const selected = (req.body && typeof req.body === 'object' && req.body.selected && typeof req.body.selected === 'object')
+            ? req.body.selected
+            : {};
+        const dataset = {};
+
+        if (selected.global_settings) {
+            dataset.global_settings = db.prepare('SELECT * FROM global_settings').all();
+        }
+        if (selected.llm_settings) {
+            dataset.llm_settings = db.prepare('SELECT * FROM llm_settings').all();
+        }
+        if (selected.blacklist) {
+            dataset.blacklist = db.prepare('SELECT * FROM blacklist').all();
+        }
+        if (selected.whitelist) {
+            dataset.whitelist = db.prepare('SELECT * FROM whitelist').all();
+        }
+        if (selected.blocked_extensions) {
+            dataset.blocked_extensions = db.prepare('SELECT * FROM blocked_extensions').all();
+        }
+        if (selected.whatsapp_groups) {
+            dataset.whatsapp_groups = db.prepare('SELECT * FROM whatsapp_groups').all();
+        }
+        if (selected.custom_groups) {
+            dataset.custom_groups = db.prepare('SELECT * FROM custom_groups').all();
+        }
+        if (selected.media) {
+            const mediaData = {};
+            const mediaDir = path.join(process.cwd(), 'media');
+            if (fs.existsSync(mediaDir)) {
+                const groups = fs.readdirSync(mediaDir);
+                for (const group of groups) {
+                    const groupPath = path.join(mediaDir, group);
+                    if (fs.statSync(groupPath).isDirectory()) {
+                        const files = fs.readdirSync(groupPath);
+                        for (const file of files) {
+                            const filePath = path.join(groupPath, file);
+                            if (fs.statSync(filePath).isFile()) {
+                                try {
+                                    const b64 = fs.readFileSync(filePath, { encoding: 'base64' });
+                                    mediaData[group + '/' + file] = b64;
+                                } catch (readErr) {
+                                    console.error('[تصدير] تعذر قراءة ملف وسائط أثناء التصدير:', filePath, readErr.message || readErr);
+                                }
+                            }
                         }
                     }
-                } catch (e) {
-                    showToast(dict.conn_err.replace(/<[^>]*>?/gm, ''));
-                }
-                btn.innerHTML = original;
-                btn.disabled = false;
-            }
-
-            function renderDefaultWords() {
-                const container = document.getElementById('defaultWordsContainer');
-                container.innerHTML = '';
-                defaultWordsArr.forEach((word, index) => {
-                    container.innerHTML += \`<div class="chip">\${word} <span class="chip-remove" onclick="removeDefaultWord(\${index})">&times;</span></div>\`;
-                });
-            }
-            function addDefaultWord() {
-                const input = document.getElementById('newDefaultWord');
-                const word = input.value.trim();
-                if (word && !defaultWordsArr.includes(word)) {
-                    defaultWordsArr.push(word);
-                    input.value = '';
-                    renderDefaultWords();
                 }
             }
-            function removeDefaultWord(index) {
-                defaultWordsArr.splice(index, 1);
-                renderDefaultWords();
-            }
+            dataset.media = mediaData;
+        }
 
-            function renderAITriggerWords() {
-                const container = document.getElementById('aiTriggerWordsContainer');
-                container.innerHTML = '';
-                aiFilterTriggerWordsArr.forEach((word, index) => {
-                    const chip = document.createElement('div');
-                    chip.className = 'chip';
-                    chip.textContent = word + ' ';
-                    const removeBtn = document.createElement('span');
-                    removeBtn.className = 'chip-remove';
-                    removeBtn.textContent = '×';
-                    removeBtn.onclick = () => removeAITriggerWord(index);
-                    chip.appendChild(removeBtn);
-                    container.appendChild(chip);
-                });
-            }
+        const exportData = {
+            version: '6.1',
+            timestamp: new Date().toISOString(),
+            data: dataset
+        };
 
-            function addAITriggerWord() {
-                const input = document.getElementById('newAITriggerWord');
-                const word = input.value.trim();
-                if (word && !aiFilterTriggerWordsArr.includes(word)) {
-                    aiFilterTriggerWordsArr.push(word);
-                    input.value = '';
-                    renderAITriggerWords();
+        res.set('Cache-Control', 'no-store');
+        res.json(exportData);
+    } catch (error) {
+        console.error('[خطأ] فشل التصدير:', error);
+        res.status(500).json({ error: 'Export failed: ' + error.message });
+    }
+});
+
+// Import dataset with selected options
+app.post('/api/import', requireAuthApi, requirePermission('import-export:manage'), (req, res) => {
+    try {
+        const { dataset, selected } = req.body;
+
+        if (!dataset || !selected) {
+            return res.status(400).json({ error: 'Invalid import data' });
+        }
+
+        const importTx = db.transaction(() => {
+            if (selected.global_settings && dataset.global_settings) {
+                const stmt = db.prepare('INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)');
+                for (const row of dataset.global_settings) {
+                    stmt.run(row.key, row.value);
                 }
             }
-
-            function removeAITriggerWord(index) {
-                aiFilterTriggerWordsArr.splice(index, 1);
-                renderAITriggerWords();
-            }
-
-            function renderGlobalQAQuestionsDraft() {
-                const container = document.getElementById('globalQAQuestionsContainer');
-                if (!container) return;
-                if (!globalQAQuestionsDraft.length) {
-                    container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);">' +
-                        (currentLang === 'en' ? 'No question variants added yet.' : 'لم يتم إضافة صيغ أسئلة بعد.') +
-                        '</div>';
-                    return;
-                }
-                container.innerHTML = globalQAQuestionsDraft.map((q, idx) =>
-                    '<div class="chip">' + q + ' <span class="chip-remove" onclick="removeGlobalQAQuestion(' + idx + ')">&times;</span></div>'
-                ).join('');
-            }
-
-            function addGlobalQAQuestion() {
-                const input = document.getElementById('globalQAQuestionInput');
-                if (!input) return;
-                const q = String(input.value || '').trim().toLowerCase();
-                if (!q) return;
-                if (!globalQAQuestionsDraft.includes(q)) globalQAQuestionsDraft.push(q);
-                input.value = '';
-                renderGlobalQAQuestionsDraft();
-            }
-
-            function removeGlobalQAQuestion(index) {
-                globalQAQuestionsDraft.splice(index, 1);
-                renderGlobalQAQuestionsDraft();
-            }
-
-            function renderGlobalQAEventDatesForm() {
-                const container = document.getElementById('globalQAEventDatesContainer');
-                const legacyInput = document.getElementById('globalQAEventDateInput');
-                const langInput = document.getElementById('globalQALanguageInput');
-                if (!container) return;
-                container.innerHTML = (globalQAEventDatesDraft || []).map(function(ed, edIdx) {
-                    return '<div class="field-row" style="margin-bottom:10px; background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; border: 1px solid var(--card-border); align-items: flex-end; gap: 12px;">' +
-                        '<div class="field-group" style="margin-bottom:0; flex: 1.5;">' +
-                            '<label class="field-label" style="font-size:10px;">' + (currentLang === 'en' ? 'Label (e.g. Exam)' : 'العنوان (مثل: اختبار)') + '</label>' +
-                            '<input type="text" value="' + (ed.label || '') + '" placeholder="..." onchange="updateGlobalQAEventDate(' + edIdx + ', \\'label\\', this.value)">' +
-                        '</div>' +
-                        '<div class="field-group" style="margin-bottom:0; flex: 1.5;">' +
-                            '<label class="field-label" style="font-size:10px;">' + (currentLang === 'en' ? 'Date' : 'التاريخ') + '</label>' +
-                            '<input type="date" value="' + (ed.date || '') + '" onchange="updateGlobalQAEventDate(' + edIdx + ', \\'date\\', this.value)" style="color-scheme: dark;">' +
-                        '</div>' +
-                        '<button type="button" class="icon-btn" onclick="removeGlobalQAEventDate(' + edIdx + ')" style="border-color:rgba(255,82,82,0.3);color:var(--red);" title="' + (currentLang === 'en' ? 'Delete event' : 'حذف الحدث') + '"><i class="fas fa-trash"></i></button>' +
-                    '</div>';
-                }).join('');
-                if (!globalQAEventDatesDraft.length) {
-                    container.innerHTML += '<div style="font-size:12px; color:var(--text-muted); padding:10px; text-align:center; border: 1px dashed var(--card-border); border-radius: 8px;">' + (currentLang === 'en' ? 'No extra events added yet.' : 'لم يتم إضافة أحداث إضافية بعد.') + '</div>';
-                }
-                if (legacyInput) legacyInput.value = globalQALegacyEventDate || '';
-                if (langInput) langInput.value = globalQALanguage || 'ar';
-            }
-
-            function addGlobalQAEventDate() {
-                globalQAEventDatesDraft.push({ label: '', date: '' });
-                renderGlobalQAEventDatesForm();
-            }
-
-            function removeGlobalQAEventDate(index) {
-                globalQAEventDatesDraft.splice(index, 1);
-                renderGlobalQAEventDatesForm();
-            }
-
-            function updateGlobalQAEventDate(index, field, value) {
-                if (!globalQAEventDatesDraft[index]) return;
-                globalQAEventDatesDraft[index][field] = value;
-            }
-
-            function updateGlobalQACurrentAnswer(value) {
-                globalQACurrentAnswer = String(value || '');
-            }
-
-            function setGlobalQAMediaSelection(mediaFile) {
-                globalQAPendingMediaFile = mediaFile || '';
-                const indicator = document.getElementById('globalQA_media_selected');
-                const nameEl = document.getElementById('globalQA_media_selected_name');
-                if (!indicator || !nameEl) return;
-                if (globalQAPendingMediaFile) {
-                    indicator.style.display = 'flex';
-                    nameEl.textContent = '📎 ' + globalQAPendingMediaFile;
-                } else {
-                    indicator.style.display = 'none';
-                    nameEl.textContent = '';
+            if (selected.llm_settings && dataset.llm_settings) {
+                const stmt = db.prepare('INSERT OR REPLACE INTO llm_settings (key, value) VALUES (?, ?)');
+                for (const row of dataset.llm_settings) {
+                    stmt.run(row.key, row.value);
                 }
             }
-
-            function loadGlobalQAMedia() {
-                fetch('/api/media/list/global-qa')
-                    .then(r => r.json())
-                    .then(files => renderGlobalQAMediaGrid(files))
-                    .catch(() => {});
-            }
-
-            function renderGlobalQAMediaGrid(files) {
-                const grid = document.getElementById('globalQA_media_grid');
-                if (!grid) return;
-                if (!files || files.length === 0) {
-                    grid.innerHTML = '<p style="font-size:12px;color:var(--text-muted);grid-column:1/-1;">' + (currentLang === 'en' ? 'No files uploaded yet.' : 'لا توجد ملفات محملة بعد.') + '</p>';
-                    return;
-                }
-                const imgExts = ['jpg','jpeg','png','gif','webp','bmp','svg'];
-                grid.innerHTML = files.map(function(f) {
-                    const ext = f.name.split('.').pop().toLowerCase();
-                    let preview;
-                    if (imgExts.includes(ext)) {
-                        preview = '<img src="/media/global-qa/' + encodeURIComponent(f.name) + '" style="width:100%;height:72px;object-fit:cover;border-radius:6px 6px 0 0;">';
-                    } else {
-                        const icons = { mp4:'fa-film', mov:'fa-film', webm:'fa-film', mkv:'fa-film', mp3:'fa-music', ogg:'fa-music', wav:'fa-music', pdf:'fa-file-pdf', doc:'fa-file-word', docx:'fa-file-word', zip:'fa-file-archive', rar:'fa-file-archive' };
-                        const icon = icons[ext] || 'fa-file';
-                        preview = '<div style="width:100%;height:72px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);border-radius:6px 6px 0 0;"><i class="fas ' + icon + '" style="font-size:28px;color:var(--text-muted);"></i></div>';
-                    }
-                    const kb = (f.size/1024).toFixed(1);
-                    const isSelected = globalQAPendingMediaFile === f.name;
-                    return '<div style="background:var(--card-bg);border:1.5px solid ' + (isSelected ? '#64dc96' : 'var(--card-border)') + ';border-radius:8px;overflow:hidden;">' +
-                        preview +
-                        '<div style="padding:6px 8px;">' +
-                            '<div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + f.name + '">' + f.name + '</div>' +
-                            '<div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">' + kb + ' KB</div>' +
-                            '<div style="display:flex;gap:4px;">' +
-                                '<button type="button" onclick="selectGlobalQAMedia(\\'' + f.name + '\\')" style="flex:1;font-size:11px;padding:4px;background:' + (isSelected ? 'rgba(100,220,150,0.15)' : 'var(--input-bg)') + ';color:' + (isSelected ? '#64dc96' : 'var(--text-muted)') + ';border:1px solid ' + (isSelected ? 'rgba(100,220,150,0.4)' : 'var(--card-border)') + ';border-radius:5px;cursor:pointer;">' +
-                                    '<i class="fas ' + (isSelected ? 'fa-check' : 'fa-link') + '"></i> ' + (isSelected ? (currentLang === 'en' ? 'Selected' : 'محدد') : (currentLang === 'en' ? 'Select' : 'اختر')) +
-                                '</button>' +
-                                '<button type="button" onclick="deleteGlobalQAMedia(\\'' + f.name + '\\')" style="padding:4px 6px;background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.3);border-radius:5px;cursor:pointer;font-size:11px;">' +
-                                    '<i class="fas fa-trash"></i>' +
-                                '</button>' +
-                            '</div>' +
-                        '</div>' +
-                    '</div>';
-                }).join('');
-            }
-
-            function uploadGlobalQAMedia(input) {
-                const file = input.files[0];
-                if (!file) return;
-                const statusEl = document.getElementById('globalQA_upload_status');
-                statusEl.style.display = 'block';
-                statusEl.textContent = currentLang==='en' ? '⏳ Uploading...' : '⏳ جاري الرفع...';
-                const fd = new FormData();
-                fd.append('file', file);
-                fetch('/api/media/upload/global-qa', { method:'POST', body:fd })
-                    .then(r => r.json())
-                    .then(data => {
-                        statusEl.textContent = currentLang==='en' ? '✅ Uploaded: ' + data.filename : '✅ تم الرفع: ' + data.filename;
-                        setTimeout(() => { statusEl.style.display='none'; }, 3000);
-                        loadGlobalQAMedia();
-                        input.value = '';
-                    })
-                    .catch(() => { statusEl.textContent = currentLang==='en' ? '❌ Upload failed' : '❌ فشل الرفع'; });
-            }
-
-            function selectGlobalQAMedia(filename) {
-                const wasSelected = globalQAPendingMediaFile === filename;
-                setGlobalQAMediaSelection(wasSelected ? '' : filename);
-                loadGlobalQAMedia();
-            }
-
-            function clearGlobalQAMedia() {
-                setGlobalQAMediaSelection('');
-                loadGlobalQAMedia();
-            }
-
-            function deleteGlobalQAMedia(filename) {
-                if (!window.confirm(currentLang === 'en' ? 'Delete ' + filename + '?' : 'حذف ' + filename + '؟')) return;
-                fetch('/api/media/delete/global-qa/' + encodeURIComponent(filename), { method:'DELETE' })
-                    .then(() => {
-                        if (globalQAPendingMediaFile === filename) clearGlobalQAMedia();
-                        loadGlobalQAMedia();
-                    });
-            }
-
-            function renderGlobalQAList() {
-                const list = document.getElementById('globalQAList');
-                if (!list) return;
-                if (!Array.isArray(globalQAArr) || globalQAArr.length === 0) {
-                    list.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:10px;border:1px dashed var(--card-border);border-radius:8px;">' +
-                        (currentLang === 'en' ? 'No global Q&A entries yet.' : 'لا توجد أزواج Q&A عامة بعد.') +
-                        '</div>';
-                    return;
-                }
-
-                list.innerHTML = globalQAArr.map((qa, idx) => {
-                    const questions = Array.isArray(qa.questions) ? qa.questions : (qa.question ? [qa.question] : []);
-                    const answer = String(qa.answer || '');
-                    const eventDates = Array.isArray(qa.eventDates) ? qa.eventDates : [];
-                    return '<div class="group-card" style="margin-bottom:10px;">' +
-                        '<div class="group-card-header" style="padding:12px;">' +
-                        '<div class="group-card-title" style="font-size:13px;">' +
-                        '<i class="fas fa-bolt" style="color:var(--accent);"></i> ' +
-                        (currentLang === 'en' ? 'Triggers' : 'المحفزات') + ' (' + questions.length + ')' +
-                        '</div>' +
-                        '<div style="display:flex;gap:8px;">' +
-                        '<button type="button" class="icon-btn" onclick="copyGlobalQA(' + idx + ')" style="background:rgba(255,160,0,0.1);color:#ffa000;border-color:rgba(255,160,0,0.3);" title="' + (currentLang==='en'?'Copy':'نسخ') + '"><i class="fas fa-copy"></i></button>' +
-                        '<button type="button" class="icon-btn" onclick="editGlobalQA(' + idx + ')" style="background:rgba(64,196,255,0.1);color:var(--blue);border-color:rgba(64,196,255,0.3);" title="' + (currentLang==='en'?'Edit':'تعديل') + '"><i class="fas fa-pen"></i></button>' +
-                        '<button type="button" class="icon-btn" onclick="removeGlobalQA(' + idx + ')" style="background:rgba(255,82,82,0.1);color:var(--red);border-color:rgba(255,82,82,0.3);" title="' + (currentLang==='en'?'Delete':'حذف') + '"><i class="fas fa-trash"></i></button>' +
-                        '</div>' +
-                        '</div>' +
-                        '<div class="group-card-body" style="padding:14px; flex:1; display:flex; flex-direction:column;">' +
-                        '<div style="margin-bottom:12px;">' +
-                        '<div class="chip-container" style="gap:4px; max-height:60px; overflow-y:auto; padding-right:4px;">' +
-                        questions.map(q => '<div class="chip" style="background:var(--input-bg); color:var(--text); border:1px solid var(--card-border); font-size:11px; padding:2px 8px;"><i class="fas fa-search" style="color:var(--text-muted); font-size:10px;"></i> ' + q + '</div>').join('') +
-                        '</div>' +
-                        '</div>' +
-                        '<div style="color:var(--text-muted); font-size:13px; line-height:1.5; flex:1; background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; border-left:3px solid var(--card-border);">' +
-                        ((answer.substring(0, 150) + (answer && answer.length > 150 ? '...' : '')) || '<em style="opacity:0.5;">(empty)</em>') +
-                        '</div>' +
-                        (qa.mediaFile ? '<div style="margin-top:12px;display:flex;align-items:center;gap:6px;font-size:11px;color:#64dc96; background:rgba(100,220,150,0.05); padding:6px 10px; border-radius:6px; border:1px dashed rgba(100,220,150,0.3);"><i class="fas fa-paperclip"></i> ' + qa.mediaFile + '</div>' : '') +
-                        (eventDates.length > 0 ? '<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--blue); background:rgba(64,196,255,0.05); padding:6px 10px; border-radius:6px; border:1px dashed rgba(64,196,255,0.3);"><i class="fas fa-calendar-alt"></i> ' + eventDates.length + ' ' + (currentLang==='en'?'Event(s)':'حدث/أحداث') + '</div>' : '') +
-                        '</div>' +
-                        '</div>';
-                }).join('');
-            }
-
-            function resetGlobalQAForm() {
-                globalQAEditingIndex = null;
-                globalQAQuestionsDraft = [];
-                globalQAEventDatesDraft = [];
-                globalQALegacyEventDate = '';
-                globalQACurrentAnswer = '';
-                globalQAPendingMediaFile = '';
-                globalQALanguage = 'ar';
-                const answerEl = document.getElementById('globalQAAnswerInput');
-                const saveBtn = document.getElementById('saveGlobalQABtn');
-                const legacyInput = document.getElementById('globalQAEventDateInput');
-                const langInput = document.getElementById('globalQALanguageInput');
-                if (answerEl) answerEl.value = '';
-                if (legacyInput) legacyInput.value = '';
-                if (langInput) langInput.value = 'ar';
-                if (saveBtn) {
-                    saveBtn.innerHTML = '<i class="fas fa-save"></i> ' + (currentLang === 'en' ? 'Save Q&A Pair' : 'حفظ زوج س و ج');
-                    saveBtn.style.background = 'var(--accent-dim)';
-                    saveBtn.style.color = 'var(--accent)';
-                }
-                setGlobalQAMediaSelection('');
-                renderGlobalQAQuestionsDraft();
-                renderGlobalQAEventDatesForm();
-            }
-
-            function editGlobalQA(index) {
-                const qa = globalQAArr[index];
-                if (!qa) return;
-                globalQAEditingIndex = index;
-                globalQAQuestionsDraft = Array.isArray(qa.questions) ? [...qa.questions] : (qa.question ? [qa.question] : []);
-                globalQAEventDatesDraft = JSON.parse(JSON.stringify(qa.eventDates || []));
-                globalQALegacyEventDate = qa.eventDate || '';
-                globalQACurrentAnswer = qa.answer || '';
-                globalQAPendingMediaFile = qa.mediaFile || '';
-                globalQALanguage = qa.qaLanguage || 'ar';
-                const answerEl = document.getElementById('globalQAAnswerInput');
-                const saveBtn = document.getElementById('saveGlobalQABtn');
-                const legacyInput = document.getElementById('globalQAEventDateInput');
-                const langInput = document.getElementById('globalQALanguageInput');
-                if (answerEl) answerEl.value = qa.answer || '';
-                if (legacyInput) legacyInput.value = globalQALegacyEventDate;
-                if (langInput) langInput.value = globalQALanguage;
-                if (saveBtn) {
-                    saveBtn.innerHTML = '<i class="fas fa-check"></i> ' + (currentLang === 'en' ? 'Update Q&A Pair' : 'تحديث زوج س و ج');
-                    saveBtn.style.background = 'var(--orange)';
-                    saveBtn.style.color = '#000';
-                }
-                setGlobalQAMediaSelection(globalQAPendingMediaFile);
-                renderGlobalQAQuestionsDraft();
-                renderGlobalQAEventDatesForm();
-                loadGlobalQAMedia();
-            }
-
-            function copyGlobalQA(index) {
-                const qa = globalQAArr[index];
-                if (!qa) return;
-                localStorage.setItem('wa_bot_qa_clipboard', JSON.stringify({ qa: qa, sourceGroupId: 'global-qa' }));
-                showToast(currentLang === 'en' ? 'Q&A copied!' : 'تم نسخ سؤال وجواب!');
-            }
-
-            async function pasteGlobalQA() {
-                const clipDataStr = localStorage.getItem('wa_bot_qa_clipboard');
-                if (!clipDataStr) {
-                    showToast(currentLang === 'en' ? 'Nothing in clipboard.' : 'لا يوجد شيء في الحافظة.');
-                    return;
-                }
-                const clipData = JSON.parse(clipDataStr);
-                let qa = JSON.parse(JSON.stringify(clipData.qa));
-                if (qa.mediaFile && clipData.sourceGroupId && clipData.sourceGroupId !== 'global-qa') {
-                    try { await fetch('/api/media/copy/' + encodeURIComponent(clipData.sourceGroupId) + '/global-qa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: qa.mediaFile }) }); } catch(e){}
-                }
-                if (!Array.isArray(globalQAArr)) globalQAArr = [];
-                globalQAArr.push(qa);
-                renderGlobalQAList();
-                loadGlobalQAMedia();
-                showToast(currentLang === 'en' ? 'Q&A pasted!' : 'تم لصق سؤال وجواب!');
-            }
-
-            function removeGlobalQA(index) {
-                if (!Array.isArray(globalQAArr)) return;
-                globalQAArr.splice(index, 1);
-                if (globalQAEditingIndex === index) resetGlobalQAForm();
-                if (globalQAEditingIndex !== null && globalQAEditingIndex > index) globalQAEditingIndex -= 1;
-                renderGlobalQAList();
-            }
-
-            function saveGlobalQA() {
-                const answerEl = document.getElementById('globalQAAnswerInput');
-                const legacyInput = document.getElementById('globalQAEventDateInput');
-                const langInput = document.getElementById('globalQALanguageInput');
-                const answer = String(answerEl ? answerEl.value : '').trim();
-                globalQALegacyEventDate = legacyInput ? legacyInput.value : globalQALegacyEventDate;
-                globalQALanguage = langInput ? (langInput.value === 'en' ? 'en' : 'ar') : 'ar';
-                globalQACurrentAnswer = answer;
-
-                if (!globalQAQuestionsDraft.length || (!answer && !globalQAPendingMediaFile)) {
-                    showToast(currentLang === 'en' ? 'Please add question variants and answer first' : 'يرجى إضافة صيغ السؤال والإجابة أولاً');
-                    return;
-                }
-
-                const entry = {
-                    questions: [...globalQAQuestionsDraft],
-                    answer: answer,
-                    eventDates: JSON.parse(JSON.stringify(globalQAEventDatesDraft || [])),
-                    eventDate: globalQALegacyEventDate,
-                    qaLanguage: globalQALanguage
-                };
-                if (globalQAPendingMediaFile) entry.mediaFile = globalQAPendingMediaFile;
-
-                if (globalQAEditingIndex !== null && globalQAEditingIndex >= 0 && globalQAEditingIndex < globalQAArr.length) {
-                    globalQAArr[globalQAEditingIndex] = entry;
-                } else {
-                    globalQAArr.push(entry);
-                }
-
-                resetGlobalQAForm();
-                renderGlobalQAList();
-            }
-
-            function toggleGroupPanel(groupIndex, type, enabled) {
-                const panelMap = { spam: 'spam', welcome: 'welcome', words: 'words', qa: 'qa', panic: 'panic', blacklist: 'blacklist', whitelist: 'whitelist' };
-                const fieldMap = { spam: 'enableAntiSpam', welcome: 'enableWelcomeMessage', words: 'enableWordFilter', qa: 'enableQAFeature', panic: 'enablePanicMode', blacklist: 'enableBlacklist', whitelist: 'enableWhitelist' };
-                const maxHeightMap = { spam: '600px', welcome: '200px', words: '600px', qa: '600px', panic: '800px', blacklist: '600px', whitelist: '600px' };
-
-                if (groupIndex !== 'global') {
-                    groupsArr[groupIndex][fieldMap[type]] = enabled;
-                }
-
-                const panel = document.getElementById(\`group_\${panelMap[type]}_panel_\${groupIndex}\`);
-                const toggle = panel ? panel.previousElementSibling : null;
-                if (!panel) return;
-
-                if (enabled) {
-                    panel.style.maxHeight = maxHeightMap[type];
-                    panel.style.opacity = '1';
-                    panel.style.marginTop = '20px';
-                    panel.style.overflowY = 'auto';
-                    if (toggle) toggle.style.borderRadius = '10px 10px 0 0';
-                } else {
-                    panel.style.maxHeight = '0px';
-                    panel.style.opacity = '0';
-                    panel.style.marginTop = '0px';
-                    panel.style.overflowY = 'hidden';
-                    if (toggle) toggle.style.borderRadius = '10px';
+            if (selected.blacklist && dataset.blacklist) {
+                if (selected.blacklist_clear) db.prepare('DELETE FROM blacklist').run();
+                const stmt = db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)');
+                for (const row of dataset.blacklist) {
+                    stmt.run(row.number);
                 }
             }
-
-            function addGroup() {
-                groupsArr.push({ 
-                    id: '', adminGroup: '', words: [], useDefaultWords: true, 
-                    aiFilterTriggerWords: [],
-                    enableJoinProfileScreening: false,
-                    adminLanguage: 'default',
-                    enableWordFilter: true, enableAIFilter: false, enableAIMedia: false, 
-                    autoAction: false, enableBlacklist: true, enableWhitelist: true,
-                    useGlobalBlacklist: true, useGlobalWhitelist: true,
-                    customBlacklist: [], customWhitelist: [],
-                    enableAntiSpam: false, spamDuplicateLimit: 3, spamAction: 'poll',
-                    enableWelcomeMessage: false, welcomeMessageText: '${t("مرحباً بك يا {user} في مجموعتنا!", "Welcome {user} to our group!")}',
-                    blockedTypes: [], blockedAction: 'delete', 
-                    spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
-                    spamLimits: {text:7, image:3, video:2, audio:3, document:3, sticker:3},
-                    enablePanicMode: false, panicMessageLimit: 10, panicTimeWindow: 5, panicLockoutDuration: 10, panicAlertTarget: 'both', panicAlertMessage: '${t("🚨 عذراً، تم رصد هجوم (Raid)! سيتم إغلاق المجموعة لمدة {time} دقائق.", "🚨 Raid detected! Group is locked for {time} minutes.")}',
-                    useGlobalQA: false,
-                    enableQAFeature: false, qaList: [], eventDate: '', eventDates: [], qaLanguage: 'ar', currentQAQuestions: [], currentQAAnswer: '', editingQAIndex: null
-                });
-                openGroupDetail(groupsArr.length - 1);
-            }
-
-            async function removeGroup(index) {
-                if(await showConfirmModal(dict.delete_confirm.replace(/<[^>]*>?/gm, ''))) {
-                    groupsArr.splice(index, 1);
-                    closeGroupDetail();
+            if (selected.whitelist && dataset.whitelist) {
+                if (selected.whitelist_clear) db.prepare('DELETE FROM whitelist').run();
+                const stmt = db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)');
+                for (const row of dataset.whitelist) {
+                    stmt.run(row.number);
                 }
             }
-
-            function updateGroupData(index, field, value) {
-                groupsArr[index][field] = value;
-                if (field === 'id' && index === currentDetailIndex) {
-                    const knownGroup = fetchedGroups.find(g => g.id === value);
-                    const groupName = knownGroup ? knownGroup.name : (value || dict.no_id);
-                    const initials = groupName.replace(/[^\u0600-\u06FFa-zA-Z]/g, '').slice(0, 2) || '؟';
-                    document.getElementById('detailGroupName').textContent = groupName;
-                    document.getElementById('detailGroupId').textContent = value || dict.no_id;
-                    document.getElementById('detailGroupAvatar').textContent = initials;
+            if (selected.blocked_extensions && dataset.blocked_extensions) {
+                if (selected.blocked_extensions_clear) db.prepare('DELETE FROM blocked_extensions').run();
+                const stmt = db.prepare('INSERT OR IGNORE INTO blocked_extensions (ext) VALUES (?)');
+                for (const row of dataset.blocked_extensions) {
+                    stmt.run(row.ext);
                 }
             }
-            function updateGroupToggle(index, field, isChecked) { groupsArr[index][field] = isChecked; }
-
-            function addGroupWord(groupIndex) {
-                const input = document.getElementById(\`newGroupWord_\${groupIndex}\`);
-                const word = input.value.trim();
-                if (word && !groupsArr[groupIndex].words.includes(word)) {
-                    groupsArr[groupIndex].words.push(word);
-                    input.value = '';
-                    renderGroupChips(groupIndex, 'words');
+            if (selected.whatsapp_groups && dataset.whatsapp_groups) {
+                const stmt = db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)');
+                for (const row of dataset.whatsapp_groups) {
+                    stmt.run(row.id, row.name);
                 }
             }
-            function removeGroupWord(groupIndex, wordIndex) {
-                groupsArr[groupIndex].words.splice(wordIndex, 1);
-                renderGroupChips(groupIndex, 'words');
-            }
-
-            function addGroupAITriggerWord(groupIndex) {
-                const input = document.getElementById(\`newGroupAITriggerWord_\${groupIndex}\`);
-                const word = input.value.trim();
-                if (!word) return;
-                if (!Array.isArray(groupsArr[groupIndex].aiFilterTriggerWords)) groupsArr[groupIndex].aiFilterTriggerWords = [];
-                if (!groupsArr[groupIndex].aiFilterTriggerWords.includes(word)) {
-                    groupsArr[groupIndex].aiFilterTriggerWords.push(word);
-                    input.value = '';
-                    renderGroupAITriggerWords(groupIndex);
+            if (selected.custom_groups && dataset.custom_groups) {
+                if (selected.custom_groups_clear) db.prepare('DELETE FROM custom_groups').run();
+                const stmt = db.prepare(`
+                    INSERT OR REPLACE INTO custom_groups (
+                        group_id, admin_group, admin_language, use_default_words, enable_word_filter, enable_ai_filter, 
+                        enable_ai_media, auto_action, enable_blacklist, enable_whitelist, enable_anti_spam, 
+                        spam_duplicate_limit, spam_action, enable_welcome_message, welcome_message_text, custom_words,
+                        blocked_types, blocked_action, spam_types, spam_limits,
+                        enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
+                        panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, 
+                        use_global_blacklist, use_global_whitelist, use_global_qa, enable_qa_feature, custom_qa, qa_event_date, 
+                        qa_language, qa_event_dates, custom_ai_trigger_words, enable_join_profile_screening
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                `);
+                for (const row of dataset.custom_groups) {
+                    stmt.run(
+                        row.group_id, row.admin_group, row.admin_language || 'default', row.use_default_words, row.enable_word_filter,
+                        row.enable_ai_filter, row.enable_ai_media, row.auto_action, row.enable_blacklist,
+                        row.enable_whitelist, row.enable_anti_spam, row.spam_duplicate_limit, row.spam_action,
+                        row.enable_welcome_message, row.welcome_message_text, row.custom_words,
+                        row.blocked_types, row.blocked_action, row.spam_types, row.spam_limits,
+                        row.enable_panic_mode, row.panic_message_limit, row.panic_time_window,
+                        row.panic_lockout_duration, row.panic_alert_target, row.panic_alert_message,
+                        row.custom_blacklist, row.custom_whitelist, row.use_global_blacklist,
+                        row.use_global_whitelist, row.use_global_qa || 0, row.enable_qa_feature, row.custom_qa, row.qa_event_date,
+                        row.qa_language, row.qa_event_dates, row.custom_ai_trigger_words || '[]', row.enable_join_profile_screening || 0
+                    );
                 }
             }
+        });
 
-            function removeGroupAITriggerWord(groupIndex, wordIndex) {
-                if (!Array.isArray(groupsArr[groupIndex].aiFilterTriggerWords)) return;
-                groupsArr[groupIndex].aiFilterTriggerWords.splice(wordIndex, 1);
-                renderGroupAITriggerWords(groupIndex);
+        importTx();
+        config = loadConfigFromDB();
+        console.log('[استيراد] تم استيراد البيانات بنجاح');
+        res.json({ success: true, message: 'Import completed successfully' });
+    } catch (error) {
+        console.error('[خطأ] فشل الاستيراد:', error);
+        res.status(500).json({ error: 'Import failed: ' + error.message });
+    }
+});
+
+app.get('/api/access/permission-groups', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const rows = db.prepare('SELECT id, name, description, permissions FROM permission_groups ORDER BY name').all();
+    const data = rows.map(r => ({ ...r, permissions: parseJsonArray(r.permissions) }));
+    res.json(data);
+});
+
+app.post('/api/access/permission-groups/create', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const name = normalizePermissionGroupName(req.body.name);
+    const description = String(req.body.description || '').trim();
+    const permissions = normalizePermissionList(req.body.permissions);
+    if (!name || permissions.length === 0) return res.status(400).json({ error: 'Invalid permission group payload' });
+
+    try {
+        const existing = db.prepare('SELECT id FROM permission_groups WHERE lower(name) = lower(?)').get(name);
+        if (existing) return res.status(409).json({ error: 'Permission group name already exists' });
+
+        db.prepare('INSERT INTO permission_groups (name, description, permissions) VALUES (?, ?, ?)')
+            .run(name, description, JSON.stringify(permissions));
+        res.sendStatus(200);
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+app.post('/api/access/permission-groups/update', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const id = parseInt(req.body.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+    const name = normalizePermissionGroupName(req.body.name);
+    const description = String(req.body.description || '').trim();
+    const permissions = normalizePermissionList(req.body.permissions);
+    if (!name || permissions.length === 0) return res.status(400).json({ error: 'Invalid permission group payload' });
+
+    try {
+        const current = db.prepare('SELECT id FROM permission_groups WHERE id = ?').get(id);
+        if (!current) return res.status(404).json({ error: 'Permission group not found' });
+
+        const duplicate = db.prepare('SELECT id FROM permission_groups WHERE lower(name) = lower(?) AND id <> ?').get(name, id);
+        if (duplicate) return res.status(409).json({ error: 'Permission group name already exists' });
+
+        db.prepare('UPDATE permission_groups SET name = ?, description = ?, permissions = ? WHERE id = ?')
+            .run(name, description, JSON.stringify(permissions), id);
+        res.sendStatus(200);
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+app.post('/api/access/permission-groups/delete', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const id = parseInt(req.body.id, 10);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'Invalid id' });
+
+    try {
+        const tx = db.transaction(() => {
+            db.prepare('DELETE FROM user_permission_groups WHERE permission_group_id = ?').run(id);
+            const info = db.prepare('DELETE FROM permission_groups WHERE id = ?').run(id);
+            if (!info || info.changes === 0) {
+                throw new Error('Permission group not found');
             }
+        });
+        tx();
+        res.sendStatus(200);
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
 
-            function renderGroupAITriggerWords(groupIndex) {
-                const container = document.getElementById(\`chip_container_ai_words_\${groupIndex}\`);
-                if (!container) return;
-                const words = Array.isArray(groupsArr[groupIndex].aiFilterTriggerWords) ? groupsArr[groupIndex].aiFilterTriggerWords : [];
-                container.innerHTML = words.map((word, idx) =>
-                    \`<div class="chip">\${word} <span class="chip-remove" onclick="removeGroupAITriggerWord(\${groupIndex}, \${idx})">&times;</span></div>\`
-                ).join('');
-            }
+app.get('/api/users', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const users = db.prepare('SELECT id, username, display_name, is_active, is_superadmin, created_at, updated_at FROM app_users ORDER BY id ASC').all();
+    const rows = db.prepare(`
+        SELECT upg.user_id, pg.id AS group_id, pg.name
+        FROM user_permission_groups upg
+        JOIN permission_groups pg ON pg.id = upg.permission_group_id
+    `).all();
+    const groupAccess = db.prepare('SELECT user_id, wa_group_id FROM user_group_access').all();
 
-            function addQuestionToQA(groupIndex) {
-                const input = document.getElementById(\`newQAQuestion_\${groupIndex}\`);
-                const question = input.value.trim().toLowerCase();
-                if (question) {
-                    if (!groupsArr[groupIndex].currentQAQuestions) groupsArr[groupIndex].currentQAQuestions = [];
-                    if (!groupsArr[groupIndex].currentQAQuestions.includes(question)) {
-                        groupsArr[groupIndex].currentQAQuestions.push(question);
-                        input.value = '';
-                        renderQAQuestions(groupIndex);
-                    } else {
-                        showToast(currentLang === 'en' ? 'This question variant already exists' : 'صيغة السؤال هذه موجودة بالفعل');
-                    }
-                }
-            }
-            
-            function removeQuestionFromQA(groupIndex, questionIndex) {
-                if (groupsArr[groupIndex].currentQAQuestions) {
-                    groupsArr[groupIndex].currentQAQuestions.splice(questionIndex, 1);
-                    renderQAQuestions(groupIndex);
-                }
-            }
+    const byUserGroups = new Map();
+    rows.forEach(r => {
+        if (!byUserGroups.has(r.user_id)) byUserGroups.set(r.user_id, []);
+        byUserGroups.get(r.user_id).push({ id: r.group_id, name: r.name });
+    });
 
-            function renderQAEventDatesForm(groupIndex) {
-                const container = document.getElementById(\`event_dates_container_\${groupIndex}\`);
-                const legacyInput = document.getElementById(\`newQAEventDate_\${groupIndex}\`);
-                if (!container) return;
-                const group = groupsArr[groupIndex];
-                container.innerHTML = (group.currentQAEventDates || []).map((ed, edIdx) => {
-                    return \`<div class="field-row" style="margin-bottom:10px; background: rgba(255,255,255,0.02); padding: 12px; border-radius: 10px; border: 1px solid var(--card-border); align-items: flex-end; gap: 12px;">
-                        <div class="field-group" style="margin-bottom:0; flex: 1.5;">
-                            <label class="field-label" style="font-size:10px;">\${currentLang==='en'?'Label (e.g. Exam)':'العنوان (مثل: اختبار)'}</label>
-                            <input type="text" value="\${ed.label || ''}" placeholder="..." onchange="updateEventDate(\${groupIndex}, \${edIdx}, 'label', this.value)">
-                        </div>
-                        <div class="field-group" style="margin-bottom:0; flex: 1.5;">
-                            <label class="field-label" style="font-size:10px;">\${currentLang==='en'?'Date':'التاريخ'}</label>
-                            <input type="date" value="\${ed.date || ''}" onchange="updateEventDate(\${groupIndex}, \${edIdx}, 'date', this.value)" style="color-scheme: dark;">
-                        </div>
-                        <button type="button" class="icon-btn" onclick="removeEventDate(\${groupIndex}, \${edIdx})" style="border-color:rgba(255,82,82,0.3);color:var(--red);" title="\${currentLang==='en'?'Delete event':'حذف الحدث'}"><i class="fas fa-trash"></i></button>
-                    </div>\`;
-                }).join('');
-                
-                if (!group.currentQAEventDates || group.currentQAEventDates.length === 0) {
-                    container.innerHTML += \`<div style="font-size:12px; color:var(--text-muted); padding:10px; text-align:center; border: 1px dashed var(--card-border); border-radius: 8px;">\${currentLang==='en'?'No extra events added yet.':'لم يتم إضافة أحداث إضافية بعد.'}</div>\`;
-                }
-                
-                if (legacyInput) legacyInput.value = group.currentQAEventDate || '';
-            }
+    const byUserWaAccess = new Map();
+    groupAccess.forEach(r => {
+        if (!byUserWaAccess.has(r.user_id)) byUserWaAccess.set(r.user_id, []);
+        byUserWaAccess.get(r.user_id).push(r.wa_group_id);
+    });
 
-            function addEventDate(groupIndex) {
-                const answerEl = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
-                if (answerEl) groupsArr[groupIndex].currentQAAnswer = answerEl.value;
-                if (!groupsArr[groupIndex].currentQAEventDates) groupsArr[groupIndex].currentQAEventDates = [];
-                groupsArr[groupIndex].currentQAEventDates.push({ label: '', date: '' });
-                renderGroupDetailBody(groupIndex, 'qa');
-            }
+    res.json(users.map(u => ({
+        ...u,
+        permissionGroups: byUserGroups.get(u.id) || [],
+        allowedGroupIds: byUserWaAccess.get(u.id) || []
+    })));
+});
 
-            function removeEventDate(groupIndex, dateIndex) {
-                const answerEl = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
-                if (answerEl) groupsArr[groupIndex].currentQAAnswer = answerEl.value;
-                groupsArr[groupIndex].currentQAEventDates.splice(dateIndex, 1);
-                renderGroupDetailBody(groupIndex, 'qa');
-            }
+app.post('/api/users/create', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const username = sanitizeUsername(req.body.username);
+    const displayName = String(req.body.displayName || '').trim();
+    const password = String(req.body.password || '');
+    const isSuperadmin = req.body.isSuperadmin ? 1 : 0;
 
-            function updateEventDate(groupIndex, dateIndex, field, value) {
-                if (!groupsArr[groupIndex].currentQAEventDates[dateIndex]) return;
-                groupsArr[groupIndex].currentQAEventDates[dateIndex][field] = value;
-            }
-            
-            function renderQAQuestions(groupIndex) {
-                const container = document.getElementById(\`qa_questions_container_\${groupIndex}\`);
-                if (!container) return;
-                const questions = groupsArr[groupIndex].currentQAQuestions || [];
-                container.innerHTML = questions.map((q, qIdx) => \`
-                    <div class="chip">
-                        <span>\${q}</span>
-                        <span class="chip-remove" onclick="removeQuestionFromQA(\${groupIndex}, \${qIdx})">×</span>
-                    </div>
-                \`).join('');
-            }
+    if (!username || !displayName || password.length < 8) {
+        return res.status(400).json({ error: 'username/displayName required and password must be at least 8 chars' });
+    }
+    if (!/^[a-z0-9._-]+$/.test(username)) {
+        return res.status(400).json({ error: 'username can contain only a-z, 0-9, dot, underscore, hyphen' });
+    }
 
-            function addGroupQA(groupIndex) {
-                const answerInput = document.getElementById(\`newQAAnswer_\${groupIndex}\`);
-                const answer = (answerInput ? answerInput.value : (groupsArr[groupIndex].currentQAAnswer || '')).trim();
-                const questions = groupsArr[groupIndex].currentQAQuestions || [];
-                const mediaFile = groupsArr[groupIndex].pendingMediaFile || '';
-                const eventDates = groupsArr[groupIndex].currentQAEventDates || [];
-                const eventDate = groupsArr[groupIndex].currentQAEventDate || '';
-                const editingIndex = Number.isInteger(groupsArr[groupIndex].editingQAIndex)
-                    ? groupsArr[groupIndex].editingQAIndex
-                    : null;
-                
-                if (questions.length > 0 && (answer || mediaFile)) {
-                    if (!groupsArr[groupIndex].qaList) groupsArr[groupIndex].qaList = [];
-                    const newPair = { questions: questions, answer: answer, eventDates: JSON.parse(JSON.stringify(eventDates)), eventDate: eventDate };
-                    if (mediaFile) newPair.mediaFile = mediaFile;
-                    if (editingIndex !== null && editingIndex >= 0 && editingIndex < groupsArr[groupIndex].qaList.length) {
-                        groupsArr[groupIndex].qaList[editingIndex] = newPair;
-                    } else {
-                        groupsArr[groupIndex].qaList.push(newPair);
-                    }
-                    if (answerInput) answerInput.value = '';
-                    groupsArr[groupIndex].currentQAQuestions = [];
-                    groupsArr[groupIndex].currentQAAnswer = '';
-                    groupsArr[groupIndex].currentQAEventDates = [];
-                    groupsArr[groupIndex].currentQAEventDate = '';
-                    groupsArr[groupIndex].editingQAIndex = null;
-                    // Clear media selection
-                    groupsArr[groupIndex].pendingMediaFile = '';
-                    const indicator = document.getElementById(\`qa_media_selected_\${groupIndex}\`);
-                    if (indicator) indicator.style.display = 'none';
-                    loadGroupMedia(groupIndex); // refresh grid (deselects all)
-                    
-                    // Render form and list again to clear event dates from UI
-                    renderGroupDetailBody(groupIndex, 'qa');
-                } else {
-                    const msg = currentLang === 'en' ? 'Please add at least one question variant and an answer or attach a media file' : 'يرجى إضافة صيغة سؤال واحدة على الأقل وملء الإجابة أو إرفاق وسائط';
-                    showToast(msg);
-                }
-            }
+    try {
+        const timestamp = nowIso();
+        db.prepare(`
+            INSERT INTO app_users (username, password_hash, display_name, is_active, is_superadmin, created_at, updated_at)
+            VALUES (?, ?, ?, 1, ?, ?, ?)
+        `).run(username, hashPassword(password), displayName, isSuperadmin, timestamp, timestamp);
+        res.sendStatus(200);
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
 
-            
-            function removeGroupQA(groupIndex, qaIndex) {
-                if (groupsArr[groupIndex].qaList) {
-                    groupsArr[groupIndex].qaList.splice(qaIndex, 1);
-                    renderGroupQA(groupIndex);
-                }
-                const editingIndex = Number.isInteger(groupsArr[groupIndex].editingQAIndex)
-                    ? groupsArr[groupIndex].editingQAIndex
-                    : null;
-                if (editingIndex !== null) {
-                    if (editingIndex === qaIndex) groupsArr[groupIndex].editingQAIndex = null;
-                    if (editingIndex > qaIndex) groupsArr[groupIndex].editingQAIndex = editingIndex - 1;
-                }
-            }
-            
-            function renderGroupQA(groupIndex) {
-                const container = document.getElementById(\`qa_container_\${groupIndex}\`);
-                if (!container) return;
-                const qaList = groupsArr[groupIndex].qaList || [];
-                container.innerHTML = qaList.map((qa, qaIdx) => \`
-                                    <div class="group-card" style="margin-bottom:0; display:flex; flex-direction:column; border:1px solid rgba(255,255,255,0.05); background:var(--card-bg);">
-                                        <div class="group-card-header" style="padding:14px; border-bottom:1px solid rgba(255,255,255,0.05);">
-                                            <div class="group-card-title" style="font-size:13px; font-weight:bold; color:var(--text);">
-                                                <i class="fas fa-bolt" style="color:var(--accent);"></i> \${qa.questions ? qa.questions.length : 0} \${currentLang==='en'?'Triggers':'محفزات'}
-                                            </div>
-                                            <div style="display:flex;gap:6px;">
-                                                <button type="button" class="icon-btn" onclick="copyQA(\${groupIndex}, \${qaIdx})" style="background:rgba(255,160,0,0.1);color:#ffa000;border-color:rgba(255,160,0,0.3); width:28px; height:28px;" title="\${currentLang==='en'?'Copy':'نسخ'}">
-                                                    <i class="fas fa-copy"></i>
-                                                </button>
-                                                <button type="button" class="icon-btn" onclick="editGroupQA(\${groupIndex}, \${qaIdx})" style="background:rgba(64,196,255,0.1);color:var(--blue);border-color:rgba(64,196,255,0.3); width:28px; height:28px;" title="\${currentLang==='en'?'Edit':'تعديل'}">
-                                                    <i class="fas fa-pen"></i>
-                                                </button>
-                                                <button type="button" class="icon-btn" onclick="removeGroupQA(\${groupIndex}, \${qaIdx})" style="background:rgba(255,82,82,0.1);color:var(--red);border-color:rgba(255,82,82,0.3); width:28px; height:28px;" title="\${currentLang==='en'?'Delete':'حذف'}">
-                                                    <i class="fas fa-trash"></i>
-                                                </button>
-                                            </div>
-                                        </div>
-                                        <div class="group-card-body" style="padding:14px; flex:1; display:flex; flex-direction:column;">
-                                            <div style="margin-bottom:12px;">
-                                                <div class="chip-container" style="gap:4px; max-height:60px; overflow-y:auto; padding-right:4px;">\${(qa.questions || []).map((q) => \`<div class="chip" style="background:var(--input-bg); color:var(--text); border:1px solid var(--card-border); font-size:11px; padding:2px 8px;"><i class="fas fa-search" style="color:var(--text-muted); font-size:10px;"></i> \${q}</div>\`).join('')}</div>
-                                            </div>
-                                            <div style="color:var(--text-muted); font-size:13px; line-height:1.5; flex:1; background:rgba(255,255,255,0.02); padding:10px; border-radius:8px; border-left:3px solid var(--card-border);">
-                                                \${(qa.answer || '').substring(0, 150) + (qa.answer && qa.answer.length > 150 ? '...' : '') || '<em style="opacity:0.5;">(empty)</em>'}
-                                            </div>
-                                            \${qa.mediaFile ? \`<div style="margin-top:12px;display:flex;align-items:center;gap:6px;font-size:11px;color:#64dc96; background:rgba(100,220,150,0.05); padding:6px 10px; border-radius:6px; border:1px dashed rgba(100,220,150,0.3);"><i class="fas fa-paperclip"></i> \${qa.mediaFile}</div>\` : ''}
-                                            \${qa.eventDates && qa.eventDates.length > 0 ? \`<div style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--blue); background:rgba(64,196,255,0.05); padding:6px 10px; border-radius:6px; border:1px dashed rgba(64,196,255,0.3);"><i class="fas fa-calendar-alt"></i> \${qa.eventDates.length} \${currentLang==='en'?'Event(s)':'حدث/أحداث'}</div>\` : ''}
-                                        </div>
-                                    </div>\`).join('');
-            }
+app.post('/api/users/update', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const userId = parseInt(req.body.userId, 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid userId' });
 
-            // ── Media management for Q&A ──────────────────────────────────────
-            function loadGroupMedia(groupIndex) {
-                const group = groupsArr[groupIndex];
-                const groupId = encodeURIComponent(group.id);
-                fetch(\`/api/media/list/\${groupId}\`)
-                    .then(r => r.json())
-                    .then(files => renderMediaGrid(groupIndex, files))
-                    .catch(() => {});
-            }
+    const user = getUserById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-            function renderMediaGrid(groupIndex, files) {
-                const grid = document.getElementById(\`qa_media_grid_\${groupIndex}\`);
-                if (!grid) return;
-                if (files.length === 0) { grid.innerHTML = \`<p style="font-size:12px;color:var(--text-muted);grid-column:1/-1;">\${currentLang==='en'?'No files uploaded yet.':'لا توجد ملفات محملة بعد.'}</p>\`; return; }
-                const imgExts = ['jpg','jpeg','png','gif','webp','bmp','svg'];
-                const vidExts = ['mp4','mov','webm','mkv','avi'];
-                const audExts = ['mp3','ogg','wav','m4a','aac'];
-                grid.innerHTML = files.map(f => {
-                    const ext = f.name.split('.').pop().toLowerCase();
-                    const groupId = encodeURIComponent(groupsArr[groupIndex].id);
-                    let preview;
-                    if (imgExts.includes(ext)) {
-                        preview = \`<img src="/media/\${groupId}/\${encodeURIComponent(f.name)}" style="width:100%;height:72px;object-fit:cover;border-radius:6px 6px 0 0;">\`;
-                    } else {
-                        const icons = { mp4:'fa-film', mov:'fa-film', webm:'fa-film', mkv:'fa-film', mp3:'fa-music', ogg:'fa-music', wav:'fa-music', pdf:'fa-file-pdf', doc:'fa-file-word', docx:'fa-file-word', zip:'fa-file-archive', rar:'fa-file-archive' };
-                        const icon = icons[ext] || 'fa-file';
-                        preview = \`<div style="width:100%;height:72px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.05);border-radius:6px 6px 0 0;"><i class="fas \${icon}" style="font-size:28px;color:var(--text-muted);"></i></div>\`;
-                    }
-                    const kb = (f.size/1024).toFixed(1);
-                    const isSelected = groupsArr[groupIndex].pendingMediaFile === f.name;
-                    return \`<div style="background:var(--card-bg);border:1.5px solid \${isSelected ? '#64dc96' : 'var(--card-border)'};border-radius:8px;overflow:hidden;">
-                        \${preview}
-                        <div style="padding:6px 8px;">
-                            <div style="font-size:11px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="\${f.name}">\${f.name}</div>
-                            <div style="font-size:10px;color:var(--text-muted);margin-bottom:6px;">\${kb} KB</div>
-                            <div style="display:flex;gap:4px;">
-                                <button type="button" onclick="selectQAMedia(\${groupIndex},\\'\${f.name}\\')" style="flex:1;font-size:11px;padding:4px;background:\${isSelected ? 'rgba(100,220,150,0.15)' : 'var(--input-bg)'};color:\${isSelected ? '#64dc96' : 'var(--text-muted)'};border:1px solid \${isSelected ? 'rgba(100,220,150,0.4)' : 'var(--card-border)'};border-radius:5px;cursor:pointer;">
-                                    <i class="fas \${isSelected ? 'fa-check' : 'fa-link'}"></i> \${isSelected ? (currentLang==='en'?'Selected':'محدد') : (currentLang==='en'?'Select':'اختر')}
-                                </button>
-                                <button type="button" onclick="deleteGroupMedia(\${groupIndex},\\'\${f.name}\\')" style="padding:4px 6px;background:var(--red-dim);color:var(--red);border:1px solid rgba(255,82,82,0.3);border-radius:5px;cursor:pointer;font-size:11px;">
-                                    <i class="fas fa-trash"></i>
-                                </button>
-                            </div>
-                        </div>
-                    </div>\`;
-                }).join('');
-            }
+    const updates = [];
+    const params = [];
 
-            function uploadGroupMedia(groupIndex, input) {
-                const file = input.files[0];
-                if (!file) return;
-                const group = groupsArr[groupIndex];
-                const groupId = encodeURIComponent(group.id);
-                const statusEl = document.getElementById(\`qa_upload_status_\${groupIndex}\`);
-                statusEl.style.display = 'block';
-                statusEl.textContent = currentLang==='en' ? '⏳ Uploading...' : '⏳ جاري الرفع...';
-                const fd = new FormData();
-                fd.append('file', file);
-                fetch(\`/api/media/upload/\${groupId}\`, { method:'POST', body:fd })
-                    .then(r => r.json())
-                    .then(data => {
-                        statusEl.textContent = currentLang==='en' ? '✅ Uploaded: ' + data.filename : '✅ تم الرفع: ' + data.filename;
-                        setTimeout(() => { statusEl.style.display='none'; }, 3000);
-                        loadGroupMedia(groupIndex);
-                        input.value = '';
-                    })
-                    .catch(() => { statusEl.textContent = currentLang==='en' ? '❌ Upload failed' : '❌ فشل الرفع'; });
-            }
+    if (typeof req.body.displayName === 'string') {
+        updates.push('display_name = ?');
+        params.push(req.body.displayName.trim());
+    }
+    if (typeof req.body.isActive !== 'undefined') {
+        updates.push('is_active = ?');
+        params.push(req.body.isActive ? 1 : 0);
+    }
+    if (typeof req.body.isSuperadmin !== 'undefined') {
+        updates.push('is_superadmin = ?');
+        params.push(req.body.isSuperadmin ? 1 : 0);
+    }
+    if (typeof req.body.password === 'string' && req.body.password.length > 0) {
+        if (req.body.password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 chars' });
+        updates.push('password_hash = ?');
+        params.push(hashPassword(req.body.password));
+    }
 
-            function selectQAMedia(groupIndex, filename) {
-                const wasSelected = groupsArr[groupIndex].pendingMediaFile === filename;
-                groupsArr[groupIndex].pendingMediaFile = wasSelected ? '' : filename;
-                // Update selected indicator
-                const indicator = document.getElementById(\`qa_media_selected_\${groupIndex}\`);
-                const nameEl = document.getElementById(\`qa_media_selected_name_\${groupIndex}\`);
-                if (!wasSelected && filename) {
-                    indicator.style.display = 'flex';
-                    nameEl.textContent = '📎 ' + filename;
-                } else {
-                    indicator.style.display = 'none';
-                }
-                // Re-render grid to update button states
-                fetch(\`/api/media/list/\${encodeURIComponent(groupsArr[groupIndex].id)}\`)
-                    .then(r => r.json()).then(files => renderMediaGrid(groupIndex, files)).catch(()=>{});
-            }
+    if (updates.length === 0) return res.status(400).json({ error: 'No valid updates' });
 
-            function clearQAMedia(groupIndex) { selectQAMedia(groupIndex, ''); }
+    updates.push('updated_at = ?');
+    params.push(nowIso());
+    params.push(userId);
 
-            async function deleteGroupMedia(groupIndex, filename) {
-                if (!await showConfirmModal(currentLang==='en' ? \`Delete \${filename}?\` : \`حذف \${filename}؟\`)) return;
-                const groupId = encodeURIComponent(groupsArr[groupIndex].id);
-                fetch(\`/api/media/delete/\${groupId}/\${encodeURIComponent(filename)}\`, { method:'DELETE' })
-                    .then(() => {
-                        if (groupsArr[groupIndex].pendingMediaFile === filename) selectQAMedia(groupIndex, '');
-                        loadGroupMedia(groupIndex);
-                    });
-            }
+    db.prepare(`UPDATE app_users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+    res.sendStatus(200);
+});
 
-            function copyQA(groupIndex, qaIndex) {
-                const qa = groupsArr[groupIndex].qaList[qaIndex];
-                if (qa) {
-                    const clipData = { qa: qa, sourceGroupId: groupsArr[groupIndex].id };
-                    localStorage.setItem('wa_bot_qa_clipboard', JSON.stringify(clipData));
-                    showToast(currentLang === 'en' ? 'Q&A copied!' : 'تم نسخ سؤال وجواب!');
-                }
-            }
+app.post('/api/users/delete', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const userId = parseInt(req.body.userId, 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid userId' });
+    if (req.authUser.id === userId) return res.status(400).json({ error: 'You cannot delete your own account' });
 
-            async function pasteQA(groupIndex) {
-                const clipDataStr = localStorage.getItem('wa_bot_qa_clipboard');
-                if (!clipDataStr) {
-                    showToast(currentLang === 'en' ? 'Nothing in clipboard.' : 'لا يوجد شيء في الحافظة.');
-                    return;
-                }
-                const clipData = JSON.parse(clipDataStr);
-                const targetGroupId = groupsArr[groupIndex].id;
-                let qa = JSON.parse(JSON.stringify(clipData.qa));
-                
-                if (qa.mediaFile && clipData.sourceGroupId && clipData.sourceGroupId !== targetGroupId) {
-                    try { await fetch('/api/media/copy/' + encodeURIComponent(clipData.sourceGroupId) + '/' + encodeURIComponent(targetGroupId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ filename: qa.mediaFile }) }); } catch(e){}
-                }
-                
-                if (!groupsArr[groupIndex].qaList) groupsArr[groupIndex].qaList = [];
-                groupsArr[groupIndex].qaList.push(qa);
-                renderGroupDetailBody(groupIndex, 'qa');
-                loadGroupMedia(groupIndex);
-                showToast(currentLang === 'en' ? 'Q&A pasted!' : 'تم لصق سؤال وجواب!');
-            }
+    const tx = db.transaction(() => {
+        db.prepare('DELETE FROM user_permission_groups WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM user_group_access WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(userId);
+        db.prepare('DELETE FROM app_users WHERE id = ?').run(userId);
+    });
 
-            function editGroupQA(groupIndex, qaIndex) {
-                const qa = groupsArr[groupIndex].qaList[qaIndex];
-                if (!qa) return;
-                // Pre-fill questions and event dates
-                groupsArr[groupIndex].currentQAQuestions = [...(qa.questions || [])];
-                groupsArr[groupIndex].currentQAEventDates = JSON.parse(JSON.stringify(qa.eventDates || []));
-                groupsArr[groupIndex].currentQAEventDate = qa.eventDate || '';
-                groupsArr[groupIndex].editingQAIndex = qaIndex;
-                groupsArr[groupIndex].currentQAAnswer = qa.answer || '';
-                groupsArr[groupIndex].pendingMediaFile = qa.mediaFile || '';
-                
-                renderGroupDetailBody(groupIndex, 'qa');
+    tx();
+    res.sendStatus(200);
+});
 
-                // Update save button appearance to indicate edit mode
-                const saveBtn = document.getElementById(\`saveQABtn_\${groupIndex}\`);
-                if (saveBtn) {
-                    saveBtn.innerHTML = '<i class="fas fa-check"></i> ' + (currentLang==='en' ? 'Update Q&A Pair' : 'تحديث زوج س و ج');
-                    saveBtn.style.background = 'var(--orange)';
-                    saveBtn.style.color = '#000';
-                }
-                // Scroll to form
-                const questionInput = document.getElementById(\`newQAQuestion_\${groupIndex}\`);
-                if (questionInput) questionInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
+app.get('/api/users/:userId/access', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const userId = parseInt(req.params.userId, 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid userId' });
+    const user = getUserById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-            function addGroupBlacklist(gIndex) {
-                const input = document.getElementById(\`newGroupBl_\${gIndex}\`);
-                let justNumbers = input.value.replace(/\\D/g, ''); 
-                if (justNumbers) {
-                    let finalId = justNumbers + '@c.us';
-                    if (!groupsArr[gIndex].customBlacklist.includes(finalId)) {
-                        groupsArr[gIndex].customBlacklist.push(finalId);
-                        input.value = '';
-                        renderGroupChips(gIndex, 'blacklist');
-                    }
-                }
-            }
-            function removeGroupBlacklist(gIndex, idx) {
-                groupsArr[gIndex].customBlacklist.splice(idx, 1);
-                renderGroupChips(gIndex, 'blacklist');
-            }
+    const permissionGroups = db.prepare(`
+        SELECT pg.id, pg.name
+        FROM user_permission_groups upg
+        JOIN permission_groups pg ON pg.id = upg.permission_group_id
+        WHERE upg.user_id = ?
+    `).all(userId);
 
-            function addGroupWhitelist(gIndex) {
-                const input = document.getElementById(\`newGroupWl_\${gIndex}\`);
-                let justNumbers = input.value.replace(/\\D/g, ''); 
-                if (justNumbers) {
-                    let finalId = justNumbers + '@c.us';
-                    if (!groupsArr[gIndex].customWhitelist.includes(finalId)) {
-                        groupsArr[gIndex].customWhitelist.push(finalId);
-                        input.value = '';
-                        renderGroupChips(gIndex, 'whitelist');
-                    }
-                }
-            }
-            function removeGroupWhitelist(gIndex, idx) {
-                groupsArr[gIndex].customWhitelist.splice(idx, 1);
-                renderGroupChips(gIndex, 'whitelist');
-            }
+    const allowedGroupIds = db.prepare('SELECT wa_group_id FROM user_group_access WHERE user_id = ?').all(userId).map(r => r.wa_group_id);
+    const settingsRows = db.prepare('SELECT key, value FROM user_settings WHERE user_id = ?').all(userId);
+    const settings = {};
+    settingsRows.forEach(r => {
+        settings[r.key] = r.value;
+    });
 
-            function getStatusIconClass(kind) {
-                if (kind === 'connected') return 'fas fa-check';
-                if (kind === 'waiting_qr') return 'fas fa-qrcode';
-                if (kind === 'syncing' || kind === 'initializing' || kind === 'retrying' || kind === 'terminating') return 'fas fa-spinner fa-spin';
-                if (kind === 'error') return 'fas fa-exclamation-triangle';
-                if (kind === 'disconnected') return 'fas fa-sign-out-alt';
-                return 'fas fa-info-circle';
-            }
+    res.json({
+        userId,
+        permissionGroupIds: permissionGroups.map(g => g.id),
+        allowedGroupIds,
+        settings
+    });
+});
 
-            function renderDashboardStatus(statusText, statusKind) {
-                const iconEl = document.getElementById('status-text-icon');
-                const labelEl = document.getElementById('status-text-label');
-                const detailEl = document.getElementById('status-text-detail');
-                const detailCheckEl = document.getElementById('status-text-detail-check');
-                const dot = document.getElementById('statusDot');
-                const logoutBtn = document.getElementById('logoutBtn');
-                const text = String(statusText || '').trim();
-                const kind = String(statusKind || 'unknown');
+app.post('/api/users/:userId/access', requireAuthApi, requirePermission('users:manage'), (req, res) => {
+    const userId = parseInt(req.params.userId, 10);
+    if (!Number.isFinite(userId)) return res.status(400).json({ error: 'Invalid userId' });
+    const user = getUserById(userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-                if (iconEl) iconEl.className = getStatusIconClass(kind);
-                if (labelEl) labelEl.textContent = text;
-                if (detailEl) detailEl.textContent = text;
-                if (detailCheckEl) detailCheckEl.style.display = kind === 'connected' ? 'inline-block' : 'none';
+    const payload = normalizeUserAccessPayload(req.body || {});
 
-                if (dot) {
-                    if (kind === 'connected') dot.className = 'status-dot online';
-                    else if (kind === 'waiting_qr') dot.className = 'status-dot waiting';
-                    else dot.className = 'status-dot';
-                }
+    const tx = db.transaction(() => {
+        db.prepare('DELETE FROM user_permission_groups WHERE user_id = ?').run(userId);
+        const insertPermission = db.prepare('INSERT OR IGNORE INTO user_permission_groups (user_id, permission_group_id) VALUES (?, ?)');
+        payload.permissionGroupIds.forEach(groupId => insertPermission.run(userId, groupId));
 
-                if (logoutBtn) logoutBtn.style.display = kind === 'connected' ? 'block' : 'none';
-            }
+        db.prepare('DELETE FROM user_group_access WHERE user_id = ?').run(userId);
+        const insertGroup = db.prepare('INSERT OR IGNORE INTO user_group_access (user_id, wa_group_id) VALUES (?, ?)');
+        payload.allowedGroupIds.forEach(waGroupId => insertGroup.run(userId, waGroupId));
 
-            renderBlacklist();
-            renderWhitelist();
-            renderDefaultWords();
-            renderAITriggerWords();
-            renderGlobalQAQuestionsDraft();
-            renderGlobalQAEventDatesForm();
-            renderGlobalQAList();
-            loadGlobalQAMedia();
-            loadScheduleSettings();
-            loadKnownGroups();
-            enforceFirstLoginChange();
+        db.prepare('DELETE FROM user_settings WHERE user_id = ?').run(userId);
+        const insertSetting = db.prepare('INSERT OR REPLACE INTO user_settings (user_id, key, value) VALUES (?, ?, ?)');
+        Object.entries(payload.settings).forEach(([key, value]) => {
+            insertSetting.run(userId, String(key), typeof value === 'string' ? value : JSON.stringify(value));
+        });
 
-            setInterval(async () => {
-                try {
-                    let res = await fetch('/api/status?lang=' + currentLang, { cache: 'no-store' });
-                    if (res.status === 401) {
-                        window.location.replace('/login');
-                        return;
-                    }
-                    if (!res.ok) return;
-                    let data = await res.json();
-                    renderDashboardStatus(data.statusText || '', data.statusKind || 'unknown');
+        db.prepare('UPDATE app_users SET updated_at = ? WHERE id = ?').run(nowIso(), userId);
+    });
 
-                    const qrImg = document.getElementById('qr-image');
-                    const qrPlaceholder = document.getElementById('qr-placeholder');
-                    if(data.qr) {
-                        qrImg.src = data.qr;
-                        qrImg.style.display = 'block';
-                        if(qrPlaceholder) qrPlaceholder.style.display = 'none';
-                    } else {
-                        qrImg.style.display = 'none';
-                        if(qrPlaceholder) qrPlaceholder.style.display = 'block';
-                    }
-                } catch(e) {}
-            }, 2000);
+    tx();
+    res.sendStatus(200);
+});
+// ─────────────────────────────────────────────────────────────────────────────
 
-            async function exportData() {
-                const selected = {
-                    global_settings: document.getElementById('export_global_settings').checked,
-                    llm_settings: document.getElementById('export_llm_settings').checked,
-                    blacklist: document.getElementById('export_blacklist').checked,
-                    whitelist: document.getElementById('export_whitelist').checked,
-                    blocked_extensions: document.getElementById('export_blocked_extensions').checked,
-                    whatsapp_groups: document.getElementById('export_whatsapp_groups').checked,
-                    custom_groups: document.getElementById('export_custom_groups').checked,
-                    media: document.getElementById('export_media') ? document.getElementById('export_media').checked : false
-                };
-
-                try {
-                    const res = await fetch('/api/export', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ selected })
-                    });
-
-                    if (!res.ok) {
-                        let reason = '';
-                        try {
-                            const errData = await res.json();
-                            reason = errData && errData.error ? String(errData.error) : '';
-                        } catch (_) {
-                            try {
-                                reason = (await res.text() || '').trim();
-                            } catch (_) {}
-                        }
-                        const prefix = currentLang==='en' ? '❌ Export failed' : '❌ فشل التصدير';
-                        showToast(reason ? (prefix + ': ' + reason) : prefix);
-                        return;
-                    }
-
-                    const json = await res.text();
-                    if (!json || !json.trim()) {
-                        throw new Error(currentLang==='en' ? 'Empty export response' : 'استجابة تصدير فارغة');
-                    }
-
-                    const blob = new Blob([json], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = url;
-                    a.download = \`automod_backup_\${new Date().toISOString().split('T')[0]}.json\`;
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    URL.revokeObjectURL(url);
-                    showToast(currentLang==='en' ? '✅ Export successful!' : '✅ تم التصدير بنجاح!');
-                } catch (error) {
-                    console.error('Export error:', error);
-                    showToast(currentLang==='en' ? '❌ Export error: ' + error.message : '❌ خطأ التصدير: ' + error.message);
-                }
-            }
-
-            async function importData() {
-                const fileInput = document.getElementById('importFile');
-                if (!fileInput.files.length) {
-                    showToast(currentLang==='en' ? '⚠️ Please select a file' : '⚠️ يرجى اختيار ملف');
-                    return;
-                }
-
-                const file = fileInput.files[0];
-                try {
-                    const json = await file.text();
-                    const importedData = JSON.parse(json);
-
-                    if (!importedData.data) {
-                        showToast(currentLang==='en' ? '❌ Invalid file format' : '❌ صيغة الملف غير صحيحة');
-                        return;
-                    }
-
-                    const selected = {
-                        global_settings: document.getElementById('import_global_settings').checked,
-                        llm_settings: document.getElementById('import_llm_settings').checked,
-                        blacklist: document.getElementById('import_blacklist').checked,
-                        blacklist_clear: document.getElementById('import_blacklist_clear').checked,
-                        whitelist: document.getElementById('import_whitelist').checked,
-                        whitelist_clear: document.getElementById('import_whitelist_clear').checked,
-                        blocked_extensions: document.getElementById('import_blocked_extensions').checked,
-                        blocked_extensions_clear: document.getElementById('import_blocked_extensions_clear').checked,
-                        whatsapp_groups: document.getElementById('import_whatsapp_groups').checked,
-                        custom_groups: document.getElementById('import_custom_groups').checked,
-                        custom_groups_clear: document.getElementById('import_custom_groups_clear').checked,
-                        media: document.getElementById('import_media') ? document.getElementById('import_media').checked : false
-                    };
-
-                    if (!await showConfirmModal(currentLang==='en' ? 'Confirm import? This action may override existing data.' : 'هل تؤكد الاستيراد؟ قد يؤدي هذا إلى إلغاء البيانات الموجودة.')) {
-                        return;
-                    }
-
-                    const res = await fetch('/api/import', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ dataset: importedData.data, selected })
-                    });
-
-                    if (!res.ok) {
-                        const errorData = await res.json();
-                        showToast(currentLang==='en' ? '❌ Import failed: ' + errorData.error : '❌ فشل الاستيراد: ' + errorData.error);
-                        return;
-                    }
-
-                    showToast(currentLang==='en' ? '✅ Import successful! Reloading...' : '✅ تم الاستيراد بنجاح! جاري إعادة التحميل...');
-                    fileInput.value = '';
-                    setTimeout(() => window.location.reload(), 1500);
-                } catch (error) {
-                    console.error('Import error:', error);
-                    showToast(currentLang==='en' ? '❌ Import error: ' + error.message : '❌ خطأ الاستيراد: ' + error.message);
-                }
-            }
-
-            async function saveConfig() {
-                let finalGroupsObj = {};
-                groupsArr.forEach(g => { 
-                    if(g.id) { finalGroupsObj[g.id] = g; } 
-                });
-
-                const gSpamTypes = [];
-                const gSpamLimits = {};
-                metaTypes.forEach(t => {
-                    const cb = document.getElementById('global_spam_check_' + t.id);
-                    if(cb && cb.checked) gSpamTypes.push(t.id);
-                    const lim = document.getElementById('global_spam_limit_' + t.id);
-                    gSpamLimits[t.id] = parseInt(lim ? lim.value : 5) || 5;
-                });
-
-                let defAdmin = '';
-                const defAdminEl = document.getElementById('defaultAdminGroup');
-                if (defAdminEl) defAdmin = defAdminEl.value;
-                let defAdminLang = 'ar';
-                const defAdminLangEl = document.getElementById('defaultAdminLanguage');
-                if (defAdminLangEl) defAdminLang = defAdminLangEl.value === 'en' ? 'en' : 'ar';
-
-                const newConfig = {
-                    enableAntiSpam: document.getElementById('enableAntiSpam').checked,
-                    safeMode: document.getElementById('safeMode').checked,
-                    spamDuplicateLimit: parseInt(document.getElementById('spamDuplicateLimit').value) || 3,
-                    spamAction: document.getElementById('spamAction').value,
-                    spamTypes: gSpamTypes,
-                    spamLimits: gSpamLimits,
-                    blockedTypes: getCheckedValues('globalBlockedTypes'),
-                    blockedAction: document.getElementById('globalBlockedAction').value,
-                    enableBlacklist: document.getElementById('enableBlacklist').checked,
-                    enableWhitelist: document.getElementById('enableWhitelist').checked,
-                    autoPurgeScheduleEnabled: document.getElementById('autoPurgeScheduleEnabled') ? document.getElementById('autoPurgeScheduleEnabled').checked : false,
-                    autoPurgeIntervalMinutes: document.getElementById('autoPurgeIntervalMinutes') ? (parseInt(document.getElementById('autoPurgeIntervalMinutes').value, 10) || 60) : 60,
-                    adminWhitelistSyncEnabled: document.getElementById('adminWhitelistSyncEnabled') ? document.getElementById('adminWhitelistSyncEnabled').checked : false,
-                    adminWhitelistSyncIntervalMinutes: document.getElementById('adminWhitelistSyncIntervalMinutes') ? (parseInt(document.getElementById('adminWhitelistSyncIntervalMinutes').value, 10) || 60) : 60,
-                    enableJoinProfileScreening: document.getElementById('enableJoinProfileScreening').checked,
-                    enableWordFilter: document.getElementById('enableWordFilter').checked,
-                    enableAIFilter: document.getElementById('enableAIFilter').checked,
-                    enableAIMedia: document.getElementById('enableAIMedia').checked,
-                    autoAction: document.getElementById('autoAction').checked,
-                    aiPrompt: document.getElementById('aiPromptText').value.trim(),
-                    aiFilterTriggerWords: aiFilterTriggerWordsArr,
-                    ollamaUrl: document.getElementById('ollamaUrl').value.trim(),
-                    ollamaModel: document.getElementById('ollamaModel').value.trim(),
-                    defaultAdminGroup: defAdmin,
-                    defaultAdminLanguage: defAdminLang,
-                    defaultWords: defaultWordsArr,
-                    globalQAEnabled: document.getElementById('globalQAEnabled') ? document.getElementById('globalQAEnabled').checked : false,
-                    globalQA: globalQAArr,
-                    groupsConfig: finalGroupsObj
-                };
-                
-                const res = await fetch('/save', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(newConfig)
-                });
-                
-                if(res.ok) {
-                    showToast(dict.save_success);
-                    setTimeout(() => window.location.reload(), 800);
-                } else showToast(dict.save_fail);
-            }
-
-            document.getElementById('configForm').onsubmit = async (e) => {
-                e.preventDefault();
-                await saveConfig();
-            }
-            
-        </script>
-        <div class="modal" id="confirmModal">
-            <div class="modal-content" style="max-width:460px;">
-                <div class="modal-header" style="margin-bottom:14px;">
-                    <h3 id="confirmModalTitle"><i class="fas fa-circle-question"></i> ${t('تأكيد الإجراء', 'Confirm Action')}</h3>
-                    <button type="button" class="close-modal" id="confirmModalClose">&times;</button>
-                </div>
-                <div id="confirmModalMessage" style="color:var(--text-muted);line-height:1.8;margin-bottom:22px;"></div>
-                <div style="display:flex;justify-content:flex-end;gap:10px;">
-                    <button type="button" class="btn btn-ghost" id="confirmModalCancel">${t('إلغاء', 'Cancel')}</button>
-                    <button type="button" class="btn btn-danger" id="confirmModalConfirm">${t('تأكيد', 'Confirm')}</button>
-                </div>
-            </div>
-        </div>
-    </body>
-    </html>
-    `;
+// Safe Mode: random delay 10-60s to mimic human behaviour and avoid WhatsApp bot detection
+async function safeDelay() {
+    if (!config.safeMode) return;
+    const ms = (Math.floor(Math.random() * 51) + 10) * 1000; // 10–60 seconds
+    console.log(`[أمان] وضع آمن: تأخير ${ms / 1000} ثانية قبل الإجراء...`);
+    await new Promise(r => setTimeout(r, ms));
 };
+
+// ── Shared global purge function ──────────────────────────────────────────────
+async function runGlobalPurge() {
+    if (!client.info || !client.info.wid) {
+        console.log('[تنظيف مجدول] البوت غير متصل، تخطي دورة المسح.');
+        return;
+    }
+    try {
+        console.log('[تنظيف مجدول] بدأت عملية المسح الشامل التلقائية...');
+        const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
+        const blacklistArr = blacklistRows.map(r => r.number);
+        const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+        const blockedExtensionsArr = blockedExtensionsRows.map(r => r.ext);
+
+        const chats = await client.getChats();
+        const botId = client.info.wid._serialized;
+        let kickedCount = 0;
+        let rejectedCount = 0;
+
+        for (const chat of chats) {
+            if (!chat.isGroup) continue;
+            const botData = chat.participants.find(p => p.id._serialized === botId);
+            const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
+            if (!botIsAdmin) continue;
+
+            const usersToKick = chat.participants
+                .map(p => p.id._serialized)
+                .filter(id => {
+                    const cleanId = id.replace(/:[0-9]+/, '');
+                    const finalCleanId = cleanId.replace('@c.us', '');
+                    const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                    return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(id);
+                });
+            if (usersToKick.length > 0) {
+                try {
+                    await chat.removeParticipants(usersToKick);
+                    kickedCount += usersToKick.length;
+                    console.log(`[تنظيف مجدول] طرد ${usersToKick.length} محظور من: ${chat.name}`);
+                    await new Promise(resolve => setTimeout(resolve, 1500));
+                } catch (e) { }
+            }
+
+            try {
+                const pendingReqs = await chat.getGroupMembershipRequests();
+                if (pendingReqs && pendingReqs.length > 0) {
+                    const groupId = chat.id._serialized;
+                    const groupConfig = config.groupsConfig[groupId];
+                    let usersToReject = [];
+                    for (const req of pendingReqs) {
+                        let rawId = typeof req.id === 'string' ? req.id : (req.id._serialized || null);
+                        if (!rawId) continue;
+                        let cleanId = rawId.replace(/:[0-9]+/, '');
+                        const finalCleanId = cleanId.replace('@c.us', '');
+                        const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                        if (isExtBlocked || blacklistArr.includes(finalCleanId) || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId)) {
+                            usersToReject.push(rawId);
+                        }
+                    }
+                    if (usersToReject.length > 0) {
+                        await chat.rejectGroupMembershipRequests({ requesterIds: usersToReject });
+                        rejectedCount += usersToReject.length;
+                        console.log(`[تنظيف مجدول] رفض ${usersToReject.length} طلبات في: ${chat.name}`);
+                        await new Promise(resolve => setTimeout(resolve, 1500));
+                    }
+                }
+            } catch (e) { }
+        }
+        console.log(`[تنظيف مجدول] انتهت دورة المسح. طرد ${kickedCount} ورفض ${rejectedCount}.`);
+    } catch (error) {
+        console.error('[تنظيف مجدول] خطأ أثناء المسح:', error.message || error);
+    }
+}
+
+// ── Purge scheduler ───────────────────────────────────────────────────────────
+let purgeScheduleTimer = null;
+function setupPurgeSchedule() {
+    if (purgeScheduleTimer) { clearInterval(purgeScheduleTimer); purgeScheduleTimer = null; }
+    if (!config.purgeScheduleEnabled) {
+        console.log('[تنظيف مجدول] الجدولة التلقائية معطلة.');
+        return;
+    }
+    const hours = Math.max(1, config.purgeScheduleIntervalHours || 24);
+    const ms = hours * 60 * 60 * 1000;
+    purgeScheduleTimer = setInterval(() => runGlobalPurge().catch(() => { }), ms);
+    if (purgeScheduleTimer.unref) purgeScheduleTimer.unref();
+    console.log(`[تنظيف مجدول] تم جدولة المسح التلقائي كل ${hours} ساعة.`);
+}
+
+const authDataPath = process.env.WA_AUTH_PATH || path.join(process.cwd(), '.wwebjs_auth');
+const browserProfileDir = process.env.WA_BROWSER_PROFILE_DIR || `/tmp/chromium-wa-bot-${process.pid}`;
+
+function resolveBrowserExecutablePath() {
+    const envPath = process.env.PUPPETEER_EXECUTABLE_PATH && process.env.PUPPETEER_EXECUTABLE_PATH.trim();
+    if (envPath) return envPath;
+
+    if (process.platform === 'win32') {
+        const winCandidates = [
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+            path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
+            path.join(process.env.LOCALAPPDATA || '', 'Chromium\\Application\\chrome.exe')
+        ].filter(Boolean);
+        const found = winCandidates.find(p => fs.existsSync(p));
+        return found || null;
+    }
+
+    if (process.platform === 'linux') {
+        const linuxCandidates = ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'];
+        const found = linuxCandidates.find(p => fs.existsSync(p));
+        return found || null;
+    }
+
+    return null;
+}
+
+const resolvedBrowserExecutablePath = resolveBrowserExecutablePath();
+
+function cleanupStaleAuthLocks(authPath) {
+    try {
+        if (!fs.existsSync(authPath)) return;
+        const lockPatterns = [
+            /lock/i,
+            /^Singleton/i,
+            /^\.parent-lock$/i
+        ];
+        const walk = (dir) => {
+            const entries = fs.readdirSync(dir, { withFileTypes: true });
+            for (const entry of entries) {
+                const fullPath = path.join(dir, entry.name);
+                if (entry.isDirectory()) {
+                    walk(fullPath);
+                    continue;
+                }
+                if (lockPatterns.some((pattern) => pattern.test(entry.name))) {
+                    try { fs.unlinkSync(fullPath); } catch (e) { }
+                }
+            }
+        };
+        walk(authPath);
+        console.log(`[أمان] تنظيف ملفات القفل القديمة من: ${authPath}`);
+    } catch (err) {
+        console.error(`[خطأ] فشل تنظيف أقفال المصادقة القديمة: ${err.message || err}`);
+    }
+}
+
+cleanupStaleAuthLocks(authDataPath);
+
+const client = new Client({
+    authStrategy: new LocalAuth({
+        dataPath: authDataPath,
+        clientId: process.env.WA_CLIENT_ID || 'main'
+    }),
+    puppeteer: {
+        ...(resolvedBrowserExecutablePath ? { executablePath: resolvedBrowserExecutablePath } : {}),
+        headless: true,
+        timeout: 60000,
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-blink-features=AutomationControlled',
+            '--disable-web-resources',
+            '--disable-extensions',
+            '--disable-background-networking',
+            '--disable-breakpad',
+            '--disable-client-side-phishing-detection',
+            '--disable-component-update',
+            '--disable-default-apps',
+            '--disable-device-discovery-notifications',
+            '--disable-hang-monitor',
+            '--disable-popup-blocking',
+            '--disable-prompt-on-repost',
+            '--disable-sync',
+            '--disable-default-apps',
+            '--disable-background-timer-throttling',
+            '--disable-renderer-backgrounding',
+            '--disable-device-orientation-request-prompt',
+            '--no-default-browser-check',
+            '--start-maximized',
+            `--user-data-dir=${browserProfileDir}`
+        ]
+    }
+});
+
+client.on('ready', async () => {
+    const readyStartTime = Date.now();
+    addConnectionLog('جاهز', 'البوت جاهز الآن والعميل مصرح');
+    isInitializing = false;
+    lastConnectionTimestamp = Date.now();
+
+    // Mark connection as ready immediately; group sync is best-effort and should not block UI status.
+    botStatus = '<i class="fas fa-check-circle"></i> متصل وجاهز للعمل';
+    botStatusKind = 'connected';
+    addConnectionLog('متصل', 'جاهز للعمل (قبل مزامنة المجموعات)');
+
+    if (initializationTimeout) {
+        clearTimeout(initializationTimeout);
+        initializationTimeout = null;
+    }
+
+    try {
+        console.log('[معلومة] بدء مزامنة المجموعات من قاعدة البيانات...');
+        const chats = await client.getChats();
+        addConnectionLog('مزامنة مجموعات', `تم جلب ${chats.length} مجموعة`);
+
+        console.log('[معلومة] بدء تحديث قاعدة البيانات...');
+        syncTx(chats);
+
+        const syncDuration = Date.now() - readyStartTime;
+        const totalInitTime = initializationStartTime ? Date.now() - initializationStartTime : 0;
+
+        console.log('[معلومة] تمت مزامنة ' + chats.length + ' مجموعة بنجاح.', {
+            syncDurationMs: syncDuration,
+            totalInitDurationMs: totalInitTime,
+            timestamp: new Date().toISOString()
+        });
+        addConnectionLog('مزامنة ناجحة', `متصل وجاهز - ${chats.length} مجموعة`);
+
+        // Start scheduled purge and admin sync if configured
+        setupPurgeSchedule();
+        setupAdminSyncSchedule();
+    } catch (error) {
+        const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+        const errorStack = error && error.stack ? error.stack : 'No stack trace';
+
+        addConnectionLog('خطأ في المزامنة', errorMsg);
+        console.error('[خطأ] فشل مزامنة المجموعات:', {
+            message: errorMsg,
+            stack: errorStack,
+            timestamp: new Date().toISOString(),
+            timeSinceReady: Date.now() - readyStartTime
+        });
+
+        // Keep status connected because the WA session is already ready.
+        addConnectionLog('متصل بدون مزامنة كاملة', 'تم الحفاظ على حالة الاتصال رغم فشل مزامنة المجموعات');
+
+        // Still start schedulers while connected even if sync failed.
+        setupPurgeSchedule();
+        setupAdminSyncSchedule();
+    }
+});
+
+client.on('authenticated', () => {
+    addConnectionLog('مصرح', 'تم التحقق من الهوية بنجاح من خوادم WhatsApp');
+    lastConnectionTimestamp = Date.now();
+    botStatus = '<i class="fas fa-sync fa-spin"></i> تم تسجيل الدخول بنجاح، جاري جلب البيانات...';
+    botStatusKind = 'syncing';
+    currentQR = '';
+
+    if (initializationTimeout) {
+        clearTimeout(initializationTimeout);
+        initializationTimeout = null;
+    }
+
+    console.log('[معلومة] تم التحقق من الهوية بنجاح', {
+        authenticatedAt: new Date().toISOString(),
+        timeSinceInitialization: initializationStartTime ? `${Date.now() - initializationStartTime}ms` : 'N/A'
+    });
+});
+
+// Handle page errors that might cause frame detachment
+client.on('page_created', (page) => {
+    addConnectionLog('صفحة تم إنشاؤها', 'صفحة WhatsApp Web تم إنشاؤها بنجاح');
+    lastConnectionTimestamp = Date.now();
+
+    page.on('error', (error) => {
+        const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+        const errorStack = error && error.stack ? error.stack : 'No stack trace';
+        addConnectionLog('خطأ في الصفحة', `${errorMsg}`);
+        console.error('[خطأ] Page error details:', {
+            message: errorMsg,
+            stack: errorStack,
+            timestamp: new Date().toISOString()
+        });
+    });
+
+    page.on('close', () => {
+        addConnectionLog('صفحة مغلقة', 'تم إغلاق صفحة WhatsApp Web');
+        console.log('[معلومة] تم إغلاق صفحة WhatsApp Web');
+    });
+
+    page.on('framenavigated', () => {
+        addConnectionLog('انتقال إطار', 'تم التنقل إلى إطار جديد');
+    });
+});
+
+// Handle QR code generation
+client.on('qr', (qr) => {
+    qrcode.toDataURL(qr, (err, url) => {
+        if (err) {
+            console.error('[خطأ] فشل إنشاء QR code:', err.message);
+            botStatus = '<i class="fas fa-exclamation-triangle"></i> خطأ في QR code';
+            botStatusKind = 'error';
+            return;
+        }
+        currentQR = url;
+        botStatus = '<i class="fas fa-qrcode"></i> بانتظار مسح رمز الاستجابة السريعة (QR Code)...';
+        botStatusKind = 'waiting_qr';
+        console.log('[معلومة] QR code متاح للمسح');
+    });
+});
+
+client.on('disconnected', async (reason) => {
+    const disconnectReason = reason || 'Unknown reason';
+    addConnectionLog('قطع الاتصال', disconnectReason);
+
+    botStatus = '<i class="fas fa-sign-out-alt"></i> تم تسجيل الخروج من الحساب...';
+    botStatusKind = 'disconnected';
+    currentQR = '';
+    isInitializing = false;
+
+    console.error('[تنبيه] توقع البوت، السبب:', {
+        reason: disconnectReason,
+        timestampOfDisconnect: new Date().toISOString(),
+        connectionDurationMs: lastConnectionTimestamp ? Date.now() - lastConnectionTimestamp : 'N/A'
+    });
+
+    if (initializationTimeout) {
+        clearTimeout(initializationTimeout);
+        initializationTimeout = null;
+    }
+
+    try {
+        console.log('[معلومة] تنظيف موارد العميل...');
+        await client.destroy();
+    } catch (e) {
+        console.error('[خطأ] خطأ أثناء تنظيف العميل:', e.message);
+    }
+
+    console.log('[معلومة] سيتم إعادة تهيئة الاتصال بعد 3 ثوانٍ...');
+    setTimeout(() => {
+        console.log('[معلومة] بدء إعادة تهيئة الاتصال...');
+        initializeClientWithRetry();
+    }, 3000);
+});
+
+
+
+// Global error handler for client errors
+client.on('error', (error) => {
+    const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+    const errorStack = error && error.stack ? error.stack : 'No stack trace';
+    const errorName = error && error.name ? error.name : 'GenericError';
+
+    console.error('[خطأ حرج] خطأ عام في العميل:', {
+        errorName,
+        message: errorMsg,
+        stack: errorStack,
+        timestamp: new Date().toISOString()
+    });
+
+    addConnectionLog('خطأ حرج', `${errorName}: ${errorMsg}`);
+});
+
+// Handle authentication failures
+client.on('auth_failure', (msg) => {
+    const failureMsg = msg || 'Unknown authentication failure';
+    console.error('[خطأ] فشل المصادقة:', {
+        message: failureMsg,
+        timestamp: new Date().toISOString()
+    });
+    addConnectionLog('فشل المصادقة', failureMsg);
+    botStatus = '<i class="fas fa-exclamation-triangle"></i> خطأ في المصادقة: ' + failureMsg;
+    botStatusKind = 'error';
+});
+
+// Handle incoming call notifications
+client.on('call', (call) => {
+    console.log('[معلومة] تنبيه مكالمة واردة:', {
+        from: call.from,
+        isGroup: call.isGroup,
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Monitor uncaught exceptions globally  
+process.on('unhandledRejection', (reason, promise) => {
+    const reasonMsg = reason ? (reason.message || reason.toString()) : 'Unknown rejection';
+    const reasonStack = reason && reason.stack ? reason.stack : 'No stack trace';
+
+    console.error('[خطأ] رفض غير معالج:', {
+        reason: reasonMsg,
+        stack: reasonStack,
+        promise: promise.toString(),
+        timestamp: new Date().toISOString()
+    });
+
+    addConnectionLog('رفض غير معالج', reasonMsg);
+    if (!isInitializing && botStatus.includes('متصل')) {
+        botStatus = '<i class="fas fa-exclamation-triangle"></i> حدث خطأ غير متوقع';
+        botStatusKind = 'error';
+    }
+});
+
+// Monitor uncaught exceptions
+process.on('uncaughtException', (error) => {
+    const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+    const errorStack = error && error.stack ? error.stack : 'No stack trace';
+    const errorName = error && error.name ? error.name : 'Unknown';
+
+    console.error('[خطأ حرج] استثناء غير معالج:', {
+        errorName,
+        message: errorMsg,
+        stack: errorStack,
+        timestamp: new Date().toISOString()
+    });
+
+    addConnectionLog('استثناء حرج', `${errorName}: ${errorMsg}`);
+});
+
+client.on('group_join', async (notification) => {
+    try {
+        const chat = await notification.getChat();
+        const groupId = chat.id._serialized;
+        try { db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)').run(groupId, chat.name); } catch (e) { }
+
+        const groupConfig = config.groupsConfig[groupId];
+        let isBlacklistEnabledForGroup = config.enableBlacklist;
+        let isWhitelistEnabledForGroup = config.enableWhitelist;
+        let isJoinProfileScreeningEnabled = config.enableJoinProfileScreening;
+        let targetAdminGroup = config.defaultAdminGroup;
+        let isWordFilterEnabled = config.enableWordFilter;
+        let isAIFilterEnabled = config.enableAIFilter;
+        let forbiddenWords = [...config.defaultWords];
+        let aiTriggerWords = Array.isArray(config.aiFilterTriggerWords) && config.aiFilterTriggerWords.length > 0 ? config.aiFilterTriggerWords : ['نعم'];
+
+        if (groupConfig) {
+            if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabledForGroup = groupConfig.enableBlacklist;
+            if (typeof groupConfig.enableWhitelist !== 'undefined') isWhitelistEnabledForGroup = groupConfig.enableWhitelist;
+            if (typeof groupConfig.enableJoinProfileScreening !== 'undefined') isJoinProfileScreeningEnabled = groupConfig.enableJoinProfileScreening;
+            if (typeof groupConfig.enableWordFilter !== 'undefined') isWordFilterEnabled = groupConfig.enableWordFilter;
+            if (typeof groupConfig.enableAIFilter !== 'undefined') isAIFilterEnabled = groupConfig.enableAIFilter;
+            if (groupConfig.useDefaultWords === false) forbiddenWords = [];
+            if (groupConfig.words && groupConfig.words.length > 0) forbiddenWords = [...forbiddenWords, ...groupConfig.words];
+            if (Array.isArray(groupConfig.aiFilterTriggerWords) && groupConfig.aiFilterTriggerWords.length > 0) {
+                aiTriggerWords = groupConfig.aiFilterTriggerWords;
+            }
+            if (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') targetAdminGroup = groupConfig.adminGroup.trim();
+        }
+
+        for (const participantId of notification.recipientIds) {
+            let cleanJoinedId = participantId.replace(/:[0-9]+/, '');
+            if (cleanJoinedId.includes('@lid')) {
+                try {
+                    const contact = await client.getContactById(participantId);
+                    if (contact && contact.number) cleanJoinedId = `${contact.number}@c.us`;
+                    else cleanJoinedId = cleanJoinedId.replace('@lid', '@c.us');
+                } catch (e) { cleanJoinedId = cleanJoinedId.replace('@lid', '@c.us'); }
+            }
+
+            let isWhitelisted = false;
+            if (isWhitelistEnabledForGroup) {
+                const globalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanJoinedId);
+                const useGlobal = groupConfig ? (groupConfig.useGlobalWhitelist !== false) : true;
+                const inCustom = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanJoinedId) : false;
+                if ((useGlobal && globalWl) || inCustom) isWhitelisted = true;
+            }
+
+            let isKicked = false;
+
+            if (isBlacklistEnabledForGroup && !isWhitelisted) {
+                const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanJoinedId);
+                const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+                const isExtBlocked = blockedExtensionsRows.some(r => cleanJoinedId.replace('@c.us', '').startsWith(r.ext));
+                const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
+                const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanJoinedId) : false;
+
+                if ((useGlobal && (globalBl || isExtBlocked)) || inCustom) {
+                    console.log(`[أمان] محاولة دخول رقم محظور (${cleanJoinedId}). جاري الطرد...`);
+                    isKicked = true;
+                    setTimeout(async () => {
+                        try {
+                            await safeDelay();
+                            await chat.removeParticipants([participantId]);
+                            const reportText = tAdmin(
+                                groupConfig,
+                                config,
+                                `🛡️ *حماية (قائمة سوداء)*\nحاول رقم محظور الدخول لمجموعة "${chat.name}" وتم طرده.\nالرقم: @${cleanJoinedId.split('@')[0]}`,
+                                `🛡️ *Protection (Blacklist)*\nA blacklisted number attempted to join "${chat.name}" and was removed.\nNumber: @${cleanJoinedId.split('@')[0]}`
+                            );
+                            await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanJoinedId] });
+                        } catch (err) { }
+                    }, 2000);
+                }
+            }
+
+            if (!isKicked && groupConfig && groupConfig.enableWelcomeMessage && groupConfig.welcomeMessageText) {
+                setTimeout(async () => {
+                    try {
+                        await safeDelay();
+                        const welcomeText = groupConfig.welcomeMessageText.replace(/{user}/g, `@${cleanJoinedId.split('@')[0]}`);
+                        await client.sendMessage(groupId, welcomeText, { mentions: [cleanJoinedId] });
+                    } catch (err) { }
+                }, 3500);
+            }
+
+            if (!isKicked && isJoinProfileScreeningEnabled && !isWhitelisted && (isWordFilterEnabled || isAIFilterEnabled)) {
+                setTimeout(async () => {
+                    try {
+                        const profileResult = await evaluateJoinProfileViolation({
+                            participantId,
+                            cleanUserId: cleanJoinedId,
+                            groupName: chat.name,
+                            isWordFilterEnabled,
+                            isAIFilterEnabled,
+                            forbiddenWords,
+                            aiTriggerWords
+                        });
+                        if (!profileResult.isViolating) return;
+
+                        await safeDelay();
+                        await chat.removeParticipants([participantId]);
+                        if (isBlacklistEnabledForGroup) {
+                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanJoinedId); } catch (e) { }
+                        }
+
+                        const reportText = tAdmin(
+                            groupConfig,
+                            config,
+                            `🚫 *فحص الانضمام*
+تم طرد عضو جديد بعد فحص الاسم/النبذة.
+المجموعة: "${chat.name}"
+الرقم: @${cleanJoinedId.split('@')[0]}
+السبب: ${profileResult.reason}
+البيانات:
+"${profileResult.profileText || 'غير متوفر'}"`,
+                            `🚫 *Join Screening*
+A newly joined member was removed after profile screening.
+Group: "${chat.name}"
+Number: @${cleanJoinedId.split('@')[0]}
+Reason: ${profileResult.reason}
+Profile:
+"${profileResult.profileText || 'Unavailable'}"`
+                        );
+                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanJoinedId] });
+                    } catch (err) { }
+                }, 2800);
+            }
+        }
+    } catch (error) { }
+});
+
+async function resolveContactForJoinScreening(participantId, cleanUserId) {
+    const candidates = [participantId, cleanUserId];
+    const numberOnly = typeof cleanUserId === 'string' ? cleanUserId.split('@')[0] : '';
+    if (numberOnly) candidates.push(`${numberOnly}@c.us`);
+    if (numberOnly) candidates.push(`${numberOnly}@lid`);
+    for (const id of candidates) {
+        if (!id) continue;
+        try {
+            const c = await client.getContactById(id);
+            if (c) return c;
+        } catch (e) { }
+    }
+    return null;
+}
+
+async function extractJoinProfileText(participantId, cleanUserId) {
+    const contact = await resolveContactForJoinScreening(participantId, cleanUserId);
+    const displayName = contact ? (contact.pushname || contact.name || contact.shortName || '') : '';
+    let about = '';
+    if (contact && typeof contact.getAbout === 'function') {
+        try {
+            const aboutText = await contact.getAbout();
+            if (typeof aboutText === 'string') about = aboutText.trim();
+        } catch (e) { }
+    }
+
+    const lines = [];
+    if (displayName) lines.push(`name: ${displayName}`);
+    if (about) lines.push(`bio: ${about}`);
+    return lines.join('\n').trim();
+}
+
+async function evaluateJoinProfileViolation({ participantId, cleanUserId, groupName, isWordFilterEnabled, isAIFilterEnabled, forbiddenWords, aiTriggerWords }) {
+    const profileText = await extractJoinProfileText(participantId, cleanUserId);
+    if (!profileText) return { isViolating: false, reason: '', profileText: '' };
+
+    if (isWordFilterEnabled && Array.isArray(forbiddenWords) && forbiddenWords.length > 0) {
+        const lowered = profileText.toLowerCase();
+        const matchedWord = forbiddenWords.find(word => typeof word === 'string' && word.trim() && lowered.includes(word.toLowerCase()));
+        if (matchedWord) {
+            return { isViolating: true, reason: `كلمة محظورة في الملف الشخصي: [${matchedWord}]`, profileText };
+        }
+    }
+
+    if (isAIFilterEnabled) {
+        try {
+            const payload = {
+                model: config.ollamaModel,
+                prompt: `Profile screening for group join in "${groupName}".\nCheck this profile text:\n${profileText}`,
+                stream: false
+            };
+            const response = await fetch(`${config.ollamaUrl}/api/generate`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+            });
+            const data = await response.json();
+            const aiText = data && typeof data.response === 'string' ? data.response : '';
+            const triggers = Array.isArray(aiTriggerWords) && aiTriggerWords.length > 0 ? aiTriggerWords : ['نعم'];
+            if (aiText && triggers.some(word => aiText.includes(word))) {
+                return { isViolating: true, reason: 'تم تصنيف الملف الشخصي كمخالفة عبر الذكاء الاصطناعي', profileText };
+            }
+        } catch (e) { }
+    }
+
+    return { isViolating: false, reason: '', profileText };
+}
+
+client.on('group_update', async (notification) => {
+    try {
+        const chat = await notification.getChat();
+        db.prepare('UPDATE whatsapp_groups SET name = ? WHERE id = ?').run(chat.name, chat.id._serialized);
+    } catch (e) { }
+});
+
+const pendingBans = new Map();
+
+function resolvePollOptionLocalIds(parentMessage) {
+    const opts = (parentMessage && (parentMessage.pollOptions || (parentMessage._data && parentMessage._data.pollOptions))) || [];
+    const yesLocalId = opts[0] && opts[0].localId ? opts[0].localId : null;
+    const noLocalId = opts[1] && opts[1].localId ? opts[1].localId : null;
+    return { yesLocalId, noLocalId };
+}
+
+function normalizeSelectedOptionName(option) {
+    if (!option) return '';
+    if (typeof option === 'string') return option;
+    if (typeof option.name === 'string') return option.name;
+    return '';
+}
+
+function isYesVoteSelected(vote, parentMessage) {
+    const { yesLocalId } = resolvePollOptionLocalIds(parentMessage);
+    const options = Array.isArray(vote && vote.selectedOptions) ? vote.selectedOptions : [];
+    for (const option of options) {
+        const name = normalizeSelectedOptionName(option);
+        if (name && (name.includes('نعم') || /\byes\b/i.test(name))) return true;
+        if (option && typeof option === 'object' && yesLocalId && option.localId && option.localId === yesLocalId) return true;
+    }
+    return false;
+}
+
+function isNoVoteSelected(vote, parentMessage) {
+    const { noLocalId } = resolvePollOptionLocalIds(parentMessage);
+    const options = Array.isArray(vote && vote.selectedOptions) ? vote.selectedOptions : [];
+    for (const option of options) {
+        const name = normalizeSelectedOptionName(option);
+        if (name && (name.includes('لا') || /\bno\b/i.test(name))) return true;
+        if (option && typeof option === 'object' && noLocalId && option.localId && option.localId === noLocalId) return true;
+    }
+    return false;
+}
+
+async function tryKickFromChat(chat, candidateIds) {
+    if (!chat || !chat.isGroup || !Array.isArray(candidateIds) || candidateIds.length === 0) return false;
+    for (const id of candidateIds) {
+        if (!id || typeof id !== 'string') continue;
+        try {
+            await chat.removeParticipants([id]);
+            return true;
+        } catch (e) { }
+    }
+    return false;
+}
+
+client.on('message', async msg => {
+    try {
+        const chat = await msg.getChat();
+        const msgId = msg.id._serialized;
+
+        if (chat.isGroup) {
+            if (msg.fromMe) return;
+
+            const rawAuthorId = msg.author || msg.from;
+            let cleanAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+
+            if (cleanAuthorId.includes('@lid')) {
+                try {
+                    const contact = await msg.getContact();
+                    if (contact && contact.number) cleanAuthorId = `${contact.number}@c.us`;
+                    else cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us');
+                } catch (e) { cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us'); }
+            }
+
+            const groupId = chat.id._serialized;
+            const groupConfig = config.groupsConfig[groupId];
+
+            async function tryRespondWithQA() {
+                const isTextMessage = msg.type === 'chat' || msg.type === 'text';
+                if (!isTextMessage || !msg.body) return false;
+
+                let isQAMatched = false;
+                const messageText = msg.body.toLowerCase().trim();
+
+                if (groupConfig && groupConfig.enableQAFeature && groupConfig.qaList && groupConfig.qaList.length > 0) {
+                    let qaAnswer = '';
+                    let matchedQA = null;
+
+                    for (const qa of groupConfig.qaList) {
+                        const questions = qa.questions || [qa.question];
+                        const matchedQuestion = questions.find(q => typeof q === 'string' && messageText.includes(q.toLowerCase().trim()));
+                        if (matchedQuestion) {
+                            isQAMatched = true;
+                            qaAnswer = qa.answer || '';
+                            matchedQA = qa;
+                            console.log(`[Q&A] تم رصد سؤال مطابق في "${chat.name}": "${matchedQuestion}"`);
+                            break;
+                        }
+                    }
+
+                    if (isQAMatched && (qaAnswer || (matchedQA && matchedQA.mediaFile))) {
+                        try {
+                            let finalAnswer = qaAnswer;
+
+                            const now = new Date();
+                            const dateStr = `${String(now.getDate()).padStart(2, '0')}/${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`;
+                            finalAnswer = finalAnswer.replace(/{date}/g, dateStr);
+
+                            const isArabic = (groupConfig.qaLanguage || 'ar') === 'ar';
+                            const today = new Date();
+                            today.setHours(0, 0, 0, 0);
+
+                            function getEventDateStr(dateVal) {
+                                if (!dateVal) return '';
+                                const eventDate = new Date(dateVal);
+                                eventDate.setHours(0, 0, 0, 0);
+                                const daysLeft = Math.ceil((eventDate - today) / (1000 * 60 * 60 * 24));
+                                const eventDateStr = `${String(eventDate.getDate()).padStart(2, '0')}/${String(eventDate.getMonth() + 1).padStart(2, '0')}/${eventDate.getFullYear()}`;
+                                if (isArabic) {
+                                    return daysLeft > 0 ? `${daysLeft} أيام متبقية - ${eventDateStr}` : (daysLeft === 0 ? `اليوم - ${eventDateStr}` : `منذ ${Math.abs(daysLeft)} أيام - ${eventDateStr}`);
+                                }
+                                return daysLeft > 0 ? `${daysLeft} days left - ${eventDateStr}` : (daysLeft === 0 ? `Today - ${eventDateStr}` : `${Math.abs(daysLeft)} days ago - ${eventDateStr}`);
+                            }
+
+                            const eventDateLegacy = matchedQA.eventDate || groupConfig.eventDate;
+                            const eventDatesArray = (matchedQA.eventDates && matchedQA.eventDates.length > 0) ? matchedQA.eventDates : groupConfig.eventDates;
+
+                            if (eventDateLegacy) {
+                                finalAnswer = finalAnswer.replace(/{eventdate}/g, getEventDateStr(eventDateLegacy));
+                            } else if (eventDatesArray && eventDatesArray.length > 0) {
+                                finalAnswer = finalAnswer.replace(/{eventdate}/g, getEventDateStr(eventDatesArray[0].date));
+                            }
+
+                            if (eventDatesArray && eventDatesArray.length > 0) {
+                                eventDatesArray.forEach(ed => {
+                                    if (ed.label && ed.date) {
+                                        const regex = new RegExp(`{eventdate:${ed.label}}`, 'g');
+                                        finalAnswer = finalAnswer.replace(regex, getEventDateStr(ed.date));
+                                    }
+                                });
+                            }
+
+                            const contact = await msg.getContact();
+                            const userName = contact ? (contact.name || contact.number) : cleanAuthorId.split('@')[0];
+                            finalAnswer = finalAnswer.replace(/{user}/g, userName);
+
+                            await safeDelay();
+                            if (matchedQA && matchedQA.mediaFile) {
+                                const mediaPath = path.join(__dirname, 'media', groupId, matchedQA.mediaFile);
+                                if (fs.existsSync(mediaPath)) {
+                                    const media = MessageMedia.fromFilePath(mediaPath);
+                                    await msg.reply(media, undefined, { caption: finalAnswer || undefined });
+                                } else if (finalAnswer) {
+                                    await msg.reply(finalAnswer);
+                                }
+                            } else {
+                                await msg.reply(finalAnswer);
+                            }
+                        } catch (err) {
+                            console.error(`[Q&A] خطأ في إرسال الإجابة: ${err.message}`);
+                        }
+                        return true;
+                    }
+                }
+
+                const shouldApplyGlobalQA = !groupConfig || groupConfig.useGlobalQA === true;
+                if (!isQAMatched && shouldApplyGlobalQA && config.globalQAEnabled && Array.isArray(config.globalQA) && config.globalQA.length > 0) {
+                    for (const gqa of config.globalQA) {
+                        const gQuestions = gqa.questions || (gqa.question ? [gqa.question] : []);
+                        const gMatched = gQuestions.find(q => typeof q === 'string' && messageText.includes(q.toLowerCase().trim()));
+                        if (gMatched) {
+                            try {
+                                let gFinalAnswer = gqa.answer || '';
+                                const gnow = new Date();
+                                const gToday = new Date();
+                                gToday.setHours(0, 0, 0, 0);
+
+                                function formatGlobalQAEventDate(dateVal, language = 'ar') {
+                                    if (!dateVal) return '';
+                                    const eventDate = new Date(dateVal);
+                                    eventDate.setHours(0, 0, 0, 0);
+                                    const daysLeft = Math.ceil((eventDate - gToday) / (1000 * 60 * 60 * 24));
+                                    const eventDateStr = `${String(eventDate.getDate()).padStart(2, '0')}/${String(eventDate.getMonth() + 1).padStart(2, '0')}/${eventDate.getFullYear()}`;
+                                    if (language === 'ar') {
+                                        return daysLeft > 0 ? `${daysLeft} أيام متبقية - ${eventDateStr}` : (daysLeft === 0 ? `اليوم - ${eventDateStr}` : `منذ ${Math.abs(daysLeft)} أيام - ${eventDateStr}`);
+                                    }
+                                    return daysLeft > 0 ? `${daysLeft} days left - ${eventDateStr}` : (daysLeft === 0 ? `Today - ${eventDateStr}` : `${Math.abs(daysLeft)} days ago - ${eventDateStr}`);
+                                }
+
+                                const gqaLanguage = gqa.qaLanguage || 'ar';
+                                gFinalAnswer = gFinalAnswer.replace(/{date}/g,
+                                    `${String(gnow.getDate()).padStart(2, '0')}/${String(gnow.getMonth() + 1).padStart(2, '0')}/${gnow.getFullYear()}`);
+
+                                const gEventDatesArray = Array.isArray(gqa.eventDates) && gqa.eventDates.length > 0 ? gqa.eventDates : [];
+                                const gEventDateLegacy = gqa.eventDate || '';
+                                if (gEventDateLegacy) {
+                                    gFinalAnswer = gFinalAnswer.replace(/{eventdate}/g, formatGlobalQAEventDate(gEventDateLegacy, gqaLanguage));
+                                } else if (gEventDatesArray.length > 0) {
+                                    gFinalAnswer = gFinalAnswer.replace(/{eventdate}/g, formatGlobalQAEventDate(gEventDatesArray[0].date, gqaLanguage));
+                                }
+                                if (gEventDatesArray.length > 0) {
+                                    gEventDatesArray.forEach(ed => {
+                                        if (ed.label && ed.date) {
+                                            const regex = new RegExp(`{eventdate:${ed.label}}`, 'g');
+                                            gFinalAnswer = gFinalAnswer.replace(regex, formatGlobalQAEventDate(ed.date, gqaLanguage));
+                                        }
+                                    });
+                                }
+
+                                const gcontact = await msg.getContact();
+                                const guserName = gcontact ? (gcontact.name || gcontact.number) : cleanAuthorId.split('@')[0];
+                                gFinalAnswer = gFinalAnswer.replace(/{user}/g, guserName);
+
+                                if (gFinalAnswer || gqa.mediaFile) {
+                                    await safeDelay();
+                                    if (gqa.mediaFile) {
+                                        const globalMediaPath = path.join(__dirname, 'media', 'global-qa', gqa.mediaFile);
+                                        if (fs.existsSync(globalMediaPath)) {
+                                            const media = MessageMedia.fromFilePath(globalMediaPath);
+                                            await msg.reply(media, undefined, { caption: gFinalAnswer || undefined });
+                                        } else if (gFinalAnswer) {
+                                            await msg.reply(gFinalAnswer);
+                                        }
+                                    } else {
+                                        await msg.reply(gFinalAnswer);
+                                    }
+                                    console.log(`[Q&A عالمي] رد على "${gMatched}" في "${chat.name}"`);
+                                }
+                            } catch (err) {
+                                console.error(`[Q&A عالمي] خطأ: ${err.message}`);
+                            }
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            }
+
+            // ── Inline commands: /ban  /kick  /report ────────────────────────
+            const cmdBody = (msg.body || '').trim();
+            const cmdMatch = cmdBody.match(/^\/(\w+)/i);
+            // Check if commands are enabled for this group (default: enabled)
+            const cmdEnabled = groupConfig ? (groupConfig.enableCommands !== false) : true;
+            if (cmdEnabled && cmdMatch && ['ban', 'kick', 'report'].includes(cmdMatch[1].toLowerCase())) {
+                const cmd = cmdMatch[1].toLowerCase();
+
+                // Only whitelisted senders may use commands
+                const senderGlobalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanAuthorId);
+                const senderUseGlobal = groupConfig ? (groupConfig.useGlobalWhitelist !== false) : true;
+                const senderInCustom = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanAuthorId) : false;
+                const isSenderWhitelisted = (senderUseGlobal && senderGlobalWl) || senderInCustom;
+
+                if (isSenderWhitelisted) {
+                    const cmdAdminLang = resolveAdminLang(groupConfig, config);
+                    const cmdAdminGroup = (groupConfig && groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '')
+                        ? groupConfig.adminGroup.trim()
+                        : config.defaultAdminGroup;
+                    const cmdBlacklistEnabled = groupConfig
+                        ? (typeof groupConfig.enableBlacklist !== 'undefined' ? groupConfig.enableBlacklist : config.enableBlacklist)
+                        : config.enableBlacklist;
+
+                    // ── Build target list ──────────────────────────────────
+                    // For /ban and /kick: all mentions (multi-ban support)
+                    // For /report: first mention or quoted author (single)
+                    // Also support: reply to a message → add quoted author as target
+                    let targetList = []; // [{ rawId, cleanId }]
+
+                    if (msg.mentionedIds && msg.mentionedIds.length > 0) {
+                        if (cmd === 'ban' || cmd === 'kick') {
+                            // All mentioned numbers
+                            for (const mid of msg.mentionedIds) {
+                                targetList.push({ rawId: mid, cleanId: mid.replace(/:[0-9]+/, '') });
+                            }
+                        } else {
+                            // /report: only first mention
+                            const mid = msg.mentionedIds[0];
+                            targetList.push({ rawId: mid, cleanId: mid.replace(/:[0-9]+/, '') });
+                        }
+                    }
+
+                    // If /ban reply (no mentions): add quoted message author
+                    if (targetList.length === 0 && msg.hasQuotedMsg) {
+                        try {
+                            const quoted = await msg.getQuotedMessage();
+                            const qRawId = quoted.author || quoted.from;
+                            const qCleanId = qRawId ? qRawId.replace(/:[0-9]+/, '') : null;
+                            if (qRawId) targetList.push({ rawId: qRawId, cleanId: qCleanId });
+                        } catch (e) { }
+                    }
+
+                    // Keep single-target aliases for /report compatibility
+                    const targetRawId = targetList.length > 0 ? targetList[0].rawId : null;
+                    const targetCleanId = targetList.length > 0 ? targetList[0].cleanId : null;
+                    // ──────────────────────────────────────────────────────
+
+                    if (!targetRawId) {
+                        // No target — tell the user how to use it
+                        try {
+                            await msg.reply(cmdAdminLang === 'en'
+                                ? `⚠️ Please mention a user or reply to their message with /${cmd}.`
+                                : `⚠️ يرجى ذكر مستخدم أو الرد على رسالته مع الأمر /${cmd}.`);
+                        } catch (e) { }
+                    } else if (cmd === 'kick' || cmd === 'ban') {
+                        const botWid = client.info && client.info.wid ? client.info.wid._serialized : null;
+                        const botParticipant = botWid ? chat.participants.find(p => p.id._serialized === botWid) : null;
+                        const botIsAdmin = botParticipant && (botParticipant.isAdmin || botParticipant.isSuperAdmin);
+
+                        if (!botIsAdmin) {
+                            try {
+                                await msg.reply(cmdAdminLang === 'en'
+                                    ? '⚠️ The bot must be a group admin to use this command.'
+                                    : '⚠️ يجب أن يكون البوت مشرفاً في المجموعة لتنفيذ هذا الأمر.');
+                            } catch (e) { }
+                        } else {
+                            await safeDelay();
+
+                            // Smart /ban reply: delete the replied-to message first
+                            if (cmd === 'ban' && msg.hasQuotedMsg) {
+                                try {
+                                    const quotedToDelete = await msg.getQuotedMessage();
+                                    await quotedToDelete.delete(true);
+                                } catch (e) { }
+                            }
+
+                            const senderNum = cleanAuthorId.split('@')[0];
+                            const succeeded = [];
+                            const failed = [];
+
+                            for (const target of targetList) {
+                                try {
+                                    await chat.removeParticipants([target.rawId]);
+                                    if (cmd === 'ban' && cmdBlacklistEnabled) {
+                                        try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(target.cleanId); } catch (e) { }
+                                    }
+                                    succeeded.push(target.cleanId.split('@')[0]);
+                                    console.log(`[أمر] ${cmd} على ${target.cleanId} في ${chat.name} بواسطة ${cleanAuthorId}`);
+                                    if (targetList.length > 1) await new Promise(r => setTimeout(r, 600)); // small gap between kicks
+                                } catch (err) {
+                                    failed.push(target.cleanId.split('@')[0]);
+                                }
+                            }
+
+                            // Summary report to admin group
+                            const succeededMentions = targetList
+                                .filter(t => succeeded.includes(t.cleanId.split('@')[0]))
+                                .map(t => t.cleanId);
+                            const allMentions = [cleanAuthorId, ...succeededMentions];
+
+                            const successLine = succeeded.length > 0
+                                ? (cmdAdminLang === 'en'
+                                    ? `✅ ${cmd === 'ban' ? 'Banned' : 'Kicked'}: @${succeeded.join(', @')}`
+                                    : `✅ تم ${cmd === 'ban' ? 'حظر' : 'طرد'}: @${succeeded.join(', @')}`)
+                                : '';
+                            const failLine = failed.length > 0
+                                ? (cmdAdminLang === 'en'
+                                    ? `⚠️ Failed (may have left or bot lacks permission): @${failed.join(', @')}`
+                                    : `⚠️ فشل (ربما غادروا أو البوت لا يملك صلاحية): @${failed.join(', @')}`)
+                                : '';
+                            const blacklistLine = cmd === 'ban' && cmdBlacklistEnabled && succeeded.length > 0
+                                ? (cmdAdminLang === 'en' ? '🚫 Added to blacklist.' : '🚫 تمت إضافتهم للقائمة السوداء.')
+                                : '';
+                            const deletedLine = cmd === 'ban' && msg.hasQuotedMsg && succeeded.length > 0
+                                ? (cmdAdminLang === 'en' ? '🗑️ Replied message deleted.' : '🗑️ تم حذف الرسالة المشار إليها.')
+                                : '';
+
+                            const confirmText = [
+                                cmdAdminLang === 'en'
+                                    ? `*${cmd === 'ban' ? 'Ban' : 'Kick'} executed* — Group: "${chat.name}" — By: @${senderNum}`
+                                    : `*تم تنفيذ ${cmd === 'ban' ? 'الحظر' : 'الطرد'}* — المجموعة: "${chat.name}" — بواسطة: @${senderNum}`,
+                                successLine, failLine, blacklistLine, deletedLine
+                            ].filter(Boolean).join('\n');
+
+                            try { await client.sendMessage(cmdAdminGroup, confirmText, { mentions: allMentions }); } catch (e) { }
+
+                            if (succeeded.length === 0) {
+                                try {
+                                    await msg.reply(cmdAdminLang === 'en'
+                                        ? '⚠️ Failed to remove all participants. They may have already left or the bot lacks permissions.'
+                                        : '⚠️ فشل الطرد لجميع المستهدفين. ربما غادروا مسبقاً أو البوت لا يملك الصلاحية الكافية.');
+                                } catch (e) { }
+                            }
+                        }
+                    } else if (cmd === 'report') {
+                        // Get quoted message body for context
+                        let reportedContent = '';
+                        if (msg.hasQuotedMsg) {
+                            try {
+                                const quoted = await msg.getQuotedMessage();
+                                reportedContent = quoted.body || '';
+                            } catch (e) { }
+                        }
+                        const senderNum = cleanAuthorId.split('@')[0];
+                        const targetNum = (targetCleanId || '').split('@')[0];
+                        const pollTitle = cmdAdminLang === 'en'
+                            ? `🚨 Member Report in "${chat.name}"\nReported by: @${senderNum}\nReported user: @${targetNum}${reportedContent ? `\nMessage:\n"${reportedContent.slice(0, 200)}"` : ''}\n\nRemove this member${cmdBlacklistEnabled ? ' and blacklist' : ''}?`
+                            : `🚨 بلاغ عضو في "${chat.name}"\nأرسله: @${senderNum}\nالمُبلَّغ عنه: @${targetNum}${reportedContent ? `\nالمحتوى:\n"${reportedContent.slice(0, 200)}"` : ''}\n\nهل تريد طرد هذا العضو${cmdBlacklistEnabled ? ' وحظره' : ''}؟`;
+                        const pollOptions = cmdBlacklistEnabled
+                            ? (cmdAdminLang === 'en' ? ['Yes, remove and blacklist', 'No'] : ['نعم، طرد وحظر', 'لا'])
+                            : (cmdAdminLang === 'en' ? ['Yes, remove', 'No'] : ['نعم، طرد', 'لا']);
+                        try {
+                            const poll = new Poll(pollTitle, pollOptions);
+                            const pollMsg = await client.sendMessage(cmdAdminGroup, poll, { mentions: [cleanAuthorId, targetCleanId] });
+                            pendingBans.set(pollMsg.id._serialized, {
+                                senderId: targetCleanId,
+                                rawSenderId: targetRawId,
+                                sourceGroupId: groupId,
+                                pollMsg,
+                                isBlacklistEnabled: cmdBlacklistEnabled
+                            });
+                            await msg.reply(cmdAdminLang === 'en'
+                                ? '✅ Your report has been sent to the admins for review.'
+                                : '✅ تم إرسال بلاغك للإدارة للمراجعة والتصويت.');
+                            console.log(`[أمر] /report على ${targetCleanId} في ${chat.name} بواسطة ${cleanAuthorId}`);
+                        } catch (e) { }
+                    }
+                }
+                return; // Always exit after a command (authorized or not)
+            }
+            // ─────────────────────────────────────────────────────────────────
+
+
+            let isWhitelistEnabled = config.enableWhitelist;
+            if (groupConfig && typeof groupConfig.enableWhitelist !== 'undefined') {
+                isWhitelistEnabled = groupConfig.enableWhitelist;
+            }
+
+            if (isWhitelistEnabled) {
+                const globalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanAuthorId);
+                const useGlobal = groupConfig ? (groupConfig.useGlobalWhitelist !== false) : true;
+                const inCustom = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanAuthorId) : false;
+                if ((useGlobal && globalWl) || inCustom) {
+                    await tryRespondWithQA();
+                    return;
+                }
+            }
+
+            if (groupConfig && groupConfig.enablePanicMode) {
+                if (!lockedGroups.has(groupId)) {
+                    const now = Date.now();
+                    if (!groupRaidTrackers.has(groupId)) groupRaidTrackers.set(groupId, []);
+                    let raidTracker = groupRaidTrackers.get(groupId);
+                    raidTracker.push(now);
+                    const timeWindowMs = (groupConfig.panicTimeWindow || 5) * 1000;
+                    raidTracker = raidTracker.filter(t => now - t < timeWindowMs);
+                    groupRaidTrackers.set(groupId, raidTracker);
+
+                    const limit = groupConfig.panicMessageLimit || 10;
+                    if (raidTracker.length >= limit) {
+                        lockedGroups.add(groupId);
+                        groupRaidTrackers.delete(groupId);
+                        console.log(`[أمان] تم رصد هجوم (Raid) في مجموعة ${chat.name}! جاري الإغلاق...`);
+                        try {
+                            await chat.setMessagesAdminsOnly(true);
+                            const lockMins = groupConfig.panicLockoutDuration || 10;
+                            const rawAlertMsg = groupConfig.panicAlertMessage || '🚨 تم رصد هجوم (Raid)! تم إغلاق المجموعة لمدة {time} دقائق.';
+                            const alertMsgText = rawAlertMsg.replace(/{time}/g, lockMins);
+                            const alertTarget = groupConfig.panicAlertTarget || 'both';
+                            let targetAdminGroup = (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') ? groupConfig.adminGroup.trim() : config.defaultAdminGroup;
+                            const panicAdminOpenText = tAdmin(
+                                groupConfig,
+                                config,
+                                `🚨 *تنبيه طوارئ (Panic Mode)* 🚨\nتم رصد هجوم في مجموعة "${chat.name}" وإغلاقها تلقائياً لمدة ${lockMins} دقائق.`,
+                                `🚨 *Panic Mode Alert* 🚨\nRaid activity was detected in "${chat.name}". The group was locked for ${lockMins} minutes.`
+                            );
+                            const panicAdminCloseText = tAdmin(
+                                groupConfig,
+                                config,
+                                `🔓 *تنبيه طوارئ*\nتم إعادة فتح مجموعة "${chat.name}" بعد انتهاء فترة الإغلاق التلقائي.`,
+                                `🔓 *Panic Mode Alert*\n"${chat.name}" has been unlocked after the automatic lock period ended.`
+                            );
+
+                            if (alertTarget === 'group' || alertTarget === 'both') await client.sendMessage(groupId, alertMsgText);
+                            if (alertTarget === 'admin' || alertTarget === 'both') await client.sendMessage(targetAdminGroup, panicAdminOpenText);
+
+                            setTimeout(async () => {
+                                try {
+                                    await chat.setMessagesAdminsOnly(false);
+                                    if (alertTarget === 'group' || alertTarget === 'both') await client.sendMessage(groupId, '🔓 *انتهت فترة الإغلاق التلقائي. يمكنكم إرسال الرسائل الآن.*');
+                                    if (alertTarget === 'admin' || alertTarget === 'both') await client.sendMessage(targetAdminGroup, panicAdminCloseText);
+                                } catch (e) { console.error('[خطأ] فشل فتح المجموعة:', e); }
+                                lockedGroups.delete(groupId);
+                            }, lockMins * 60 * 1000);
+                        } catch (e) {
+                            console.error('[خطأ] فشل إغلاق المجموعة في وضع الطوارئ.', e);
+                            lockedGroups.delete(groupId);
+                        }
+                    }
+                }
+            }
+
+            let internalMsgType = 'text';
+            if (msg.type === 'image') internalMsgType = 'image';
+            else if (msg.type === 'video') internalMsgType = 'video';
+            else if (msg.type === 'audio' || msg.type === 'ptt') internalMsgType = 'audio';
+            else if (msg.type === 'document') internalMsgType = 'document';
+            else if (msg.type === 'sticker') internalMsgType = 'sticker';
+
+            const normalizedMessageText = (() => {
+                const chunks = [];
+                const bodyWithoutVCard = stripRawVCardBlocks(msg.body || '');
+                if (bodyWithoutVCard.length > 0) chunks.push(bodyWithoutVCard);
+                if ((msg.type === 'vcard' || msg.type === 'multi_vcard') && Array.isArray(msg.vCards) && msg.vCards.length > 0) {
+                    const prettyVcards = formatVCardsForDisplay(msg.vCards);
+                    if (prettyVcards) chunks.push(prettyVcards);
+                }
+                return chunks.join('\n').trim();
+            })();
+
+            const compactId = compactMsgId(msgId);
+            const msgPreview = toLogPreview(normalizedMessageText, 100) || `[${internalMsgType}]`;
+            console.log(`[رسالة] استلام | id=${compactId} | نوع=${internalMsgType} | نص="${msgPreview}"`);
+
+            let targetAdminGroup = config.defaultAdminGroup;
+            let isWordFilterEnabled = config.enableWordFilter;
+            let isAIFilterEnabled = config.enableAIFilter;
+            let isAIMediaEnabled = config.enableAIMedia;
+            let isAutoActionEnabled = config.autoAction;
+            let isBlacklistEnabled = config.enableBlacklist;
+            let isAntiSpamEnabled = config.enableAntiSpam;
+            let spamDuplicateLimit = config.spamDuplicateLimit;
+            let spamAction = config.spamAction;
+            let spamTypes = config.spamTypes;
+            let spamLimits = config.spamLimits;
+            let blockedTypes = config.blockedTypes;
+            let blockedAction = config.blockedAction;
+            let forbiddenWords = [...config.defaultWords];
+            let aiTriggerWords = Array.isArray(config.aiFilterTriggerWords) && config.aiFilterTriggerWords.length > 0 ? config.aiFilterTriggerWords : ['نعم'];
+            let adminMessageLang = normalizeAdminLang(config.defaultAdminLanguage);
+
+            if (groupConfig) {
+                targetAdminGroup = (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') ? groupConfig.adminGroup.trim() : config.defaultAdminGroup;
+                adminMessageLang = resolveAdminLang(groupConfig, config);
+                if (typeof groupConfig.enableWordFilter !== 'undefined') isWordFilterEnabled = groupConfig.enableWordFilter;
+                if (typeof groupConfig.enableAIFilter !== 'undefined') isAIFilterEnabled = groupConfig.enableAIFilter;
+                if (typeof groupConfig.enableAIMedia !== 'undefined') isAIMediaEnabled = groupConfig.enableAIMedia;
+                if (typeof groupConfig.autoAction !== 'undefined') isAutoActionEnabled = groupConfig.autoAction;
+                if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabled = groupConfig.enableBlacklist;
+                if (typeof groupConfig.enableAntiSpam !== 'undefined') {
+                    isAntiSpamEnabled = groupConfig.enableAntiSpam;
+                    spamDuplicateLimit = groupConfig.spamDuplicateLimit || 3;
+                    spamAction = groupConfig.spamAction || 'poll';
+                }
+                if (groupConfig.spamTypes) spamTypes = groupConfig.spamTypes;
+                if (groupConfig.spamLimits) spamLimits = groupConfig.spamLimits;
+                if (groupConfig.blockedTypes) blockedTypes = groupConfig.blockedTypes;
+                if (groupConfig.blockedAction) blockedAction = groupConfig.blockedAction;
+                if (groupConfig.useDefaultWords === false) forbiddenWords = [];
+                if (groupConfig.words && groupConfig.words.length > 0) forbiddenWords = [...forbiddenWords, ...groupConfig.words];
+                if (Array.isArray(groupConfig.aiFilterTriggerWords) && groupConfig.aiFilterTriggerWords.length > 0) {
+                    aiTriggerWords = groupConfig.aiFilterTriggerWords;
+                }
+            }
+
+            if (isBlacklistEnabled) {
+                const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanAuthorId);
+                const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+                const isExtBlocked = blockedExtensionsRows.some(r => cleanAuthorId.replace('@c.us', '').startsWith(r.ext));
+                const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
+                const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanAuthorId) : false;
+                if ((useGlobal && (globalBl || isExtBlocked)) || inCustom) {
+                    console.log(`[أمان] رقم محظور أرسل رسالة. سيتم حذفه.`);
+                    await safeDelay();
+                    await msg.delete(true);
+                    await chat.removeParticipants([rawAuthorId]);
+                    return;
+                }
+            }
+
+            if (blockedTypes.includes(internalMsgType)) {
+                console.log(`[أمان] رصد نوع ممنوع قطعي (${internalMsgType}). يتم الحذف.`);
+                await safeDelay();
+                try { await msg.delete(true); } catch (e) { }
+                if (blockedAction === 'auto') {
+                    try {
+                        await chat.removeParticipants([rawAuthorId]);
+                        if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanAuthorId);
+                        const reportText = adminMessageLang === 'en'
+                            ? `🚨 *Auto Ban (Blocked Type)*\nA member sent (${internalMsgType}) in "${chat.name}" and was removed.\n👤 *Sender:* @${cleanAuthorId.split('@')[0]}`
+                            : `🚨 *حظر تلقائي (نوع ممنوع)*\nأرسل العضو ملف (${internalMsgType}) في "${chat.name}" وتم طرده.\n👤 *المرسل:* @${cleanAuthorId.split('@')[0]}`;
+                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanAuthorId] });
+                    } catch (e) { }
+                } else if (blockedAction === 'poll') {
+                    const pollTitle = adminMessageLang === 'en'
+                        ? `🚨 Violation Alert in "${chat.name}"\nSender: @${cleanAuthorId.split('@')[0]}\nReason: Sent blocked type (${internalMsgType})\n\nDo you want to remove this number${isBlacklistEnabled ? ' and add it to blacklist' : ''}?`
+                        : `🚨 إشعار بمخالفة في "${chat.name}"\nالمرسل: @${cleanAuthorId.split('@')[0]}\nالسبب: إرسال نوع ممنوع (${internalMsgType})\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
+                    const poll = new Poll(pollTitle, isBlacklistEnabled ? (adminMessageLang === 'en' ? ['Yes, remove and blacklist', 'No'] : ['نعم، طرد وحظر', 'لا']) : (adminMessageLang === 'en' ? ['Yes, remove', 'No'] : ['نعم، طرد', 'لا']));
+                    const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [cleanAuthorId] });
+                    pendingBans.set(pollMsg.id._serialized, {
+                        senderId: cleanAuthorId,
+                        rawSenderId: rawAuthorId,
+                        sourceGroupId: groupId,
+                        pollMsg: pollMsg,
+                        isBlacklistEnabled: isBlacklistEnabled
+                    });
+                }
+                return;
+            }
+
+            if (isAntiSpamEnabled) {
+                const trackerKey = `${groupId}_${cleanAuthorId}`;
+                if (spamMutedUsers.has(trackerKey)) {
+                    if (Date.now() < spamMutedUsers.get(trackerKey)) {
+                        try { await msg.delete(true); } catch (e) { }
+                        return;
+                    } else { spamMutedUsers.delete(trackerKey); }
+                }
+
+                if (!userTrackers.has(trackerKey)) userTrackers.set(trackerKey, []);
+                let tracker = userTrackers.get(trackerKey);
+                const messageTime = msg.timestamp * 1000;
+                tracker.push({ text: msg.body, time: messageTime, msgObj: msg, id: msgId, type: internalMsgType });
+                tracker = tracker.filter(m => messageTime - m.time < 15000);
+                userTrackers.set(trackerKey, tracker);
+
+                let isSpamFlagged = false;
+                let spamFlagReason = '';
+
+                if (spamTypes.includes(internalMsgType)) {
+                    const typeCount = tracker.filter(m => m.type === internalMsgType).length;
+                    const typeLimit = spamLimits[internalMsgType] || 5;
+                    if (typeCount >= typeLimit) {
+                        isSpamFlagged = true;
+                        const arNames = { text: 'نصوص', image: 'صور', video: 'فيديو', audio: 'صوتيات', document: 'ملفات', sticker: 'ملصقات' };
+                        spamFlagReason = `إرسال (${arNames[internalMsgType] || internalMsgType}) بسرعة تتجاوز الحد المسموح (${typeLimit} خلال 15ث)`;
+                    }
+                }
+
+                if (!isSpamFlagged && internalMsgType === 'text') {
+                    const textCounts = {};
+                    for (const m of tracker) {
+                        if (m.type === 'text' && m.text && m.text.trim().length > 0) {
+                            textCounts[m.text] = (textCounts[m.text] || 0) + 1;
+                            if (textCounts[m.text] >= spamDuplicateLimit) {
+                                isSpamFlagged = true;
+                                spamFlagReason = `تكرار نفس النص ${textCounts[m.text]} مرات متتالية`;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (isSpamFlagged) {
+                    console.log(`[أمان] تم رصد مزعج في (${chat.name}): ${spamFlagReason}`);
+                    spamMutedUsers.set(trackerKey, Date.now() + 60000);
+                    for (const m of tracker) abortedMessages.add(m.id);
+                    await safeDelay();
+                    try { await msg.delete(true); } catch (e) { }
+                    for (const m of tracker) {
+                        if (m.id !== msgId) {
+                            try { await m.msgObj.delete(true); await new Promise(r => setTimeout(r, 500)); } catch (err) { }
+                        }
+                    }
+                    try {
+                        const recentMsgs = await chat.fetchMessages({ limit: 15 });
+                        for (const rMsg of recentMsgs) {
+                            if ((rMsg.author || rMsg.from) === rawAuthorId) {
+                                try { await rMsg.delete(true); await new Promise(r => setTimeout(r, 200)); } catch (e) { }
+                            }
+                        }
+                    } catch (err) { }
+                    userTrackers.delete(trackerKey);
+
+                    const contact = await msg.getContact();
+                    let senderId = cleanAuthorId;
+                    if (contact && contact.number) senderId = `${contact.number}@c.us`;
+
+                    if (spamAction === 'auto') {
+                        try {
+                            await chat.removeParticipants([rawAuthorId]);
+                            if (isBlacklistEnabled) {
+                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
+                            }
+                            const reportText = adminMessageLang === 'en'
+                                ? `🚨 *Auto Ban (Spam)*\nThe member was removed from "${chat.name}"${isBlacklistEnabled ? ' and added to blacklist' : ''}.\n\n👤 *Sender:* @${senderId.split('@')[0]}\n📋 *Reason:* ${spamFlagReason}`
+                                : `🚨 *حظر تلقائي (إزعاج)*\nتم طرد العضو من "${chat.name}"${isBlacklistEnabled ? ' وإدراجه في القائمة السوداء' : ''}.\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${spamFlagReason}`;
+                            await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
+                        } catch (e) { }
+                    } else {
+                        const pollOptions = isBlacklistEnabled
+                            ? (adminMessageLang === 'en' ? ['Yes, remove and blacklist', 'No, only delete'] : ['نعم، طرد وحظر', 'لا، اكتف بالحذف'])
+                            : (adminMessageLang === 'en' ? ['Yes, remove member', 'No'] : ['نعم، طرد العضو', 'لا']);
+                        const pollTitle = adminMessageLang === 'en'
+                            ? `🚨 Spam Alert in "${chat.name}"\nSender: @${senderId.split('@')[0]}\nReason: ${spamFlagReason}\n\nDo you want to remove this number${isBlacklistEnabled ? ' and add it to blacklist' : ''}?`
+                            : `🚨 إشعار إزعاج في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${spamFlagReason}\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
+                        const poll = new Poll(pollTitle, pollOptions);
+                        const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
+                        pendingBans.set(pollMsg.id._serialized, {
+                            senderId: senderId,
+                            rawSenderId: rawAuthorId,
+                            sourceGroupId: groupId,
+                            pollMsg: pollMsg,
+                            isBlacklistEnabled: isBlacklistEnabled
+                        });
+                    }
+                    return;
+                }
+            }
+
+            let isViolating = false;
+            let violationReason = '';
+            const isMediaContent = internalMsgType !== 'text';
+
+            if (isWordFilterEnabled && forbiddenWords.length > 0 && normalizedMessageText) {
+                const normalizedLower = normalizedMessageText.toLowerCase();
+                const matchedWord = forbiddenWords.find(word => {
+                    if (typeof word !== 'string' || word.trim().length === 0) return false;
+                    return normalizedLower.includes(word.toLowerCase());
+                });
+                if (matchedWord) {
+                    isViolating = true;
+                    violationReason = `تطابق تام مع الكلمة المحظورة: [${matchedWord}]`;
+                }
+            }
+
+            if (await tryRespondWithQA()) return;
+
+            let canSendToAI = false;
+            let base64Image = null;
+
+            if (!isViolating && isAIFilterEnabled) {
+                if (!isMediaContent) {
+                    if (msg.body && msg.body.trim().length > 0) canSendToAI = true;
+                } else {
+                    if (isAIMediaEnabled) {
+                        canSendToAI = true;
+                        if (msg.type === 'image') {
+                            try {
+                                const media = await msg.downloadMedia();
+                                if (media && media.data) base64Image = media.data;
+                            } catch (err) { }
+                        }
+                    } else if (msg.body && msg.body.trim().length > 0) {
+                        canSendToAI = true;
+                    }
+                }
+            }
+
+            if (canSendToAI) {
+                try {
+                    const msgText = normalizedMessageText;
+                    console.log(`[AI] إرسال | id=${compactId} | نص="${toLogPreview(msgText, 100)}"`);
+                    const payload = { model: config.ollamaModel, prompt: msgText, stream: false };
+                    if (base64Image) payload.images = [base64Image];
+
+                    const response = await fetch(`${config.ollamaUrl}/api/generate`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                    });
+
+                    if (abortedMessages.has(msgId)) { abortedMessages.delete(msgId); return; }
+
+                    const data = await response.json();
+                    const aiText = data && typeof data.response === 'string' ? data.response : '';
+                    console.log(`[AI] رد | id=${compactId} | نص="${toLogPreview(aiText, 140)}"`);
+                    if (aiText && aiTriggerWords.some(word => aiText.includes(word))) {
+                        isViolating = true;
+                        violationReason = 'تم التصنيف كمخالفة عبر الذكاء الاصطناعي';
+                    }
+                } catch (error) {
+                    console.error(`[AI] خطأ | id=${compactId} | السبب=${error.message || error}`);
+                }
+            } else {
+                let aiSkipReason = 'غير مستوفية لشروط الفحص';
+                const hasText = normalizedMessageText.length > 0;
+                if (isViolating) aiSkipReason = 'تم اعتبارها مخالفة قبل AI';
+                else if (!isAIFilterEnabled) aiSkipReason = 'فلتر AI معطل';
+                else if (!hasText && !isAIMediaEnabled) aiSkipReason = 'وسائط بدون نص وفلتر الوسائط معطل';
+                else if (!hasText) aiSkipReason = 'لا يوجد نص للتحليل';
+                console.log(`[AI] تخطي | id=${compactId} | السبب=${aiSkipReason}`);
+            }
+
+            if (isViolating) {
+                const contact = await msg.getContact();
+                let senderId = cleanAuthorId;
+                if (contact && contact.number) senderId = `${contact.number}@c.us`;
+
+                const cleanBodyFallback = stripRawVCardBlocks(msg.body || '');
+                const messageContent = normalizedMessageText || cleanBodyFallback || '[مرفق وسائط]';
+                await safeDelay();
+                await msg.delete(true);
+
+                if (isAutoActionEnabled) {
+                    try {
+                        await chat.removeParticipants([rawAuthorId]);
+                        if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
+
+                        const reportText = adminMessageLang === 'en'
+                            ? `🚨 *Auto Moderation Report*\nViolating content was deleted and the member was removed from "${chat.name}".\n\n👤 *Sender:* @${senderId.split('@')[0]}\n📋 *Reason:* ${violationReason}\n📝 *Deleted Content:*\n"${messageContent}"`
+                            : `🚨 *تقرير إجراء وحظر تلقائي*\nتم مسح محتوى مخالف وطرد العضو من "${chat.name}".\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${violationReason}\n📝 *النص الممسوح:*\n"${messageContent}"`;
+                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
+                    } catch (e) { }
+                } else {
+                    const pollOptions = isBlacklistEnabled
+                        ? (adminMessageLang === 'en' ? ['Yes, remove and blacklist', 'No, only delete'] : ['نعم، طرد وحظر', 'لا، اكتف بالحذف'])
+                        : (adminMessageLang === 'en' ? ['Yes, remove', 'No'] : ['نعم، طرد', 'لا']);
+                    const pollTitle = adminMessageLang === 'en'
+                        ? `🚨 Violation Alert in "${chat.name}"\nSender: @${senderId.split('@')[0]}\nReason: ${violationReason}\nContent:\n"${messageContent}"\n\nDo you want to remove this member?`
+                        : `🚨 إشعار بمحتوى مخالف في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${violationReason}\nالنص:\n"${messageContent}"\n\nهل ترغب في طرده؟`;
+                    const poll = new Poll(pollTitle, pollOptions);
+
+                    const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
+                    pendingBans.set(pollMsg.id._serialized, {
+                        senderId: senderId,
+                        rawSenderId: rawAuthorId,
+                        sourceGroupId: groupId,
+                        pollMsg: pollMsg,
+                        isBlacklistEnabled: isBlacklistEnabled
+                    });
+                }
+            }
+        }
+    } catch (error) { }
+});
+
+client.on('vote_update', async vote => {
+    const pollId = vote && vote.parentMessage && vote.parentMessage.id ? vote.parentMessage.id._serialized : null;
+    if (!pollId || !pendingBans.has(pollId)) return;
+
+    const data = pendingBans.get(pollId);
+    const userToBan = data.senderId;
+    const userNumber = (typeof userToBan === 'string' ? userToBan.split('@')[0] : '').trim();
+    const candidateIds = [];
+    if (data.rawSenderId) candidateIds.push(data.rawSenderId);
+    if (userToBan) candidateIds.push(userToBan);
+    if (userNumber) candidateIds.push(`${userNumber}@c.us`);
+    if (userNumber) candidateIds.push(`${userNumber}@lid`);
+
+    const yesSelected = isYesVoteSelected(vote, vote.parentMessage);
+    const noSelected = isNoVoteSelected(vote, vote.parentMessage);
+
+    if (!yesSelected && !noSelected) {
+        return;
+    }
+
+    if (yesSelected) {
+        if (data.isBlacklistEnabled) {
+            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan); } catch (e) { }
+        }
+
+        let removed = false;
+        if (data.sourceGroupId) {
+            try {
+                const sourceChat = await client.getChatById(data.sourceGroupId);
+                removed = await tryKickFromChat(sourceChat, candidateIds);
+            } catch (e) { }
+        }
+
+        if (!removed) {
+            const botId = client.info && client.info.wid ? client.info.wid._serialized : null;
+            const chats = await client.getChats();
+            for (const chat of chats) {
+                if (!chat.isGroup) continue;
+                const botData = botId ? chat.participants.find(p => p.id._serialized === botId) : null;
+                if (!botData || !(botData.isAdmin || botData.isSuperAdmin)) continue;
+                const done = await tryKickFromChat(chat, candidateIds);
+                if (done) {
+                    removed = true;
+                    break;
+                }
+            }
+        }
+
+        const replyText = removed
+            ? (data.isBlacklistEnabled ? '✅ *تم تطبيق الطرد وإدراج الرقم في القائمة السوداء بنجاح.*' : '✅ *تم تطبيق الطرد بنجاح.*')
+            : (data.isBlacklistEnabled ? '⚠️ *تم إدراج الرقم في القائمة السوداء، لكن فشل الطرد الآن. قد يكون العضو غير موجود أو ليست هناك صلاحية كافية.*' : '⚠️ *فشل الطرد الآن. قد يكون العضو غير موجود أو ليست هناك صلاحية كافية.*');
+        await data.pollMsg.reply(replyText);
+        pendingBans.delete(pollId);
+        return;
+    }
+
+    if (noSelected) {
+        await data.pollMsg.reply('🛑 *تم إلغاء الطرد بناءً على تصويت الإدارة.*');
+        pendingBans.delete(pollId);
+    }
+});
+
+// Initialize client with retry logic and detailed logging
+async function initializeClientWithRetry(retryCount = 0, maxRetries = 5) {
+    const retryDelay = Math.min(1000 * Math.pow(2, retryCount), 30000); // Exponential backoff, max 30s
+
+    if (retryCount > 0) {
+        console.log(`[معلومة] المحاولة ${retryCount} لتهيئة الاتصال...`);
+        addConnectionLog(`اعادة محاولة #${retryCount}`, `انتظر ${retryDelay}ms قبل اعادة المحاولة`);
+        await new Promise(resolve => setTimeout(resolve, retryDelay));
+    }
+
+    try {
+        if (retryCount === 0) {
+            console.log('[معلومة] جاري بدء البوت...');
+            addConnectionLog('بدء البوت', 'محاولة اولى للتهيئة');
+            initializationStartTime = Date.now();
+        }
+
+        isInitializing = true;
+        botStatusKind = 'initializing';
+        console.log(`[معلومة] مرحلة 1: اوضاي التهيئة...`);
+        addConnectionLog('التهيئة الجارية', 'مرحلة 1/3: التهيئة');
+
+        // Set initialization timeout to detect hangs
+        initializationTimeout = setTimeout(() => {
+            console.error('[خطأ] استنزاف وقت التهيئة (timeout)!');
+            addConnectionLog('انتهاء الوقت', 'انقضى وقت التهيئة المسموح به (60 ثانية)');
+            isInitializing = false;
+            botStatus = '<i class="fas fa-exclamation-triangle"></i> خطأ: انقضى وقت التهيئة';
+            botStatusKind = 'error';
+        }, 60000); // 60 second timeout
+
+        await client.initialize();
+
+        // Clear timeout if initialization completes successfully
+        if (initializationTimeout) {
+            clearTimeout(initializationTimeout);
+            initializationTimeout = null;
+        }
+
+        console.log('[معلومة] تمت تهيئة البوت بنجاح في المحاولة ' + (retryCount + 1));
+        addConnectionLog('تهيئة ناجحة', `تمت التهيئة في المحاولة ${retryCount + 1}`);
+
+    } catch (error) {
+        isInitializing = false;
+
+        if (initializationTimeout) {
+            clearTimeout(initializationTimeout);
+            initializationTimeout = null;
+        }
+
+        const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+        const errorStack = error && error.stack ? error.stack : 'No stack trace available';
+        const errorName = error && error.name ? error.name : 'Unknown';
+
+        console.error(`[خطأ] فشلت تهيئة البوت مرة ${retryCount + 1}:`, {
+            errorName,
+            message: errorMsg,
+            stack: errorStack,
+            retryAttempt: retryCount + 1,
+            maxRetries,
+            timestamp: new Date().toISOString(),
+            elapsedMs: initializationStartTime ? Date.now() - initializationStartTime : 'N/A'
+        });
+
+        addConnectionLog(`خطأ #${retryCount + 1}`, `${errorName}: ${errorMsg}`);
+
+        if (retryCount < maxRetries) {
+            console.log(`[معلومة] سيتم إعادة المحاولة (رقم ${retryCount + 2} من ${maxRetries + 1})`);
+            botStatus = `<i class="fas fa-spin fa-spinner"></i> خطأ - اعادة محاولة (${retryCount + 1}/${maxRetries})`;
+            botStatusKind = 'retrying';
+
+            // Retry with exponential backoff
+            return initializeClientWithRetry(retryCount + 1, maxRetries);
+        } else {
+            console.error(`[خطأ حرج] فشلت جميع محاولات التهيئة (${maxRetries + 1} محاولات)!`);
+            botStatus = `<i class="fas fa-exclamation-triangle"></i> فشل بدء البوت بعد ${maxRetries + 1} محاولات`;
+            botStatusKind = 'error';
+            addConnectionLog('فشل نهائي', `فشلت جميع ${maxRetries + 1} محاولات برسالة: ${errorMsg}`);
+        }
+    }
+}
+
+// Start the client
+(async () => {
+    try {
+        await initializeClientWithRetry();
+    } catch (error) {
+        console.error('[خطأ] خطأ غير متوقع عند بدء البوت:', error);
+    }
+})();
+
+// Handle graceful shutdown
+process.on('SIGTERM', async () => {
+    console.log('[معلومة] تم استقبال إشارة SIGTERM، جاري إغلاق البوت...');
+    try {
+        await client.destroy();
+    } catch (e) {
+        console.error('[خطأ] خطأ أثناء إغلاق البوت:', e.message);
+    }
+    process.exit(0);
+});
+
+process.on('SIGINT', async () => {
+    console.log('[معلومة] تم استقبال إشارة SIGINT، جاري إغلاق البوت...');
+    try {
+        await client.destroy();
+    } catch (e) {
+        console.error('[خطأ] خطأ أثناء إغلاق البوت:', e.message);
+    }
+    process.exit(0);
+});
+
+async function screenPendingMembershipRequests() {
+    try {
+        const chats = await client.getChats();
+        for (const chat of chats) {
+            if (!chat.isGroup) continue;
+
+            const groupId = chat.id._serialized;
+            const groupConfig = config.groupsConfig[groupId];
+
+            let isJoinProfileScreeningEnabled = config.enableJoinProfileScreening;
+            let isWordFilterEnabled = config.enableWordFilter;
+            let isAIFilterEnabled = config.enableAIFilter;
+            let isBlacklistEnabled = config.enableBlacklist;
+            let isWhitelistEnabled = config.enableWhitelist;
+            let targetAdminGroup = config.defaultAdminGroup;
+            let forbiddenWords = [...config.defaultWords];
+            let aiTriggerWords = Array.isArray(config.aiFilterTriggerWords) && config.aiFilterTriggerWords.length > 0 ? config.aiFilterTriggerWords : ['نعم'];
+
+            if (groupConfig) {
+                if (typeof groupConfig.enableJoinProfileScreening !== 'undefined') isJoinProfileScreeningEnabled = groupConfig.enableJoinProfileScreening;
+                if (typeof groupConfig.enableWordFilter !== 'undefined') isWordFilterEnabled = groupConfig.enableWordFilter;
+                if (typeof groupConfig.enableAIFilter !== 'undefined') isAIFilterEnabled = groupConfig.enableAIFilter;
+                if (typeof groupConfig.enableBlacklist !== 'undefined') isBlacklistEnabled = groupConfig.enableBlacklist;
+                if (typeof groupConfig.enableWhitelist !== 'undefined') isWhitelistEnabled = groupConfig.enableWhitelist;
+                if (groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '') targetAdminGroup = groupConfig.adminGroup.trim();
+                if (groupConfig.useDefaultWords === false) forbiddenWords = [];
+                if (groupConfig.words && groupConfig.words.length > 0) forbiddenWords = [...forbiddenWords, ...groupConfig.words];
+                if (Array.isArray(groupConfig.aiFilterTriggerWords) && groupConfig.aiFilterTriggerWords.length > 0) {
+                    aiTriggerWords = groupConfig.aiFilterTriggerWords;
+                }
+            }
+
+            // Skip this group entirely only if neither blacklist nor profile screening is active
+            if (!isBlacklistEnabled && (!isJoinProfileScreeningEnabled || (!isWordFilterEnabled && !isAIFilterEnabled))) continue;
+
+            let pendingReqs = [];
+            try {
+                pendingReqs = await chat.getGroupMembershipRequests();
+            } catch (e) {
+                continue;
+            }
+            if (!pendingReqs || pendingReqs.length === 0) continue;
+
+            // Load blacklist data once per group iteration
+            const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
+            const blacklistArr = blacklistRows.map(r => r.number);
+            const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+            const blockedExtensionsArr = blockedExtensionsRows.map(r => r.ext);
+
+            for (const req of pendingReqs) {
+                const rawRequesterId = (req && (req.id || req.requesterId || req.author)) ? (req.id || req.requesterId || req.author) : null;
+                if (!rawRequesterId) continue;
+
+                const cacheKey = `${groupId}::${rawRequesterId}`;
+                const lastTs = joinProfileReviewCache.get(cacheKey) || 0;
+                if (Date.now() - lastTs < 2 * 60 * 1000) continue;
+                joinProfileReviewCache.set(cacheKey, Date.now());
+
+                let cleanRequesterId = rawRequesterId.replace(/:[0-9]+/, '');
+                if (cleanRequesterId.includes('@lid')) {
+                    try {
+                        const contact = await client.getContactById(rawRequesterId);
+                        if (contact && contact.number) cleanRequesterId = `${contact.number}@c.us`;
+                        else cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us');
+                    } catch (e) { cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us'); }
+                }
+
+                if (isWhitelistEnabled) {
+                    const globalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanRequesterId);
+                    const useGlobalWl = groupConfig ? (groupConfig.useGlobalWhitelist !== false) : true;
+                    const inCustomWl = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanRequesterId) : false;
+                    if ((useGlobalWl && globalWl) || inCustomWl) {
+                        continue;
+                    }
+                }
+
+                // ── Blacklist check for pending join requests ──────────────────
+                if (isBlacklistEnabled) {
+                    const finalCleanId = cleanRequesterId.replace('@c.us', '');
+                    const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                    const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
+                    const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanRequesterId) : false;
+                    const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanRequesterId);
+
+                    if ((useGlobalBl && (globalBl || isExtBlocked)) || inCustomBl) {
+                        console.log(`[أمان] رفض طلب انضمام لرقم محظور (${cleanRequesterId}) في: ${chat.name}`);
+                        try {
+                            await chat.rejectGroupMembershipRequests({ requesterIds: [rawRequesterId] });
+                            const reportText = tAdmin(
+                                groupConfig,
+                                config,
+                                `🛡️ *حماية (قائمة سوداء)*\nتم رفض طلب انضمام لرقم محظور في مجموعة "${chat.name}" تلقائياً.\nالرقم: @${cleanRequesterId.split('@')[0]}`,
+                                `🛡️ *Protection (Blacklist)*\nA join request from a blacklisted number was automatically rejected in "${chat.name}".\nNumber: @${cleanRequesterId.split('@')[0]}`
+                            );
+                            try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanRequesterId] }); } catch (e) { }
+                        } catch (e) { }
+                        continue; // skip profile screening for this requester
+                    }
+                }
+                // ─────────────────────────────────────────────────────────────
+
+                if (!isJoinProfileScreeningEnabled || (!isWordFilterEnabled && !isAIFilterEnabled)) continue;
+
+                const profileResult = await evaluateJoinProfileViolation({
+                    participantId: rawRequesterId,
+                    cleanUserId: cleanRequesterId,
+                    groupName: chat.name,
+                    isWordFilterEnabled,
+                    isAIFilterEnabled,
+                    forbiddenWords,
+                    aiTriggerWords
+                });
+                if (!profileResult.isViolating) continue;
+
+                try {
+                    await chat.rejectGroupMembershipRequests({ requesterIds: [rawRequesterId] });
+                } catch (e) {
+                    continue;
+                }
+
+                if (isBlacklistEnabled) {
+                    try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanRequesterId); } catch (e) { }
+                }
+
+                const reportText = tAdmin(
+                    groupConfig,
+                    config,
+                    `🚫 *فحص طلب الانضمام*
+تم رفض طلب انضمام بعد فحص الاسم/النبذة.
+المجموعة: "${chat.name}"
+الرقم: @${cleanRequesterId.split('@')[0]}
+السبب: ${profileResult.reason}
+البيانات:
+"${profileResult.profileText || 'غير متوفر'}"`,
+                    `🚫 *Join Request Screening*
+Join request was rejected after profile screening.
+Group: "${chat.name}"
+Number: @${cleanRequesterId.split('@')[0]}
+Reason: ${profileResult.reason}
+Profile:
+"${profileResult.profileText || 'Unavailable'}"`
+                );
+                try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanRequesterId] }); } catch (e) { }
+            }
+        }
+    } catch (e) { }
+}
+
+setInterval(() => {
+    screenPendingMembershipRequests().catch(() => { });
+}, 30000);
+
+// ── Admin auto-sync: extract as named function ────────────────────────────────
+async function runAdminSync() {
+    if (!client.info || !client.info.wid) {
+        console.log('[مزامنة المشرفين] البوت غير متصل، تخطي الدورة.');
+        return;
+    }
+    let updatedCount = 0;
+    for (const [groupId, gConf] of Object.entries(config.groupsConfig)) {
+        if (!gConf.enableAdminSync) continue;
+        try {
+            const chat = await client.getChatById(groupId);
+            if (!chat || !chat.isGroup) continue;
+            const adminIds = chat.participants
+                .filter(p => p.isAdmin || p.isSuperAdmin)
+                .map(p => p.id._serialized.replace(/:[0-9]+/, ''));
+            if (adminIds.length === 0) continue;
+            const merged = Array.from(new Set([...(gConf.customWhitelist || []), ...adminIds]));
+            if (merged.length === (gConf.customWhitelist || []).length) continue; // nothing new
+            config.groupsConfig[groupId].customWhitelist = merged;
+            updatedCount++;
+            console.log(`[مزامنة المشرفين] تحديث القائمة البيضاء في "${chat.name}" — ${adminIds.length} مشرف`);
+        } catch (e) { }
+    }
+    if (updatedCount > 0) {
+        saveConfigToDB(config);
+        config = loadConfigFromDB();
+        console.log(`[مزامنة المشرفين] اكتملت — تم تحديث ${updatedCount} مجموعة.`);
+    } else {
+        console.log('[مزامنة المشرفين] لا توجد تحديثات جديدة.');
+    }
+}
+
+// Admin sync scheduler — interval options: 1h / 24h / 168h (week) / 720h (month)
+let adminSyncTimer = null;
+function setupAdminSyncSchedule() {
+    if (adminSyncTimer) { clearInterval(adminSyncTimer); adminSyncTimer = null; }
+    if (!config.adminSyncEnabled) {
+        console.log('[مزامنة المشرفين] الجدولة التلقائية معطلة.');
+        return;
+    }
+    // Clamp to one of the four preset values: 1, 24, 168, 720
+    const validHours = [1, 24, 168, 720];
+    const rawHours = parseInt(config.adminSyncIntervalHours, 10) || 1;
+    const hours = validHours.reduce((prev, cur) =>
+        Math.abs(cur - rawHours) < Math.abs(prev - rawHours) ? cur : prev
+    );
+    const ms = hours * 60 * 60 * 1000;
+    adminSyncTimer = setInterval(() => runAdminSync().catch(() => { }), ms);
+    if (adminSyncTimer.unref) adminSyncTimer.unref();
+    console.log(`[مزامنة المشرفين] تم جدولة المزامنة كل ${hours} ساعة.`);
+}
