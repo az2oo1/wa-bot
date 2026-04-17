@@ -662,7 +662,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         <div class="toggle-row" style="margin-bottom:18px;">
                             <div class="toggle-left">
                                 <label class="switch"><input type="checkbox" id="enableWordFilterSmartMatch" ${config.enableWordFilterSmartMatch ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label">${t('تفعيل الذكاء اللفظي (الفلتر)', 'Enable Smart Match (Filter)')}<small>${t('يتجاهل التشكيل العربي والرموز الخاصة والمزخرفة', 'Ignores Arabic diacritics and special symbols when matching')}</small></div>
+                                <div class="toggle-label">${t('تفعيل الذكاء اللفظي لمعالجة الرسائل الواردة', 'Enable Smart Match for Incoming Messages')}<small>${t('يُنظّف رسائل المستخدم من التشكيل والزخرفة قبل مقارنتها بالكلمات الممنوعة', 'Cleans incoming messages from diacritics and decorations before checking forbidden words')}</small></div>
                             </div>
                         </div>
                         <div class="field-group">
@@ -846,20 +846,17 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     <p>${t('قاعدة أسئلة واحدة يمكن تطبيقها على كل المجموعات أو المجموعات المخصصة التي تختارها', 'One Q&A knowledge base that can be applied to all groups or selected custom groups')}</p>
                 </div>
 
-                <div class="card info" style="max-width:900px;">
-                    <div class="toggle-row blue" style="margin-bottom:0;border-radius:10px;">
+                <div class="card info" style="max-width:900px; margin-bottom:20px;">
+                    <div class="toggle-row blue" style="margin-bottom:15px; border-radius:10px;">
                         <div class="toggle-left">
                             <label class="switch"><input type="checkbox" id="globalQAEnabled" ${config.globalQAEnabled ? 'checked' : ''}><span class="slider"></span></label>
                             <div class="toggle-label blue">${t('تفعيل Q&A العام', 'Enable Global Q&A')}<small>${t('عند التفعيل: يعمل للمجموعات غير المخصصة تلقائياً، ويمكن تفعيله للمجموعات المخصصة من إعداداتها', 'When enabled: applies to non-custom groups automatically, and to custom groups when opted in')}</small></div>
                         </div>
                     </div>
-                </div>
-
-                <div class="card" style="margin-bottom:20px; border-left: 4px solid #3b82f6;">
-                    <div class="toggle-row" style="margin:0;">
+                    <div class="toggle-row blue" style="margin-bottom:0; border-radius:10px;">
                         <div class="toggle-left">
                             <label class="switch"><input type="checkbox" id="enableQASmartMatch" ${config.enableQASmartMatch ? 'checked' : ''}><span class="slider"></span></label>
-                            <div class="toggle-label blue">${t('تفعيل الذكاء اللفظي (Q&A)', 'Enable Smart Match (Q&A)')}<small>${t('يتجاهل التشكيل العربي والرموز الخاصة والمزخرفة', 'Ignores Arabic diacritics and special symbols when matching')}</small></div>
+                            <div class="toggle-label blue">${t('تفعيل الذكاء اللفظي لمعالجة الرسائل الواردة (Q&A)', 'Enable Smart Match for Incoming Q&A Messages')}<small>${t('يُنظّف رسائل المستخدم من التشكيل العربي والرموز المطولة قبل مطابقتها مع السؤال', 'Cleans the incoming user message from Arabic diacritics, tatweel, and symbols before matching with the question.')}</small></div>
                         </div>
                     </div>
                 </div>
