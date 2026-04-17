@@ -9,6 +9,7 @@ const path = require('path');
 const multer = require('multer');
 const { exec } = require('child_process');
 const renderDashboard = require('./UI.js');
+const { initVerification } = require('./secondaryVerification.js');
 
 // Ensure media storage directory exists
 if (!fs.existsSync('./media')) fs.mkdirSync('./media');
@@ -227,6 +228,14 @@ db.exec(`
     CREATE TABLE IF NOT EXISTS blacklist (number TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS blocked_extensions (ext TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS whitelist (number TEXT PRIMARY KEY); 
+    CREATE TABLE IF NOT EXISTS secondary_verification (
+        requester_id TEXT PRIMARY KEY,
+        group_id TEXT,
+        state TEXT,
+        email TEXT,
+        code TEXT,
+        created_at INTEGER
+    );
     CREATE TABLE IF NOT EXISTS whatsapp_groups (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE IF NOT EXISTS custom_groups (
         group_id TEXT PRIMARY KEY, admin_group TEXT, use_default_words INTEGER,
@@ -306,6 +315,20 @@ function loadConfigFromDB() {
         autoPurgeScheduleEnabled: false, autoPurgeIntervalMinutes: 60,
         adminWhitelistSyncEnabled: false, adminWhitelistSyncIntervalMinutes: 60,
         enableJoinProfileScreening: false,
+        enableSecondaryVerification: false,
+        customMessageText: "",
+        approvalKeyword: "yes",
+        banKeyword: "no",
+        emailDomain: "college.edu",
+        outlookEmail: "",
+        outlookPassword: "",
+        enableSecondaryVerification: false,
+        customMessageText: "",
+        approvalKeyword: "yes",
+        banKeyword: "no",
+        emailDomain: "college.edu",
+        outlookEmail: "",
+        outlookPassword: "",
         safeMode: false,
         purgeScheduleEnabled: false, purgeScheduleIntervalHours: 24,
         adminSyncEnabled: false, adminSyncIntervalHours: 1,
@@ -393,6 +416,20 @@ function saveConfigToDB(conf) {
         setGlobal.run('adminWhitelistSyncEnabled', conf.adminWhitelistSyncEnabled ? '1' : '0');
         setGlobal.run('adminWhitelistSyncIntervalMinutes', String(Math.max(1, parseInt(conf.adminWhitelistSyncIntervalMinutes, 10) || 60)));
         setGlobal.run('enableJoinProfileScreening', conf.enableJoinProfileScreening ? '1' : '0');
+        setGlobal.run('enableSecondaryVerification', conf.enableSecondaryVerification ? '1' : '0');
+        setGlobal.run('customMessageText', conf.customMessageText || '');
+        setGlobal.run('approvalKeyword', conf.approvalKeyword || '');
+        setGlobal.run('banKeyword', conf.banKeyword || '');
+        setGlobal.run('emailDomain', conf.emailDomain || '');
+        setGlobal.run('outlookEmail', conf.outlookEmail || '');
+        setGlobal.run('outlookPassword', conf.outlookPassword || '');
+        setGlobal.run('enableSecondaryVerification', conf.enableSecondaryVerification ? '1' : '0');
+        setGlobal.run('customMessageText', conf.customMessageText || '');
+        setGlobal.run('approvalKeyword', conf.approvalKeyword || '');
+        setGlobal.run('banKeyword', conf.banKeyword || '');
+        setGlobal.run('emailDomain', conf.emailDomain || '');
+        setGlobal.run('outlookEmail', conf.outlookEmail || '');
+        setGlobal.run('outlookPassword', conf.outlookPassword || '');
         setGlobal.run('safeMode', conf.safeMode ? '1' : '0');
         setGlobal.run('purgeScheduleEnabled', conf.purgeScheduleEnabled ? '1' : '0');
         setGlobal.run('purgeScheduleIntervalHours', (conf.purgeScheduleIntervalHours || 24).toString());
@@ -2566,6 +2603,10 @@ async function tryKickFromChat(chat, candidateIds) {
 
 client.on('message', async msg => {
     try {
+        const verification = initVerification(client, db, config);
+        const handledByVerification = await verification.handleIncomingMessage(msg);
+        if (handledByVerification) return;
+
         const chat = await msg.getChat();
         const msgId = msg.id._serialized;
 
@@ -3638,7 +3679,11 @@ async function screenPendingMembershipRequests() {
                     forbiddenWords,
                     aiTriggerWords
                 });
-                if (!profileResult.isViolating) continue;
+                if (!profileResult.isViolating) {
+                    const verification = initVerification(client, db, config);
+                    await verification.startVerification(rawRequesterId, cleanRequesterId, chat.id._serialized);
+                    continue;
+                }
 
                 try {
                     await chat.rejectGroupMembershipRequests({ requesterIds: [rawRequesterId] });
