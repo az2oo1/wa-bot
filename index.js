@@ -47,8 +47,14 @@ const mediaStorage = multer.diskStorage({
         cb(null, dir);
     },
     filename: (req, file, cb) => {
-        // Preserve original name but make it safe
-        const safe = file.originalname.replace(/[^a-zA-Z0-9._\u0600-\u06FF-]/g, '_');
+        // Fix multer charset issue: decode latin1-misinterpreted UTF-8
+        let decodedName = file.originalname;
+        try {
+            decodedName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+        } catch (e) {}
+        
+        // Preserve original name but make it safe (including Arabic letters)
+        const safe = decodedName.replace(/[^a-zA-Z0-9._\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF-]/g, '_');
         cb(null, safe);
     }
 });
