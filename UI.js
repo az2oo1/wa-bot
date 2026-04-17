@@ -693,12 +693,20 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         </div>
                         <div class="field-row" style="margin-bottom:15px;">
                             <div class="field-group">
-                                <label class="field-label">${t('كلمة الموافقة (مفصولة بفاصلة)', 'Approval Keywords (Comma separated)')}</label>
-                                <input type="text" id="approvalKeyword" value="${config.approvalKeyword || 'yes'}" placeholder="yes, ok, agree">
+                                <label class="field-label">${t('كلمات الموافقة', 'Approval Keywords')}</label>
+                                <div class="input-with-btn">
+                                    <input type="text" id="newApprovalWord" placeholder="${t('أدخل كلمة الموافقة...', 'Enter approval word...')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addApprovalWord();}">
+                                    <button type="button" class="btn btn-primary" onclick="addApprovalWord()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
+                                </div>
+                                <div id="approvalWordsContainer" class="chip-container"></div>
                             </div>
                             <div class="field-group">
-                                <label class="field-label">${t('كلمة الرفض (مفصولة بفاصلة)', 'Ban Keywords (Comma separated)')}</label>
-                                <input type="text" id="banKeyword" value="${config.banKeyword || 'no'}" placeholder="no, disagree, reject">
+                                <label class="field-label">${t('كلمات الرفض', 'Ban Keywords')}</label>
+                                <div class="input-with-btn">
+                                    <input type="text" id="newBanWord" placeholder="${t('أدخل كلمة الرفض...', 'Enter ban word...')}" onkeypress="if(event.key==='Enter'){event.preventDefault();addBanWord();}">
+                                    <button type="button" class="btn btn-primary" onclick="addBanWord()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
+                                </div>
+                                <div id="banWordsContainer" class="chip-container"></div>
                             </div>
                         </div>
                         <div class="field-row" style="margin-bottom:15px;">
@@ -2668,6 +2676,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             umRenderPermissionHelp();
             umRenderCreatePermSelection();
 
+            let approvalWordsArr = "${(config.approvalKeyword || 'yes').replace(/"/g, '\"')}".split(',').map(s=>s.trim()).filter(Boolean);
+            let banWordsArr = "${(config.banKeyword || 'no').replace(/"/g, '\"')}".split(',').map(s=>s.trim()).filter(Boolean);
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
             let aiFilterTriggerWordsArr = ${JSON.stringify(config.aiFilterTriggerWords || ['نعم'])};
             let globalQAArr = ${JSON.stringify(config.globalQA || [])};
@@ -3504,6 +3514,48 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 btn.disabled = false;
             }
 
+            function renderApprovalWords() {
+                const container = document.getElementById('approvalWordsContainer');
+                container.innerHTML = '';
+                approvalWordsArr.forEach((word, index) => {
+                    container.innerHTML += `<div class="chip">${word} <span class="chip-remove" onclick="removeApprovalWord(${index})">&times;</span></div>`;
+                });
+            }
+            function addApprovalWord() {
+                const input = document.getElementById('newApprovalWord');
+                const word = input.value.trim();
+                if (word && !approvalWordsArr.includes(word)) {
+                    approvalWordsArr.push(word);
+                    input.value = '';
+                    renderApprovalWords();
+                }
+            }
+            function removeApprovalWord(index) {
+                approvalWordsArr.splice(index, 1);
+                renderApprovalWords();
+            }
+
+            function renderBanWords() {
+                const container = document.getElementById('banWordsContainer');
+                container.innerHTML = '';
+                banWordsArr.forEach((word, index) => {
+                    container.innerHTML += `<div class="chip">${word} <span class="chip-remove" onclick="removeBanWord(${index})">&times;</span></div>`;
+                });
+            }
+            function addBanWord() {
+                const input = document.getElementById('newBanWord');
+                const word = input.value.trim();
+                if (word && !banWordsArr.includes(word)) {
+                    banWordsArr.push(word);
+                    input.value = '';
+                    renderBanWords();
+                }
+            }
+            function removeBanWord(index) {
+                banWordsArr.splice(index, 1);
+                renderBanWords();
+            }
+
             function renderDefaultWords() {
                 const container = document.getElementById('defaultWordsContainer');
                 container.innerHTML = '';
@@ -3517,7 +3569,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 if (word && !defaultWordsArr.includes(word)) {
                     defaultWordsArr.push(word);
                     input.value = '';
-                    renderDefaultWords();
+                    renderApprovalWords();
+            renderBanWords();
+            renderDefaultWords();
                 }
             }
             function removeDefaultWord(index) {
@@ -4576,33 +4630,13 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     adminWhitelistSyncIntervalMinutes: document.getElementById('adminWhitelistSyncIntervalMinutes') ? (parseInt(document.getElementById('adminWhitelistSyncIntervalMinutes').value, 10) || 60) : 60,
                     enableJoinProfileScreening: document.getElementById('enableJoinProfileScreening').checked,
                     enableSecondaryVerification: document.getElementById('enableSecondaryVerification') ? document.getElementById('enableSecondaryVerification').checked : false,
+                    enableKeywordVerification: document.getElementById('enableKeywordVerification') ? document.getElementById('enableKeywordVerification').checked : false,
+                    enableEmailVerification: document.getElementById('enableEmailVerification') ? document.getElementById('enableEmailVerification').checked : false,
+                    enablePhotoVerification: document.getElementById('enablePhotoVerification') ? document.getElementById('enablePhotoVerification').checked : false,
+                    enableSecondarySmartMatch: document.getElementById('enableSecondarySmartMatch') ? document.getElementById('enableSecondarySmartMatch').checked : false,
                     customMessageText: document.getElementById('customMessageText') ? document.getElementById('customMessageText').value.trim() : '',
-                    approvalKeyword: document.getElementById('approvalKeyword') ? document.getElementById('approvalKeyword').value.trim() : '',
-                    banKeyword: document.getElementById('banKeyword') ? document.getElementById('banKeyword').value.trim() : '',
-                    emailDomain: document.getElementById('emailDomain') ? document.getElementById('emailDomain').value.trim() : '',
-                    outlookEmail: document.getElementById('outlookEmail') ? document.getElementById('outlookEmail').value.trim() : '',
-                    outlookPassword: document.getElementById('outlookPassword') ? document.getElementById('outlookPassword').value.trim() : '',
-
-                    enableSecondaryVerification: document.getElementById('enableSecondaryVerification') ? document.getElementById('enableSecondaryVerification').checked : false,
-                    customMessageText: document.getElementById('customMessageText') ? document.getElementById('customMessageText').value.trim() : '',
-                    approvalKeyword: document.getElementById('approvalKeyword') ? document.getElementById('approvalKeyword').value.trim() : '',
-                    banKeyword: document.getElementById('banKeyword') ? document.getElementById('banKeyword').value.trim() : '',
-                    emailDomain: document.getElementById('emailDomain') ? document.getElementById('emailDomain').value.trim() : '',
-                    outlookEmail: document.getElementById('outlookEmail') ? document.getElementById('outlookEmail').value.trim() : '',
-                    outlookPassword: document.getElementById('outlookPassword') ? document.getElementById('outlookPassword').value.trim() : '',
-
-                    enableSecondaryVerification: document.getElementById('enableSecondaryVerification') ? document.getElementById('enableSecondaryVerification').checked : false,
-                    customMessageText: document.getElementById('customMessageText') ? document.getElementById('customMessageText').value.trim() : '',
-                    approvalKeyword: document.getElementById('approvalKeyword') ? document.getElementById('approvalKeyword').value.trim() : '',
-                    banKeyword: document.getElementById('banKeyword') ? document.getElementById('banKeyword').value.trim() : '',
-                    emailDomain: document.getElementById('emailDomain') ? document.getElementById('emailDomain').value.trim() : '',
-                    outlookEmail: document.getElementById('outlookEmail') ? document.getElementById('outlookEmail').value.trim() : '',
-                    outlookPassword: document.getElementById('outlookPassword') ? document.getElementById('outlookPassword').value.trim() : '',
-
-                    enableSecondaryVerification: document.getElementById('enableSecondaryVerification') ? document.getElementById('enableSecondaryVerification').checked : false,
-                    customMessageText: document.getElementById('customMessageText') ? document.getElementById('customMessageText').value.trim() : '',
-                    approvalKeyword: document.getElementById('approvalKeyword') ? document.getElementById('approvalKeyword').value.trim() : '',
-                    banKeyword: document.getElementById('banKeyword') ? document.getElementById('banKeyword').value.trim() : '',
+                    approvalKeyword: approvalWordsArr.join(','),
+                    banKeyword: banWordsArr.join(','),
                     emailDomain: document.getElementById('emailDomain') ? document.getElementById('emailDomain').value.trim() : '',
                     outlookEmail: document.getElementById('outlookEmail') ? document.getElementById('outlookEmail').value.trim() : '',
                     outlookPassword: document.getElementById('outlookPassword') ? document.getElementById('outlookPassword').value.trim() : '',
