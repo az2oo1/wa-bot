@@ -657,19 +657,48 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             <h3><i class="fas fa-shield-alt"></i> ${t('التحقق الثنائي', 'Secondary Verification')}</h3>
                             <label class="switch"><input type="checkbox" id="enableSecondaryVerification" ${config.enableSecondaryVerification ? 'checked' : ''}><span class="slider"></span></label>
                         </div>
-                        <div style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:10px;">${t('يتطلب التحقق من بريد جامعي أو صورة بعد القبول', 'Requires college email or photo verification after approval')}</div>
+                        <div style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:10px;">${t('تفعيل الميزات الثلاث للتحقق بشكل منفصل', 'Enable the three features for verification separately')}</div>
+                        
+                        <div class="toggle-row" style="margin-bottom:10px; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 6px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableKeywordVerification" ${config.enableKeywordVerification ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label">${t('تفعيل الكلمات الافتتاحية للموافقة/الرفض', 'Enable Welcome Message & Keywords')}</div>
+                            </div>
+                        </div>
+
+                        <div class="toggle-row" style="margin-bottom:10px; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 6px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableEmailVerification" ${config.enableEmailVerification ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label">${t('تفعيل البريد الجامعي', 'Enable Email Verification')}</div>
+                            </div>
+                        </div>
+
+                        <div class="toggle-row" style="margin-bottom:10px; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 6px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enablePhotoVerification" ${config.enablePhotoVerification ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label">${t('تفعيل التحقق بالصورة', 'Enable Photo Verification')}</div>
+                            </div>
+                        </div>
+
+                        <div class="toggle-row" style="margin-bottom:15px; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 6px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableSecondarySmartMatch" ${config.enableSecondarySmartMatch ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label">${t('تفعيل الذكاء اللفظي للكلمات', 'Enable Smart Match for Keywords')}</div>
+                            </div>
+                        </div>
+
                         <div class="field-group">
                             <label class="field-label">${t('رسالة الترحيب المخصصة', 'Custom Welcome Message')}</label>
                             <input type="text" id="customMessageText" value="${config.customMessageText || ''}" placeholder="Welcome. Please reply with our custom approval word.">
                         </div>
                         <div class="field-row" style="margin-bottom:15px;">
                             <div class="field-group">
-                                <label class="field-label">${t('كلمة الموافقة', 'Approval Keyword')}</label>
-                                <input type="text" id="approvalKeyword" value="${config.approvalKeyword || 'yes'}" placeholder="yes">
+                                <label class="field-label">${t('كلمة الموافقة (مفصولة بفاصلة)', 'Approval Keywords (Comma separated)')}</label>
+                                <input type="text" id="approvalKeyword" value="${config.approvalKeyword || 'yes'}" placeholder="yes, ok, agree">
                             </div>
                             <div class="field-group">
-                                <label class="field-label">${t('كلمة الرفض', 'Ban Keyword')}</label>
-                                <input type="text" id="banKeyword" value="${config.banKeyword || 'no'}" placeholder="no">
+                                <label class="field-label">${t('كلمة الرفض (مفصولة بفاصلة)', 'Ban Keywords (Comma separated)')}</label>
+                                <input type="text" id="banKeyword" value="${config.banKeyword || 'no'}" placeholder="no, disagree, reject">
                             </div>
                         </div>
                         <div class="field-row" style="margin-bottom:15px;">

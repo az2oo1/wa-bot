@@ -315,14 +315,24 @@ function loadConfigFromDB() {
         autoPurgeScheduleEnabled: false, autoPurgeIntervalMinutes: 60,
         adminWhitelistSyncEnabled: false, adminWhitelistSyncIntervalMinutes: 60,
         enableJoinProfileScreening: false,
-        enableSecondaryVerification: false,
-        customMessageText: "",
-        approvalKeyword: "yes",
-        banKeyword: "no",
-        emailDomain: "college.edu",
-        outlookEmail: "",
         outlookPassword: "",
         enableSecondaryVerification: false,
+        enableKeywordVerification: false,
+        enableEmailVerification: false,
+        enablePhotoVerification: false,
+        enableSecondarySmartMatch: false,
+        enableKeywordVerification: false,
+        enableEmailVerification: false,
+        enablePhotoVerification: false,
+        enableSecondarySmartMatch: false,
+        enableKeywordVerification: false,
+        enableEmailVerification: false,
+        enablePhotoVerification: false,
+        enableSecondarySmartMatch: false,
+        enableKeywordVerification: false,
+        enableEmailVerification: false,
+        enablePhotoVerification: false,
+        enableSecondarySmartMatch: false,
         customMessageText: "",
         approvalKeyword: "yes",
         banKeyword: "no",
@@ -416,14 +426,24 @@ function saveConfigToDB(conf) {
         setGlobal.run('adminWhitelistSyncEnabled', conf.adminWhitelistSyncEnabled ? '1' : '0');
         setGlobal.run('adminWhitelistSyncIntervalMinutes', String(Math.max(1, parseInt(conf.adminWhitelistSyncIntervalMinutes, 10) || 60)));
         setGlobal.run('enableJoinProfileScreening', conf.enableJoinProfileScreening ? '1' : '0');
-        setGlobal.run('enableSecondaryVerification', conf.enableSecondaryVerification ? '1' : '0');
-        setGlobal.run('customMessageText', conf.customMessageText || '');
-        setGlobal.run('approvalKeyword', conf.approvalKeyword || '');
-        setGlobal.run('banKeyword', conf.banKeyword || '');
-        setGlobal.run('emailDomain', conf.emailDomain || '');
-        setGlobal.run('outlookEmail', conf.outlookEmail || '');
         setGlobal.run('outlookPassword', conf.outlookPassword || '');
         setGlobal.run('enableSecondaryVerification', conf.enableSecondaryVerification ? '1' : '0');
+        setGlobal.run('enableKeywordVerification', conf.enableKeywordVerification ? '1' : '0');
+        setGlobal.run('enableEmailVerification', conf.enableEmailVerification ? '1' : '0');
+        setGlobal.run('enablePhotoVerification', conf.enablePhotoVerification ? '1' : '0');
+        setGlobal.run('enableSecondarySmartMatch', conf.enableSecondarySmartMatch ? '1' : '0');
+        setGlobal.run('enableKeywordVerification', conf.enableKeywordVerification ? '1' : '0');
+        setGlobal.run('enableEmailVerification', conf.enableEmailVerification ? '1' : '0');
+        setGlobal.run('enablePhotoVerification', conf.enablePhotoVerification ? '1' : '0');
+        setGlobal.run('enableSecondarySmartMatch', conf.enableSecondarySmartMatch ? '1' : '0');
+        setGlobal.run('enableKeywordVerification', conf.enableKeywordVerification ? '1' : '0');
+        setGlobal.run('enableEmailVerification', conf.enableEmailVerification ? '1' : '0');
+        setGlobal.run('enablePhotoVerification', conf.enablePhotoVerification ? '1' : '0');
+        setGlobal.run('enableSecondarySmartMatch', conf.enableSecondarySmartMatch ? '1' : '0');
+        setGlobal.run('enableKeywordVerification', conf.enableKeywordVerification ? '1' : '0');
+        setGlobal.run('enableEmailVerification', conf.enableEmailVerification ? '1' : '0');
+        setGlobal.run('enablePhotoVerification', conf.enablePhotoVerification ? '1' : '0');
+        setGlobal.run('enableSecondarySmartMatch', conf.enableSecondarySmartMatch ? '1' : '0');
         setGlobal.run('customMessageText', conf.customMessageText || '');
         setGlobal.run('approvalKeyword', conf.approvalKeyword || '');
         setGlobal.run('banKeyword', conf.banKeyword || '');

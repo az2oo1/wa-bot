@@ -5,18 +5,40 @@ function initVerification(client, db, config, chat) {
         // Triggered after bio check is passed
         startVerification: async (rawRequesterId, cleanUserId, groupId) => {
             if (!config.enableSecondaryVerification) return false;
+            const useKeyword = config.enableKeywordVerification;
+            const useEmail = config.enableEmailVerification;
+            const usePhoto = config.enablePhotoVerification;
+            if (!useKeyword && !useEmail && !usePhoto) return false;
+            const useKeyword = config.enableKeywordVerification;
+            const useEmail = config.enableEmailVerification;
+            const usePhoto = config.enablePhotoVerification;
+            if (!useKeyword && !useEmail && !usePhoto) return false;
+            const useKeyword = config.enableKeywordVerification;
+            const useEmail = config.enableEmailVerification;
+            const usePhoto = config.enablePhotoVerification;
+            if (!useKeyword && !useEmail && !usePhoto) return false;
             
             console.log(`[Verification] Starting for ${cleanUserId}`);
             
+            const initialState = useKeyword ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
             const insertStmt = db.prepare(`
                 INSERT OR REPLACE INTO secondary_verification 
                 (requester_id, group_id, state, email, code, created_at) 
-                VALUES (?, ?, 'PENDING_CUSTOM', '', '', ?)
+                VALUES (?, ?, ?, '', '', ?)
             `);
-            insertStmt.run(rawRequesterId, groupId, Date.now());
+            insertStmt.run(rawRequesterId, groupId, initialState, Date.now());
 
-            // Send initial custom message
-            const msg = config.customMessageText || 'Welcome. Please reply with our custom approval word.';
+            // Send initial custom message or method prompt
+            let msg = '';
+            if (useKeyword) {
+                msg = config.customMessageText || 'Welcome. Please reply with our custom approval word.';
+            } else {
+                const domain = config.emailDomain || 'college.edu';
+                let methods = [];
+                if (useEmail) methods.push(`your college email ending with @${domain}`);
+                if (usePhoto) methods.push('a photo of your blackboard showing your subjects');
+                msg = 'To finish joining, please send ' + methods.join(' OR ');
+            }
             try {
                 const response = await client.sendMessage(rawRequesterId, msg);
                 // archive the chat
@@ -36,15 +58,33 @@ function initVerification(client, db, config, chat) {
             const record = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(senderId);
             if (!record) return false;
 
-            const text = (msg.body || '').trim().toLowerCase();
+            // Helper for smart match
+            const applySmartMatch = (str) => {
+                if (typeof str !== 'string') return str;
+                let res = str.replace(/[!@#$%^&*()_+=\-\[\]{}:;"'<>,.?\/\\|~`]/g, '');
+                res = res.replace(/[\u064B-\u0652\u0640\u0670]/g, '');
+                res = res.replace(/[أإآ]/g, 'ا');
+                return res;
+            };
+
+            let text = (msg.body || '').trim().toLowerCase();
+            if (config.enableSecondarySmartMatch) {
+                text = applySmartMatch(text);
+            }
+            
             const groupToJoin = record.group_id;
 
             try {
                 if (record.state === 'PENDING_CUSTOM') {
-                    const approveW = (config.approvalKeyword || 'yes').toLowerCase();
-                    const banW = (config.banKeyword || 'no').toLowerCase();
+                    let approveWs = (config.approvalKeyword || 'yes').toLowerCase().split(',').map(s => s.trim());
+                    let banWs = (config.banKeyword || 'no').toLowerCase().split(',').map(s => s.trim());
+                    
+                    if (config.enableSecondarySmartMatch) {
+                        approveWs = approveWs.map(s => applySmartMatch(s));
+                        banWs = banWs.map(s => applySmartMatch(s));
+                    }
 
-                    if (text === banW) {
+                    if (banWs.includes(text)) {
                         // Reject and ban
                         const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
                         const cleanId = senderId.replace('@c.us', '');
@@ -58,7 +98,21 @@ function initVerification(client, db, config, chat) {
                         return true;
                     }
 
-                    if (text === approveW) {
+                    } else if (approveWs.includes(text)) {
+                        const useEmail = config.enableEmailVerification;
+                        const usePhoto = config.enablePhotoVerification;
+
+                        if (!useEmail && !usePhoto) {
+                            // Keyword was the only verification needed
+                            const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
+                            const cleanId = senderId.replace('@c.us', '');
+                            if (chatObj) await chatObj.approveGroupMembershipRequests({ requesterIds: [senderId] });
+                            db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)').run(cleanId);
+                            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(senderId);
+                            await msg.reply('Verification successful! You have been approved and added to the verified list.');
+                            return true;
+                        }
+
                         // Move to next step
                         db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD' WHERE requester_id = ?").run(senderId);
                         
@@ -69,12 +123,23 @@ function initVerification(client, db, config, chat) {
                         } catch(e) {}
 
                         const domain = config.emailDomain || 'college.edu';
-                        await msg.reply(`Approved! To finish joining ${reqGroupName}, please send your college email ending with @${domain} (we will send a verification code), OR send a photo of your blackboard showing your subjects for manual verification.`);
+                        let methods = [];
+                        if (useEmail) methods.push(`your college email ending with @${domain} (we will send a verification code)`);
+                        if (usePhoto) methods.push('a photo of your blackboard showing your subjects for manual verification');
+                        
+                        await msg.reply(`Approved! To finish joining ${reqGroupName}, please send ${methods.join(' OR ')}.`);
                     } else {
                         await msg.reply('Invalid response. Reply with the specific word.');
                     }
                 } else if (record.state === 'PENDING_METHOD') {
+                    const useEmail = config.enableEmailVerification;
+                    const usePhoto = config.enablePhotoVerification;
+
                     if (msg.hasMedia) {
+                        if (!usePhoto) {
+                            await msg.reply('Photo verification is not enabled.');
+                            return true;
+                        }
                         const media = await msg.downloadMedia();
                         if (media) {
                             // Forward to admin
@@ -86,6 +151,11 @@ function initVerification(client, db, config, chat) {
                             }
                         }
                     } else {
+                        if (!useEmail) {
+                            const pMsg = usePhoto ? 'Please send a photo instead.' : '';
+                            await msg.reply(`Email verification is not enabled. ${pMsg}`);
+                            return true;
+                        }
                         // Check email
                         const domain = config.emailDomain || 'college.edu';
                         const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
