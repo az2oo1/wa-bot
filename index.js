@@ -1118,7 +1118,14 @@ async function runGlobalBlacklistPurge() {
             if (pendingReqs && pendingReqs.length > 0) {
                 const usersToReject = [];
                 for (const req of pendingReqs) {
-                    const rawId = typeof req.id === 'string' ? req.id : (req.id._serialized || (req.id.user && req.id.server ? `${req.id.user}@${req.id.server}` : null));
+                    let rawId = null;
+                    if (req) {
+                        if (typeof req.id === 'string') rawId = req.id;
+                        else if (req.id && req.id._serialized) rawId = req.id._serialized;
+                        else if (req.id && req.id.user && req.id.server) rawId = `${req.id.user}@${req.id.server}`;
+                        else if (typeof req.requesterId === 'string') rawId = req.requesterId;
+                        else if (typeof req.author === 'string') rawId = req.author;
+                    }
                     if (!rawId) continue;
 
                     let cleanId = rawId.replace(/:[0-9]+/, '');
@@ -1923,7 +1930,14 @@ async function runGlobalPurge() {
                     const groupConfig = config.groupsConfig[groupId];
                     let usersToReject = [];
                     for (const req of pendingReqs) {
-                        let rawId = typeof req.id === 'string' ? req.id : (req.id._serialized || null);
+                        let rawId = null;
+                        if (req) {
+                            if (typeof req.id === 'string') rawId = req.id;
+                            else if (req.id && req.id._serialized) rawId = req.id._serialized;
+                            else if (req.id && req.id.user && req.id.server) rawId = `${req.id.user}@${req.id.server}`;
+                            else if (typeof req.requesterId === 'string') rawId = req.requesterId;
+                            else if (typeof req.author === 'string') rawId = req.author;
+                        }
                         if (!rawId) continue;
                         let cleanId = rawId.replace(/:[0-9]+/, '');
                         const finalCleanId = cleanId.replace('@c.us', '');
@@ -3555,7 +3569,14 @@ async function screenPendingMembershipRequests() {
             const blockedExtensionsArr = blockedExtensionsRows.map(r => r.ext);
 
             for (const req of pendingReqs) {
-                const rawRequesterId = (req && (req.id || req.requesterId || req.author)) ? (req.id || req.requesterId || req.author) : null;
+                let rawRequesterId = null;
+                if (req) {
+                    if (typeof req.id === 'string') rawRequesterId = req.id;
+                    else if (req.id && req.id._serialized) rawRequesterId = req.id._serialized;
+                    else if (req.id && req.id.user && req.id.server) rawRequesterId = `${req.id.user}@${req.id.server}`;
+                    else if (typeof req.requesterId === 'string') rawRequesterId = req.requesterId;
+                    else if (typeof req.author === 'string') rawRequesterId = req.author;
+                }
                 if (!rawRequesterId) continue;
 
                 const cacheKey = `${groupId}::${rawRequesterId}`;
