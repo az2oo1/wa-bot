@@ -659,6 +659,12 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                                 <div class="toggle-label">${t('تفعيل فلتر الكلمات', 'Enable Word Filter')}<small>${t('حذف فوري عند رصد أي كلمة ممنوعة', 'Instant delete on detecting forbidden words')}</small></div>
                             </div>
                         </div>
+                        <div class="toggle-row" style="margin-bottom:18px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableWordFilterSmartMatch" ${config.enableWordFilterSmartMatch ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label">${t('تفعيل الذكاء اللفظي (الفلتر)', 'Enable Smart Match (Filter)')}<small>${t('يتجاهل التشكيل العربي والرموز الخاصة والمزخرفة', 'Ignores Arabic diacritics and special symbols when matching')}</small></div>
+                            </div>
+                        </div>
                         <div class="field-group">
                             <label class="field-label">${t('الكلمات الممنوعة الافتراضية', 'Default Forbidden Words')}</label>
                             <div class="input-with-btn">
@@ -845,6 +851,15 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         <div class="toggle-left">
                             <label class="switch"><input type="checkbox" id="globalQAEnabled" ${config.globalQAEnabled ? 'checked' : ''}><span class="slider"></span></label>
                             <div class="toggle-label blue">${t('تفعيل Q&A العام', 'Enable Global Q&A')}<small>${t('عند التفعيل: يعمل للمجموعات غير المخصصة تلقائياً، ويمكن تفعيله للمجموعات المخصصة من إعداداتها', 'When enabled: applies to non-custom groups automatically, and to custom groups when opted in')}</small></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom:20px; border-left: 4px solid #3b82f6;">
+                    <div class="toggle-row" style="margin:0;">
+                        <div class="toggle-left">
+                            <label class="switch"><input type="checkbox" id="enableQASmartMatch" ${config.enableQASmartMatch ? 'checked' : ''}><span class="slider"></span></label>
+                            <div class="toggle-label blue">${t('تفعيل الذكاء اللفظي (Q&A)', 'Enable Smart Match (Q&A)')}<small>${t('يتجاهل التشكيل العربي والرموز الخاصة والمزخرفة', 'Ignores Arabic diacritics and special symbols when matching')}</small></div>
                         </div>
                     </div>
                 </div>
@@ -4493,6 +4508,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     adminWhitelistSyncIntervalMinutes: document.getElementById('adminWhitelistSyncIntervalMinutes') ? (parseInt(document.getElementById('adminWhitelistSyncIntervalMinutes').value, 10) || 60) : 60,
                     enableJoinProfileScreening: document.getElementById('enableJoinProfileScreening').checked,
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
+                    enableWordFilterSmartMatch: document.getElementById('enableWordFilterSmartMatch') ? document.getElementById('enableWordFilterSmartMatch').checked : false,
                     enableAIFilter: document.getElementById('enableAIFilter').checked,
                     enableAIMedia: document.getElementById('enableAIMedia').checked,
                     autoAction: document.getElementById('autoAction').checked,
@@ -4504,6 +4520,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     defaultAdminLanguage: defAdminLang,
                     defaultWords: defaultWordsArr,
                     globalQAEnabled: document.getElementById('globalQAEnabled') ? document.getElementById('globalQAEnabled').checked : false,
+                    enableQASmartMatch: document.getElementById('enableQASmartMatch') ? document.getElementById('enableQASmartMatch').checked : false,
                     globalQA: globalQAArr,
                     groupsConfig: finalGroupsObj
                 };

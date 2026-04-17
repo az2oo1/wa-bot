@@ -173,6 +173,17 @@ function ensureDbPathReady(dbPath) {
     fs.closeSync(fs.openSync(dbPath, 'a'));
 }
 
+function applySmartMatch(text) {
+    if (typeof text !== 'string') return text;
+    // Remove common punctuation/symbols
+    let res = text.replace(/[!@#$%^&*()_+=\-\[\]{}:;"'<>,.?\/\\|~`]/g, '');
+    // Remove Arabic diacritics/Tatweel/Superscript Alef
+    res = res.replace(/[\u064B-\u0652\u0640\u0670]/g, '');
+    // Normalize Alefs
+    res = res.replace(/[أإآ]/g, 'ا');
+    return res;
+}
+
 function openDatabaseWithFallback() {
     const primaryPath = resolveDbPath();
     const fallbackPath = path.join('/tmp', 'wa-bot', 'bot_data.sqlite');
@@ -283,7 +294,8 @@ colsToAdd.forEach(col => {
 
 function loadConfigFromDB() {
     let newConfig = {
-        enableWordFilter: true, enableAIFilter: false, enableAIMedia: false,
+        enableWordFilter: true, enableWordFilterSmartMatch: false,
+        enableAIFilter: false, enableAIMedia: false,
         autoAction: false, enableBlacklist: true, enableWhitelist: true, enableAntiSpam: false,
         autoPurgeScheduleEnabled: false, autoPurgeIntervalMinutes: 60,
         adminWhitelistSyncEnabled: false, adminWhitelistSyncIntervalMinutes: 60,
@@ -291,7 +303,8 @@ function loadConfigFromDB() {
         safeMode: false,
         purgeScheduleEnabled: false, purgeScheduleIntervalHours: 24,
         adminSyncEnabled: false, adminSyncIntervalHours: 1,
-        globalQAEnabled: false, globalQA: [],
+        globalQAEnabled: false, enableQASmartMatch: false,
+        globalQA: [],
         spamDuplicateLimit: 3, spamFloodLimit: 5, spamAction: 'poll',
         blockedTypes: [], blockedAction: 'delete',
         spamTypes: ['text', 'image', 'video', 'audio', 'document', 'sticker'],
@@ -303,7 +316,7 @@ function loadConfigFromDB() {
 
     db.prepare('SELECT * FROM global_settings').all().forEach(row => {
         if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits', 'aiFilterTriggerWords', 'globalQA'].includes(row.key)) newConfig[row.key] = JSON.parse(row.value);
-        else if (['enableWordFilter', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled', 'autoPurgeScheduleEnabled', 'adminWhitelistSyncEnabled'].includes(row.key)) {
+        else if (['enableWordFilter', 'enableWordFilterSmartMatch', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled', 'enableQASmartMatch', 'autoPurgeScheduleEnabled', 'adminWhitelistSyncEnabled'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
         } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes'].includes(row.key)) {
             newConfig[row.key] = parseInt(row.value, 10);
@@ -362,6 +375,7 @@ function saveConfigToDB(conf) {
     const saveTx = db.transaction(() => {
         const setGlobal = db.prepare('INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)');
         setGlobal.run('enableWordFilter', conf.enableWordFilter ? '1' : '0');
+        setGlobal.run('enableWordFilterSmartMatch', conf.enableWordFilterSmartMatch ? '1' : '0');
         setGlobal.run('enableAIFilter', conf.enableAIFilter ? '1' : '0');
         setGlobal.run('enableAIMedia', conf.enableAIMedia ? '1' : '0');
         setGlobal.run('autoAction', conf.autoAction ? '1' : '0');
@@ -379,6 +393,7 @@ function saveConfigToDB(conf) {
         setGlobal.run('adminSyncEnabled', conf.adminSyncEnabled ? '1' : '0');
         setGlobal.run('adminSyncIntervalHours', (conf.adminSyncIntervalHours || 1).toString());
         setGlobal.run('globalQAEnabled', conf.globalQAEnabled ? '1' : '0');
+        setGlobal.run('enableQASmartMatch', conf.enableQASmartMatch ? '1' : '0');
         setGlobal.run('globalQA', JSON.stringify(conf.globalQA || []));
         setGlobal.run('spamDuplicateLimit', conf.spamDuplicateLimit.toString());
         setGlobal.run('spamAction', conf.spamAction);
@@ -2433,8 +2448,18 @@ async function evaluateJoinProfileViolation({ participantId, cleanUserId, groupN
     if (!profileText) return { isViolating: false, reason: '', profileText: '' };
 
     if (isWordFilterEnabled && Array.isArray(forbiddenWords) && forbiddenWords.length > 0) {
-        const lowered = profileText.toLowerCase();
-        const matchedWord = forbiddenWords.find(word => typeof word === 'string' && word.trim() && lowered.includes(word.toLowerCase()));
+        let lowered = profileText.toLowerCase();
+        if (config.enableWordFilterSmartMatch) {
+            lowered = applySmartMatch(lowered);
+        }
+        const matchedWord = forbiddenWords.find(word => {
+            if (typeof word !== 'string' || !word.trim()) return false;
+            let targetWord = word.toLowerCase();
+            if (config.enableWordFilterSmartMatch) {
+                targetWord = applySmartMatch(targetWord);
+            }
+            return lowered.includes(targetWord);
+        });
         if (matchedWord) {
             return { isViolating: true, reason: `كلمة محظورة في الملف الشخصي: [${matchedWord}]`, profileText };
         }
@@ -2546,7 +2571,8 @@ client.on('message', async msg => {
                 if (!isTextMessage || !msg.body) return false;
 
                 let isQAMatched = false;
-                const messageText = msg.body.toLowerCase().trim();
+                let messageText = msg.body.toLowerCase().trim();
+                let messageTextSmart = applySmartMatch(messageText);
 
                 if (groupConfig && groupConfig.enableQAFeature && groupConfig.qaList && groupConfig.qaList.length > 0) {
                     let qaAnswer = '';
@@ -2554,7 +2580,14 @@ client.on('message', async msg => {
 
                     for (const qa of groupConfig.qaList) {
                         const questions = qa.questions || [qa.question];
-                        const matchedQuestion = questions.find(q => typeof q === 'string' && messageText.includes(q.toLowerCase().trim()));
+                        const matchedQuestion = questions.find(q => {
+                            if (typeof q !== 'string') return false;
+                            let targetQ = q.toLowerCase().trim();
+                            if (config.enableQASmartMatch) {
+                                return messageTextSmart.includes(applySmartMatch(targetQ));
+                            }
+                            return messageText.includes(targetQ);
+                        });
                         if (matchedQuestion) {
                             isQAMatched = true;
                             qaAnswer = qa.answer || '';
@@ -2633,7 +2666,14 @@ client.on('message', async msg => {
                 if (!isQAMatched && shouldApplyGlobalQA && config.globalQAEnabled && Array.isArray(config.globalQA) && config.globalQA.length > 0) {
                     for (const gqa of config.globalQA) {
                         const gQuestions = gqa.questions || (gqa.question ? [gqa.question] : []);
-                        const gMatched = gQuestions.find(q => typeof q === 'string' && messageText.includes(q.toLowerCase().trim()));
+                        const gMatched = gQuestions.find(q => {
+                            if (typeof q !== 'string') return false;
+                            let targetQ = q.toLowerCase().trim();
+                            if (config.enableQASmartMatch) {
+                                return messageTextSmart.includes(applySmartMatch(targetQ));
+                            }
+                            return messageText.includes(targetQ);
+                        });
                         if (gMatched) {
                             try {
                                 let gFinalAnswer = gqa.answer || '';
@@ -3168,10 +3208,17 @@ client.on('message', async msg => {
             const isMediaContent = internalMsgType !== 'text';
 
             if (isWordFilterEnabled && forbiddenWords.length > 0 && normalizedMessageText) {
-                const normalizedLower = normalizedMessageText.toLowerCase();
+                let normalizedLower = normalizedMessageText.toLowerCase();
+                if (config.enableWordFilterSmartMatch) {
+                    normalizedLower = applySmartMatch(normalizedLower);
+                }
                 const matchedWord = forbiddenWords.find(word => {
                     if (typeof word !== 'string' || word.trim().length === 0) return false;
-                    return normalizedLower.includes(word.toLowerCase());
+                    let targetWord = word.toLowerCase();
+                    if (config.enableWordFilterSmartMatch) {
+                        targetWord = applySmartMatch(targetWord);
+                    }
+                    return normalizedLower.includes(targetWord);
                 });
                 if (matchedWord) {
                     isViolating = true;
