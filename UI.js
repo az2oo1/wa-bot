@@ -651,6 +651,48 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 </div>
 
                 <div class="card-grid">
+                    <!-- Verification Card -->
+                    <div class="card info">
+                        <div class="card-header">
+                            <h3><i class="fas fa-shield-alt"></i> ${t('التحقق الثنائي', 'Secondary Verification')}</h3>
+                            <label class="switch"><input type="checkbox" id="enableSecondaryVerification" ${config.enableSecondaryVerification ? 'checked' : ''}><span class="slider"></span></label>
+                        </div>
+                        <div style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:10px;">${t('يتطلب التحقق من بريد جامعي أو صورة بعد القبول', 'Requires college email or photo verification after approval')}</div>
+                        <div class="field-group">
+                            <label class="field-label">${t('رسالة الترحيب المخصصة', 'Custom Welcome Message')}</label>
+                            <input type="text" id="customMessageText" value="${config.customMessageText || ''}" placeholder="Welcome. Please reply with our custom approval word.">
+                        </div>
+                        <div class="field-row" style="margin-bottom:15px;">
+                            <div class="field-group">
+                                <label class="field-label">${t('كلمة الموافقة', 'Approval Keyword')}</label>
+                                <input type="text" id="approvalKeyword" value="${config.approvalKeyword || 'yes'}" placeholder="yes">
+                            </div>
+                            <div class="field-group">
+                                <label class="field-label">${t('كلمة الرفض', 'Ban Keyword')}</label>
+                                <input type="text" id="banKeyword" value="${config.banKeyword || 'no'}" placeholder="no">
+                            </div>
+                        </div>
+                        <div class="field-row" style="margin-bottom:15px;">
+                            <div class="field-group">
+                                <label class="field-label">${t('نطاق البريد الجامعي', 'College Email Domain')}</label>
+                                <input type="text" id="emailDomain" value="${config.emailDomain || 'college.edu'}" placeholder="college.edu">
+                            </div>
+                        </div>
+                        <div class="sub-panel" style="margin-top:10px;">
+                            <h4>${t('إعدادات البريد (Outlook)', 'Email Settings (Outlook)')}</h4>
+                            <div class="field-row">
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('البريد الإلكتروني', 'Outlook Email')}</label>
+                                    <input type="text" id="outlookEmail" value="${config.outlookEmail || ''}" placeholder="you@outlook.com">
+                                </div>
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('كلمة المرور', 'Outlook Password')}</label>
+                                    <input type="password" id="outlookPassword" value="${config.outlookPassword || ''}" placeholder="Password or App Password">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div class="card">
                         <div class="card-header"><h3><i class="fas fa-filter"></i> ${t('فلتر الكلمات الممنوعة', 'Forbidden Word Filter')}</h3></div>
                         <div class="toggle-row" style="margin-bottom:18px;">
@@ -4504,6 +4546,38 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     adminWhitelistSyncEnabled: document.getElementById('adminWhitelistSyncEnabled') ? document.getElementById('adminWhitelistSyncEnabled').checked : false,
                     adminWhitelistSyncIntervalMinutes: document.getElementById('adminWhitelistSyncIntervalMinutes') ? (parseInt(document.getElementById('adminWhitelistSyncIntervalMinutes').value, 10) || 60) : 60,
                     enableJoinProfileScreening: document.getElementById('enableJoinProfileScreening').checked,
+                    enableSecondaryVerification: document.getElementById('enableSecondaryVerification') ? document.getElementById('enableSecondaryVerification').checked : false,
+                    customMessageText: document.getElementById('customMessageText') ? document.getElementById('customMessageText').value.trim() : '',
+                    approvalKeyword: document.getElementById('approvalKeyword') ? document.getElementById('approvalKeyword').value.trim() : '',
+                    banKeyword: document.getElementById('banKeyword') ? document.getElementById('banKeyword').value.trim() : '',
+                    emailDomain: document.getElementById('emailDomain') ? document.getElementById('emailDomain').value.trim() : '',
+                    outlookEmail: document.getElementById('outlookEmail') ? document.getElementById('outlookEmail').value.trim() : '',
+                    outlookPassword: document.getElementById('outlookPassword') ? document.getElementById('outlookPassword').value.trim() : '',
+
+                    enableSecondaryVerification: document.getElementById('enableSecondaryVerification') ? document.getElementById('enableSecondaryVerification').checked : false,
+                    customMessageText: document.getElementById('customMessageText') ? document.getElementById('customMessageText').value.trim() : '',
+                    approvalKeyword: document.getElementById('approvalKeyword') ? document.getElementById('approvalKeyword').value.trim() : '',
+                    banKeyword: document.getElementById('banKeyword') ? document.getElementById('banKeyword').value.trim() : '',
+                    emailDomain: document.getElementById('emailDomain') ? document.getElementById('emailDomain').value.trim() : '',
+                    outlookEmail: document.getElementById('outlookEmail') ? document.getElementById('outlookEmail').value.trim() : '',
+                    outlookPassword: document.getElementById('outlookPassword') ? document.getElementById('outlookPassword').value.trim() : '',
+
+                    enableSecondaryVerification: document.getElementById('enableSecondaryVerification') ? document.getElementById('enableSecondaryVerification').checked : false,
+                    customMessageText: document.getElementById('customMessageText') ? document.getElementById('customMessageText').value.trim() : '',
+                    approvalKeyword: document.getElementById('approvalKeyword') ? document.getElementById('approvalKeyword').value.trim() : '',
+                    banKeyword: document.getElementById('banKeyword') ? document.getElementById('banKeyword').value.trim() : '',
+                    emailDomain: document.getElementById('emailDomain') ? document.getElementById('emailDomain').value.trim() : '',
+                    outlookEmail: document.getElementById('outlookEmail') ? document.getElementById('outlookEmail').value.trim() : '',
+                    outlookPassword: document.getElementById('outlookPassword') ? document.getElementById('outlookPassword').value.trim() : '',
+
+                    enableSecondaryVerification: document.getElementById('enableSecondaryVerification') ? document.getElementById('enableSecondaryVerification').checked : false,
+                    customMessageText: document.getElementById('customMessageText') ? document.getElementById('customMessageText').value.trim() : '',
+                    approvalKeyword: document.getElementById('approvalKeyword') ? document.getElementById('approvalKeyword').value.trim() : '',
+                    banKeyword: document.getElementById('banKeyword') ? document.getElementById('banKeyword').value.trim() : '',
+                    emailDomain: document.getElementById('emailDomain') ? document.getElementById('emailDomain').value.trim() : '',
+                    outlookEmail: document.getElementById('outlookEmail') ? document.getElementById('outlookEmail').value.trim() : '',
+                    outlookPassword: document.getElementById('outlookPassword') ? document.getElementById('outlookPassword').value.trim() : '',
+
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
                     enableWordFilterSmartMatch: document.getElementById('enableWordFilterSmartMatch') ? document.getElementById('enableWordFilterSmartMatch').checked : false,
                     enableAIFilter: document.getElementById('enableAIFilter').checked,
