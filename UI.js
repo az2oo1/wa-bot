@@ -675,6 +675,25 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             <label class="switch"><input type="checkbox" id="enableSecondaryVerification" ${config.enableSecondaryVerification ? 'checked' : ''}><span class="slider"></span></label>
                         </div>
                         <div style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:10px;">${t('تفعيل الميزات الثلاث للتحقق بشكل منفصل', 'Enable the three features for verification separately')}</div>
+
+                        <div class="field-group" style="background: rgba(0,0,0,0.1); border-radius: 6px; padding: 12px; margin-bottom: 12px;">
+                            <label class="field-label">${t('لغة رسائل البوت', 'Bot Reply Language')}</label>
+                            <select id="secondaryVerificationLanguage" class="form-control" style="width:100%;margin-bottom:10px;">
+                                <option value="en" ${config.secondaryVerificationLanguage === 'en' ? 'selected' : ''}>English</option>
+                                <option value="ar" ${config.secondaryVerificationLanguage === 'ar' ? 'selected' : ''}>العربية (Arabic)</option>
+                            </select>
+                            
+                            <label class="field-label">${t('المجموعات المطبقة عليها الطريقة', 'Groups Using This Verification')}</label>
+                            <select id="secondaryVerificationGroups" class="form-control" multiple style="width:100%; height: 100px;">
+                                ${groupsArr.map(g => `<option value="${g.id}" ${(config.secondaryVerificationGroups || []).includes(g.id) ? 'selected' : ''}>${umEscapeHtml(g.name)}</option>`).join('')}
+                            </select>
+                            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${t('اضغط مع التثبيت على Ctrl/Cmd لاختيار أو إلغاء اختيار عدة مجموعات (اذا لم تحدد شيئاً سيعمل على الكل)', 'Hold Ctrl/Cmd to select multiple groups (if empty, applies to ALL groups)')}</div>
+                        </div>
+
+                        <div class="field-group" style="background: rgba(0,0,0,0.1); border-radius: 6px; padding: 12px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+                            <label class="field-label" style="margin: 0;">${t('تأخير الإرسال لمنع الحظر (ثواني - مثلاً 3600 لانتظار ساعة)', 'DM Delay to prevent ban (secs - e.g. 3600 for 1 hr)')}</label>
+                            <input type="number" id="secondaryVerificationDelay" class="form-control" value="${config.secondaryVerificationDelay !== undefined ? config.secondaryVerificationDelay : 3600}" min="1" max="86400" style="width: 80px;">
+                        </div>
                         
                         <div class="toggle-row" style="margin-bottom:10px; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 6px;">
                             <div class="toggle-left">
@@ -3322,6 +3341,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             window.addEventListener('DOMContentLoaded', () => { 
                 renderBlockedExtensions(); 
                 renderApproved();
+                if(typeof renderApprovalWords === 'function') renderApprovalWords();
+                if(typeof renderBanWords === 'function') renderBanWords();
             });
 
             async function addBlacklistNumber() {
@@ -4682,6 +4703,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     adminWhitelistSyncIntervalMinutes: document.getElementById('adminWhitelistSyncIntervalMinutes') ? (parseInt(document.getElementById('adminWhitelistSyncIntervalMinutes').value, 10) || 60) : 60,
                     enableJoinProfileScreening: document.getElementById('enableJoinProfileScreening').checked,
                     enableSecondaryVerification: document.getElementById('enableSecondaryVerification') ? document.getElementById('enableSecondaryVerification').checked : false,
+                    secondaryVerificationGroups: document.getElementById('secondaryVerificationGroups') ? Array.from(document.getElementById('secondaryVerificationGroups').selectedOptions).map(opt => opt.value) : [],
+                    secondaryVerificationLanguage: document.getElementById('secondaryVerificationLanguage') ? document.getElementById('secondaryVerificationLanguage').value : 'en',
+                    secondaryVerificationDelay: document.getElementById('secondaryVerificationDelay') ? parseInt(document.getElementById('secondaryVerificationDelay').value, 10) : 3600,
                     enableKeywordVerification: document.getElementById('enableKeywordVerification') ? document.getElementById('enableKeywordVerification').checked : false,
                     enableEmailVerification: document.getElementById('enableEmailVerification') ? document.getElementById('enableEmailVerification').checked : false,
                     enablePhotoVerification: document.getElementById('enablePhotoVerification') ? document.getElementById('enablePhotoVerification').checked : false,

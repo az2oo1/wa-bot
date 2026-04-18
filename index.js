@@ -318,18 +318,8 @@ function loadConfigFromDB() {
         enableJoinProfileScreening: false,
         outlookPassword: "",
         enableSecondaryVerification: false,
-        enableKeywordVerification: false,
-        enableEmailVerification: false,
-        enablePhotoVerification: false,
-        enableSecondarySmartMatch: false,
-        enableKeywordVerification: false,
-        enableEmailVerification: false,
-        enablePhotoVerification: false,
-        enableSecondarySmartMatch: false,
-        enableKeywordVerification: false,
-        enableEmailVerification: false,
-        enablePhotoVerification: false,
-        enableSecondarySmartMatch: false,
+        secondaryVerificationGroups: "[]",
+        secondaryVerificationLanguage: "en",
         enableKeywordVerification: false,
         enableEmailVerification: false,
         enablePhotoVerification: false,
@@ -355,7 +345,9 @@ function loadConfigFromDB() {
     };
 
     db.prepare('SELECT * FROM global_settings').all().forEach(row => {
-        if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits', 'aiFilterTriggerWords', 'globalQA'].includes(row.key)) newConfig[row.key] = JSON.parse(row.value);
+        if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits', 'aiFilterTriggerWords', 'globalQA', 'secondaryVerificationGroups'].includes(row.key)) {
+            try { newConfig[row.key] = JSON.parse(row.value); } catch(e) { }
+        }
         else if (['enableWordFilter', 'enableWordFilterSmartMatch', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled', 'enableQASmartMatch', 'autoPurgeScheduleEnabled', 'adminWhitelistSyncEnabled'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
         } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes'].includes(row.key)) {
@@ -429,6 +421,8 @@ function saveConfigToDB(conf) {
         setGlobal.run('enableJoinProfileScreening', conf.enableJoinProfileScreening ? '1' : '0');
         setGlobal.run('outlookPassword', conf.outlookPassword || '');
         setGlobal.run('enableSecondaryVerification', conf.enableSecondaryVerification ? '1' : '0');
+        setGlobal.run('secondaryVerificationGroups', JSON.stringify(conf.secondaryVerificationGroups || []));
+        setGlobal.run('secondaryVerificationLanguage', conf.secondaryVerificationLanguage || 'en');
         setGlobal.run('enableKeywordVerification', conf.enableKeywordVerification ? '1' : '0');
         setGlobal.run('enableEmailVerification', conf.enableEmailVerification ? '1' : '0');
         setGlobal.run('enablePhotoVerification', conf.enablePhotoVerification ? '1' : '0');
@@ -3601,7 +3595,10 @@ process.on('SIGINT', async () => {
     process.exit(0);
 });
 
+let isScreeningRunning = false;
 async function screenPendingMembershipRequests() {
+    if (isScreeningRunning) return;
+    isScreeningRunning = true;
     try {
         const chats = await client.getChats();
         for (const chat of chats) {
@@ -3746,7 +3743,12 @@ async function screenPendingMembershipRequests() {
                 });
                 if (!profileResult.isViolating) {
                     const verification = initVerification(client, db, config);
-                    await verification.startVerification(rawRequesterId, cleanRequesterId, chat.id._serialized);
+                    const didStart = await verification.startVerification(rawRequesterId, cleanRequesterId, chat.id._serialized);
+                    if (didStart) {
+                        // Rate limit to prevent WhatsApp banning the bot for spamming new pending requests all at once
+                        const delaySecs = (config.secondaryVerificationDelay !== undefined && !isNaN(config.secondaryVerificationDelay)) ? config.secondaryVerificationDelay : 3600;
+                        await new Promise(r => setTimeout(r, delaySecs * 1000));
+                    }
                     continue;
                 }
 
@@ -3781,7 +3783,7 @@ Profile:
                 try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanRequesterId] }); } catch (e) { }
             }
         }
-    } catch (e) { }
+    } catch (e) { } finally { isScreeningRunning = false; }
 }
 
 setInterval(() => {
