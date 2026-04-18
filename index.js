@@ -3676,7 +3676,7 @@ async function screenPendingMembershipRequests() {
                 }
 
                 const finalCleanId = cleanRequesterId.replace('@c.us', '');
-                let isAutoApproved = false;
+                let isVIP = false;
 
                 if (isWhitelistEnabled) {
                     // Whitelist array in DB has @c.us suffix since UI appends it, so we query with cleanRequesterId
@@ -3686,24 +3686,20 @@ async function screenPendingMembershipRequests() {
                     const inCustomWl = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanRequesterId) : false;
                     
                     if ((useGlobalWl && globalWl) || inCustomWl) {
-                        isAutoApproved = true;
+                        isVIP = true;
                     }
                 }
 
-                // approved_numbers from secondary verification skips the @c.us suffix
-                const isApprovedNum = db.prepare('SELECT 1 FROM approved_numbers WHERE number = ?').get(finalCleanId);
-                
-                if (isAutoApproved || isApprovedNum) {
+                if (isVIP) {
                     try {
                         await chat.approveGroupMembershipRequests({ requesterIds: [rawRequesterId] });
-                        console.log(`[أمان] تم القبول التلقائي لرقم متخطي أو متحقق منه (${cleanRequesterId}) في: ${chat.name}`);
+                        console.log(`[أمان] تم القبول التلقائي لـ VIP (${cleanRequesterId}) في: ${chat.name}`);
                     } catch (e) {}
                     continue;
                 }
 
                 // ── Blacklist check for pending join requests ──────────────────
                 if (isBlacklistEnabled) {
-                    const finalCleanId = cleanRequesterId.replace('@c.us', '');
                     const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
                     const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
                     const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanRequesterId) : false;
@@ -3725,6 +3721,17 @@ async function screenPendingMembershipRequests() {
                     }
                 }
                 // ─────────────────────────────────────────────────────────────
+
+                // ── Approved Numbers Check (after Blacklist) ───────────────────
+                const isApprovedNum = db.prepare('SELECT 1 FROM approved_numbers WHERE number = ?').get(finalCleanId);
+                
+                if (isApprovedNum) {
+                    try {
+                        await chat.approveGroupMembershipRequests({ requesterIds: [rawRequesterId] });
+                        console.log(`[أمان] تم القبول التلقائي لرقم متحقق منه (${cleanRequesterId}) في: ${chat.name}`);
+                    } catch (e) {}
+                    continue;
+                }
 
                 if (!isJoinProfileScreeningEnabled || (!isWordFilterEnabled && !isAIFilterEnabled)) continue;
 
