@@ -703,7 +703,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             
                             <label class="field-label">${t('المجموعات المطبقة عليها الطريقة', 'Groups Using This Verification')}</label>
                             <select id="secondaryVerificationGroups" class="form-control" multiple style="width:100%; height: 100px;">
-                                ${groupsArr.map(g => `<option value="${g.id}" ${(config.secondaryVerificationGroups || []).includes(g.id) ? 'selected' : ''}>${umEscapeHtml(g.name)}</option>`).join('')}
+                                ${groupsArr.map(g => `<option value="${g.id}" ${(config.secondaryVerificationGroups || []).includes(g.id) ? 'selected' : ''}>${(g.name || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</option>`).join('')}
                             </select>
                             <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${t('اضغط مع التثبيت على Ctrl/Cmd لاختيار أو إلغاء اختيار عدة مجموعات (اذا لم تحدد شيئاً سيعمل على الكل)', 'Hold Ctrl/Cmd to select multiple groups (if empty, applies to ALL groups)')}</div>
                         </div>
