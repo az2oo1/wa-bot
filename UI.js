@@ -3518,7 +3518,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 const container = document.getElementById('approvalWordsContainer');
                 container.innerHTML = '';
                 approvalWordsArr.forEach((word, index) => {
-                    container.innerHTML += `<div class="chip">${word} <span class="chip-remove" onclick="removeApprovalWord(${index})">&times;</span></div>`;
+                    container.innerHTML += '<div class="chip">' + word + ' <span class="chip-remove" onclick="removeApprovalWord(' + index + ')">&times;</span></div>';
                 });
             }
             function addApprovalWord() {
@@ -3539,7 +3539,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 const container = document.getElementById('banWordsContainer');
                 container.innerHTML = '';
                 banWordsArr.forEach((word, index) => {
-                    container.innerHTML += `<div class="chip">${word} <span class="chip-remove" onclick="removeBanWord(${index})">&times;</span></div>`;
+                    container.innerHTML += '<div class="chip">' + word + ' <span class="chip-remove" onclick="removeBanWord(' + index + ')">&times;</span></div>';
                 });
             }
             function addBanWord() {
