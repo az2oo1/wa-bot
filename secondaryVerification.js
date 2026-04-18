@@ -9,14 +9,6 @@ function initVerification(client, db, config, chat) {
             const useEmail = config.enableEmailVerification;
             const usePhoto = config.enablePhotoVerification;
             if (!useKeyword && !useEmail && !usePhoto) return false;
-            const useKeyword = config.enableKeywordVerification;
-            const useEmail = config.enableEmailVerification;
-            const usePhoto = config.enablePhotoVerification;
-            if (!useKeyword && !useEmail && !usePhoto) return false;
-            const useKeyword = config.enableKeywordVerification;
-            const useEmail = config.enableEmailVerification;
-            const usePhoto = config.enablePhotoVerification;
-            if (!useKeyword && !useEmail && !usePhoto) return false;
             
             console.log(`[Verification] Starting for ${cleanUserId}`);
             
@@ -96,8 +88,6 @@ function initVerification(client, db, config, chat) {
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(senderId);
                         await msg.reply('You have been rejected.');
                         return true;
-                    }
-
                     } else if (approveWs.includes(text)) {
                         const useEmail = config.enableEmailVerification;
                         const usePhoto = config.enablePhotoVerification;
@@ -107,7 +97,7 @@ function initVerification(client, db, config, chat) {
                             const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
                             const cleanId = senderId.replace('@c.us', '');
                             if (chatObj) await chatObj.approveGroupMembershipRequests({ requesterIds: [senderId] });
-                            db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)').run(cleanId);
+                            db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(senderId);
                             await msg.reply('Verification successful! You have been approved and added to the verified list.');
                             return true;
@@ -210,8 +200,8 @@ function initVerification(client, db, config, chat) {
                             await chatObj.approveGroupMembershipRequests({ requesterIds: [senderId] });
                         }
                         
-                        // Add to verified dataset (whitelist)
-                        db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)').run(cleanId);
+                        // Add to verified dataset (approved_numbers)
+                        db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
                         
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(senderId);
                         await msg.reply('Verification successful! You have been approved and added to the verified list.');

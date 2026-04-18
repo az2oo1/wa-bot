@@ -228,6 +228,7 @@ db.exec(`
     CREATE TABLE IF NOT EXISTS blacklist (number TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS blocked_extensions (ext TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS whitelist (number TEXT PRIMARY KEY); 
+    CREATE TABLE IF NOT EXISTS approved_numbers (number TEXT PRIMARY KEY);
     CREATE TABLE IF NOT EXISTS secondary_verification (
         requester_id TEXT PRIMARY KEY,
         group_id TEXT,
@@ -1112,6 +1113,26 @@ app.post('/api/whitelist/remove', requireAuthApi, requirePermission('security:ma
         try {
             db.prepare('DELETE FROM whitelist WHERE number = ?').run(req.body.number);
             console.log(`[أمان] تم إزالة رقم من القائمة البيضاء عبر اللوحة: ${req.body.number}`);
+        } catch (e) { }
+    }
+    res.sendStatus(200);
+});
+
+app.post('/api/approved/add', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    if (req.body.number) {
+        try {
+            db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(req.body.number);
+            console.log(`[أمان] تم إضافة رقم لقائمة المتحقق منهم: ${req.body.number}`);
+        } catch (e) { }
+    }
+    res.sendStatus(200);
+});
+
+app.post('/api/approved/remove', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    if (req.body.number) {
+        try {
+            db.prepare('DELETE FROM approved_numbers WHERE number = ?').run(req.body.number);
+            console.log(`[أمان] تم إزالة رقم من قائمة المتحقق منهم: ${req.body.number}`);
         } catch (e) { }
     }
     res.sendStatus(200);
@@ -3654,13 +3675,30 @@ async function screenPendingMembershipRequests() {
                     } catch (e) { cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us'); }
                 }
 
+                const finalCleanId = cleanRequesterId.replace('@c.us', '');
+                let isAutoApproved = false;
+
                 if (isWhitelistEnabled) {
+                    // Whitelist array in DB has @c.us suffix since UI appends it, so we query with cleanRequesterId
                     const globalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanRequesterId);
                     const useGlobalWl = groupConfig ? (groupConfig.useGlobalWhitelist !== false) : true;
+                    // Custom whitelist generally uses cleanRequesterId (with @c.us)
                     const inCustomWl = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanRequesterId) : false;
+                    
                     if ((useGlobalWl && globalWl) || inCustomWl) {
-                        continue;
+                        isAutoApproved = true;
                     }
+                }
+
+                // approved_numbers from secondary verification skips the @c.us suffix
+                const isApprovedNum = db.prepare('SELECT 1 FROM approved_numbers WHERE number = ?').get(finalCleanId);
+                
+                if (isAutoApproved || isApprovedNum) {
+                    try {
+                        await chat.approveGroupMembershipRequests({ requesterIds: [rawRequesterId] });
+                        console.log(`[أمان] تم القبول التلقائي لرقم متخطي أو متحقق منه (${cleanRequesterId}) في: ${chat.name}`);
+                    } catch (e) {}
+                    continue;
                 }
 
                 // ── Blacklist check for pending join requests ──────────────────
