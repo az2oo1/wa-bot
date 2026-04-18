@@ -762,8 +762,12 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         </div>
 
                         <div class="field-group">
-                            <label class="field-label">${t('رسالة الترحيب المخصصة (افصل بين التنبيهات العشوائية بـ ||)', 'Custom Welcome Messages (separate random baits with ||)')}</label>
-                            <input type="text" id="customMessageText" value="${config.customMessageText || ''}" placeholder="Message 1 || Message 2 || Message 3">
+                            <label class="field-label">${t('رسالة الترحيب المخصصة / التنبيهات العشوائية', 'Custom Welcome Messages / Random Baits')}</label>
+                            <div class="input-with-btn">
+                                <input type="text" id="newCustomMessage" placeholder="${t('أدخل رسالة ترحيب...', 'Enter a welcome message...')} (Message 1)" onkeypress="if(event.key==='Enter'){event.preventDefault();addCustomMessage();}">
+                                <button type="button" class="btn btn-primary" onclick="addCustomMessage()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
+                            </div>
+                            <div id="customMessagesContainer" class="chip-container" style="flex-direction: column; gap: 8px;"></div>
                         </div>
                         <div class="field-row" style="margin-bottom:15px;">
                             <div class="field-group">
@@ -2746,6 +2750,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             umRenderPermissionHelp();
             umRenderCreatePermSelection();
 
+            let customMessagesArr = (${JSON.stringify(config.customMessageText || '')}).split('||').map(s=>s.trim()).filter(Boolean);
             let approvalWordsArr = "${(config.approvalKeyword || 'yes').replace(/"/g, '\"')}".split(',').map(s=>s.trim()).filter(Boolean);
             let banWordsArr = "${(config.banKeyword || 'no').replace(/"/g, '\"')}".split(',').map(s=>s.trim()).filter(Boolean);
             let defaultWordsArr = ${JSON.stringify(config.defaultWords)};
@@ -3379,6 +3384,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             window.addEventListener('DOMContentLoaded', () => { 
                 renderBlockedExtensions(); 
                 renderApproved();
+                if(typeof renderCustomMessages === 'function') renderCustomMessages();
                 if(typeof renderApprovalWords === 'function') renderApprovalWords();
                 if(typeof renderBanWords === 'function') renderBanWords();
             });
@@ -3654,6 +3660,32 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 }
                 btn.innerHTML = original;
                 btn.disabled = false;
+            }
+
+            function renderCustomMessages() {
+                const container = document.getElementById('customMessagesContainer');
+                if (!container) return;
+                container.innerHTML = '';
+                customMessagesArr.forEach((msg, index) => {
+                    const safeMsg = umEscapeHtml(msg);
+                    container.innerHTML += '<div class="chip" title="' + safeMsg + '" style="cursor:default; display:flex; justify-content:space-between; align-items:center; padding: 10px 14px; width: 100%;"><span style="flex:1; white-space:pre-wrap; word-break:break-word; margin-inline-end: 10px; line-height: 1.4;">' + safeMsg + '</span> <span class="chip-remove" style="padding:4px; font-size:18px;" onclick="removeCustomMessage(' + index + ')">&times;</span></div>';
+                });
+            }
+
+            function addCustomMessage() {
+                const input = document.getElementById('newCustomMessage');
+                if (!input) return;
+                const msg = input.value.trim();
+                if (msg && !customMessagesArr.includes(msg)) {
+                    customMessagesArr.push(msg);
+                    input.value = '';
+                    renderCustomMessages();
+                }
+            }
+
+            function removeCustomMessage(index) {
+                customMessagesArr.splice(index, 1);
+                renderCustomMessages();
             }
 
             function renderApprovalWords() {
@@ -4779,7 +4811,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     enableEmailVerification: document.getElementById('enableEmailVerification') ? document.getElementById('enableEmailVerification').checked : false,
                     enablePhotoVerification: document.getElementById('enablePhotoVerification') ? document.getElementById('enablePhotoVerification').checked : false,
                     enableSecondarySmartMatch: document.getElementById('enableSecondarySmartMatch') ? document.getElementById('enableSecondarySmartMatch').checked : false,
-                    customMessageText: document.getElementById('customMessageText') ? document.getElementById('customMessageText').value.trim() : '',
+                    customMessageText: customMessagesArr.join(' || '),
                     approvalKeyword: approvalWordsArr.join(','),
                     banKeyword: banWordsArr.join(','),
                     emailDomain: document.getElementById('emailDomain') ? document.getElementById('emailDomain').value.trim() : '',
