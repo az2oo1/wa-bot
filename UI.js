@@ -573,6 +573,19 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         </div>
                         <label class="field-label">${t('الأرقام المتحقق منها حالياً', 'Currently Approved Numbers')}</label>
                         <div id="approvedContainer" class="chip-container"></div>
+
+                        <div class="field-group" style="background: rgba(0,0,0,0.1); border-radius: 8px; padding: 15px; margin-top: 20px; border: 1.5px solid var(--card-border);">
+                            <label class="field-label">${t('استخراج واعتماد الأرقام من مجموعات معينة', 'Extract & Approve Members from Groups')}</label>
+                            <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${t('قم باختيار المجموعات وسيتم سحب أرقام جميع المتواجدين فيها واعتمادهم مباشرة فورياً', 'Select groups to extract and automatically approve all participants inside them.')}</p>
+                            
+                            <select id="extractApprovedGroups" multiple style="width:100%; height: 120px; font-family: var(--font); background: var(--input-bg); border: 1px solid var(--card-border); color: var(--text); border-radius: 8px; padding: 8px;">
+                                ${groupsArr.map(g => `<option value="${g.id}">${t(g.name, g.name)}</option>`).join('')}
+                            </select>
+                            
+                            <button type="button" class="btn btn-warning" style="margin-top: 15px; width: 100%; justify-content: center; font-size: 14px;" onclick="extractApprovedNumbersFromGroups(this)">
+                                <i class="fas fa-download"></i> ${t('استخراج واعتماد الأرقام المحددة', 'Extract & Approve Selected Groups')}
+                            </button>
+                        </div>
                     </div>
 
                     <div class="card info" style="border-color:rgba(64,196,255,0.4);">
@@ -724,8 +737,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         </div>
 
                         <div class="field-group">
-                            <label class="field-label">${t('رسالة الترحيب المخصصة', 'Custom Welcome Message')}</label>
-                            <input type="text" id="customMessageText" value="${config.customMessageText || ''}" placeholder="Welcome. Please reply with our custom approval word.">
+                            <label class="field-label">${t('رسالة الترحيب المخصصة (افصل بين التنبيهات العشوائية بـ ||)', 'Custom Welcome Messages (separate random baits with ||)')}</label>
+                            <input type="text" id="customMessageText" value="${config.customMessageText || ''}" placeholder="Message 1 || Message 2 || Message 3">
                         </div>
                         <div class="field-row" style="margin-bottom:15px;">
                             <div class="field-group">
@@ -3421,7 +3434,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
 
             async function addApprovedNumber() {
                 const input = document.getElementById('newApprovedNumber');
-                let justNumbers = input.value.replace(/\\D/g, ''); 
+                let justNumbers = input.value.replace(/\D/g, ''); 
                 if (justNumbers) {
                     let finalId = justNumbers + '@c.us';
                     if (!approvedArr.includes(finalId)) {
@@ -3433,6 +3446,38 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     }
                 }
                 input.value = '';
+            }
+
+            async function extractApprovedNumbersFromGroups(btn) {
+                const selectElement = document.getElementById('extractApprovedGroups');
+                const selectedOptions = Array.from(selectElement.selectedOptions);
+                if (selectedOptions.length === 0) {
+                    return alert("${t('الرجاء اختيار مجموعة واحدة على الأقل.', 'Please select at least one group.')}");
+                }
+                
+                const groupIds = selectedOptions.map(option => option.value);
+                const originalHTML = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
+                btn.disabled = true;
+
+                try {
+                    const res = await fetch('/api/approved/extract-groups', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ groupIds })
+                    });
+                    const data = await res.json();
+                    
+                    if (!res.ok) {
+                        throw new Error(data.error || 'Request failed');
+                    }
+                    alert(data.message);
+                    location.reload();
+                } catch(e) {
+                    alert(e.message);
+                    btn.innerHTML = originalHTML;
+                    btn.disabled = false;
+                }
             }
 
             async function removeApprovedNumber(index) {

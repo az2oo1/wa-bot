@@ -35,7 +35,12 @@ function initVerification(client, db, config, chat) {
             // Send initial custom message or method prompt
             let initMsg = '';
             if (useKeyword) {
-                initMsg = config.customMessageText || (isAr ? 'أهلاً بك. يرجى الرد بكلمة الموافقة المخصصة لدينا.' : 'Welcome. Please reply with our custom approval word.');
+                const baits = config.customMessageText ? config.customMessageText.split('||').map(s => s.trim()).filter(s => s) : [];
+                if (baits.length > 0) {
+                    initMsg = baits[Math.floor(Math.random() * baits.length)];
+                } else {
+                    initMsg = isAr ? 'أهلاً بك. يرجى الرد بكلمة الموافقة المخصصة لدينا.' : 'Welcome. Please reply with our custom approval word.';
+                }
             } else {
                 const domain = config.emailDomain || 'college.edu';
                 let methods = [];
@@ -45,9 +50,6 @@ function initVerification(client, db, config, chat) {
             }
             try {
                 const response = await client.sendMessage(rawRequesterId, initMsg);
-                // archive the chat
-                const userChat = await client.getChatById(rawRequesterId);
-                await userChat.archive();
             } catch (e) {
                 console.error(`[Verification] Failed to message ${rawRequesterId}`, e);
             }
@@ -90,7 +92,7 @@ function initVerification(client, db, config, chat) {
                         banWs = banWs.map(s => applySmartMatch(s));
                     }
 
-                    if (banWs.includes(text)) {
+                    if (banWs.some(w => text.includes(w))) {
                         // Reject and ban
                         const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
                         const cleanId = senderId.replace('@c.us', '');
@@ -100,9 +102,9 @@ function initVerification(client, db, config, chat) {
                         db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
                         
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(senderId);
-                        await msg.reply(isAr ? 'تم رفض طلبك.' : 'You have been rejected.');
+                        // Make it a silent trap: no rejection notification
                         return true;
-                    } else if (approveWs.includes(text)) {
+                    } else if (approveWs.some(w => text.includes(w))) {
                         const useEmail = config.enableEmailVerification;
                         const usePhoto = config.enablePhotoVerification;
 
@@ -133,7 +135,7 @@ function initVerification(client, db, config, chat) {
                         
                         await msg.reply(isAr ? `مقبول! لإكمال الانضمام لـ ${reqGroupName}، يرجى إرسال ${methods.join(' أو ')}.` : `Approved! To finish joining ${reqGroupName}, please send ${methods.join(' OR ')}.`);
                     } else {
-                        await msg.reply(isAr ? 'رد غير صحيح. يرجى الرد بالكلمة المحددة.' : 'Invalid response. Reply with the specific word.');
+                        // Silent trap - do nothing if the message didn't contain either keyword
                     }
                 } else if (record.state === 'PENDING_METHOD') {
                     const useEmail = config.enableEmailVerification;
@@ -227,12 +229,6 @@ function initVerification(client, db, config, chat) {
             } catch (e) {
                 console.error('[Verification] Error handling msg:', e);
             }
-            
-            // Re-archive the chat to keep interactions in the archived tab securely
-            try {
-                const userChat = await client.getChatById(senderId).catch(() => null);
-                if (userChat) await userChat.archive();
-            } catch (archiveErr) {}
 
             return true; // We handled the message, stop propagation
         }

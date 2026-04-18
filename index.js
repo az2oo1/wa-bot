@@ -1132,6 +1132,37 @@ app.post('/api/approved/remove', requireAuthApi, requirePermission('security:man
     res.sendStatus(200);
 });
 
+app.post('/api/approved/extract-groups', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    const { groupIds } = req.body;
+    if (!groupIds || !Array.isArray(groupIds) || groupIds.length === 0) {
+        return res.status(400).json({ error: 'لم يتم اختيار أي مجموعة.' });
+    }
+    let addedCount = 0;
+    const botId = client.info && client.info.wid ? client.info.wid._serialized : null;
+
+    try {
+        for (const groupId of groupIds) {
+            const chat = await client.getChatById(groupId);
+            if (!chat || !chat.isGroup) continue;
+
+            for (const participant of chat.participants) {
+                const rawId = participant.id._serialized;
+                if (botId && rawId === botId) continue; // skip the bot itself
+
+                const cleanId = rawId.replace(/:[0-9]+/, '').replace('@c.us', '');
+                const result = db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                if (result.changes > 0) {
+                    addedCount++;
+                }
+            }
+        }
+        res.json({ message: `تم استخراج وإضافة ${addedCount} رقم بنجاح لقائمة المتحقق منهم. / Successfully extracted and approved ${addedCount} numbers.` });
+    } catch (e) {
+        console.error('[Extract Groups Error]', e);
+        res.status(500).json({ error: 'حدث خطأ أثناء استخراج الأرقام.' });
+    }
+});
+
 function getScheduleIntervalMs(minutesValue, fallbackMinutes = 60) {
     const parsed = parseInt(minutesValue, 10);
     const safeMinutes = Number.isFinite(parsed) && parsed > 0 ? parsed : fallbackMinutes;
