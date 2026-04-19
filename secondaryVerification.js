@@ -1,6 +1,16 @@
 const nodemailer = require('nodemailer');
 
 const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
+const VERIFICATION_DEBUG = process.env.WA_VERIFICATION_DEBUG === 'true';
+
+function debugLog(message, meta = {}) {
+    if (!VERIFICATION_DEBUG) return;
+    try {
+        console.log(`[VerificationDebug] ${message} ${JSON.stringify(meta)}`);
+    } catch (e) {
+        console.log(`[VerificationDebug] ${message}`);
+    }
+}
 
 function normalizeVerificationId(value) {
     if (typeof value !== 'string' || !value) return '';
@@ -29,7 +39,10 @@ function initVerification(client, db, config, chat) {
     return {
         // Triggered after bio check is passed
         startVerification: async (rawRequesterId, cleanUserId, groupId, options = {}) => {
-            if (!config.enableSecondaryVerification) return false;
+            if (!config.enableSecondaryVerification) {
+                debugLog('start blocked: feature disabled', { requesterId: rawRequesterId, groupId });
+                return false;
+            }
             
             // Check if feature applies to this group
             const normalizeGroupId = (value) => String(value || '').trim();
@@ -37,13 +50,22 @@ function initVerification(client, db, config, chat) {
             const enabledGroups = Array.isArray(config.secondaryVerificationGroups)
                 ? config.secondaryVerificationGroups.map(normalizeGroupId).filter(Boolean)
                 : [];
-            if (enabledGroups.length === 0) return false;
-            if (!enabledGroups.includes(normalizedGroupId)) return false;
+            if (enabledGroups.length === 0) {
+                debugLog('start blocked: no selected groups', { requesterId: rawRequesterId, groupId });
+                return false;
+            }
+            if (!enabledGroups.includes(normalizedGroupId)) {
+                debugLog('start blocked: group not selected', { requesterId: rawRequesterId, groupId, selectedGroups: enabledGroups });
+                return false;
+            }
 
             const useKeyword = config.enableKeywordVerification;
             const useEmail = config.enableEmailVerification;
             const usePhoto = config.enablePhotoVerification;
-            if (!useKeyword && !useEmail && !usePhoto) return false;
+            if (!useKeyword && !useEmail && !usePhoto) {
+                debugLog('start blocked: no methods enabled', { requesterId: rawRequesterId, groupId });
+                return false;
+            }
 
             const flowType = options.flowType === 'test' ? 'test' : 'join';
             const forceRestart = Boolean(options.forceRestart);
@@ -55,8 +77,10 @@ function initVerification(client, db, config, chat) {
                 const ttlMs = Number.isFinite(rawTtlSec) && rawTtlSec > 0 ? rawTtlSec * 1000 : DEFAULT_SESSION_TTL_MS;
                 const isExpired = !existingRecord.created_at || Date.now() - existingRecord.created_at > ttlMs;
                 if (forceRestart || isExpired) {
+                    debugLog('start replacing existing session', { requesterId: rawRequesterId, groupId, forceRestart, isExpired });
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(rawRequesterId, groupId);
                 } else {
+                    debugLog('start blocked: active session exists', { requesterId: rawRequesterId, groupId });
                     return false; // Already sent them a message, waiting for their reply
                 }
             }
@@ -70,6 +94,15 @@ function initVerification(client, db, config, chat) {
                 VALUES (?, ?, ?, ?, ?, ?, '', '', ?)
             `);
             insertStmt.run(rawRequesterId, groupId, initialState, flowType, useEmail ? 1 : 0, usePhoto ? 1 : 0, Date.now());
+            debugLog('session started', {
+                requesterId: rawRequesterId,
+                groupId,
+                initialState,
+                flowType,
+                useKeyword,
+                useEmail,
+                usePhoto
+            });
 
             const isAr = config.secondaryVerificationLanguage === 'ar';
             // Send initial custom message or method prompt
@@ -90,8 +123,10 @@ function initVerification(client, db, config, chat) {
             }
             try {
                 const response = await client.sendMessage(rawRequesterId, initMsg);
+                debugLog('initial message sent', { requesterId: rawRequesterId, groupId, initialState });
             } catch (e) {
                 console.error(`[Verification] Failed to message ${rawRequesterId}`, e);
+                debugLog('initial message failed', { requesterId: rawRequesterId, groupId, error: e && e.message ? e.message : String(e) });
             }
             return true; // Indicates we intercepted it, do not approve/reject yet
         },
@@ -117,13 +152,25 @@ function initVerification(client, db, config, chat) {
                     break;
                 }
             }
-            if (!record) return false;
+            if (!record) {
+                debugLog('incoming ignored: no active session', { senderId, msgType: msg.type });
+                return false;
+            }
+
+            debugLog('incoming matched session', {
+                senderId,
+                requesterId: record.requester_id,
+                state: record.state,
+                flowType: record.flow_type || 'join',
+                msgType: msg.type
+            });
 
             const now = Date.now();
             const rawTtlSec = parseInt(config.secondaryVerificationDelay, 10);
             const ttlMs = Number.isFinite(rawTtlSec) && rawTtlSec > 0 ? rawTtlSec * 1000 : DEFAULT_SESSION_TTL_MS;
             if (!record.created_at || now - record.created_at > ttlMs) {
                 db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
+                debugLog('session expired and deleted', { requesterId: record.requester_id, state: record.state, ttlMs });
                 return false;
             }
 
@@ -161,9 +208,11 @@ function initVerification(client, db, config, chat) {
 
                     if (banWs.some(w => smartText.includes(w))) {
                         wasHandled = true;
+                        debugLog('ban keyword matched', { requesterId: record.requester_id, flowType: record.flow_type || 'join' });
                         if (isTestFlow) {
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                             await msg.reply(isAr ? 'تم التقاط كلمة الرفض في وضع الاختبار. لن يتم الحظر في الاختبار.' : 'Ban keyword detected in test mode. No blacklist action is applied during tests.');
+                            debugLog('test flow ban handled and session deleted', { requesterId: record.requester_id });
                             return true;
                         }
                         // Reject and ban
@@ -175,12 +224,14 @@ function initVerification(client, db, config, chat) {
                         db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
                         
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
+                        debugLog('ban applied and session deleted', { requesterId: record.requester_id });
                         // Make it a silent trap: no rejection notification
                         return true;
                     } else if (approveWs.some(w => smartText.includes(w))) {
                         wasHandled = true;
                         const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
                         const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
+                        debugLog('approval keyword matched', { requesterId: record.requester_id, useEmail, usePhoto });
 
                         if (!useEmail && !usePhoto) {
                             // Keyword was the only verification needed
@@ -194,11 +245,13 @@ function initVerification(client, db, config, chat) {
                             db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                             await msg.reply(isAr ? 'تم التحقق بنجاح! تمت الموافقة عليك وإضافتك إلى قائمة المتحقق منهم.' : 'Verification successful! You have been approved and added to the verified list.');
+                            debugLog('session completed after keyword only', { requesterId: record.requester_id });
                             return true;
                         }
 
                         // Move to next step
                         db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD' WHERE requester_id = ?").run(record.requester_id);
+                        debugLog('state transition', { requesterId: record.requester_id, from: 'PENDING_CUSTOM', to: 'PENDING_METHOD', useEmail, usePhoto });
                         
                         let reqGroupName = isAr ? "المجموعة" : "the group";
                         try {
@@ -228,6 +281,7 @@ function initVerification(client, db, config, chat) {
                     const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
                     const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
                     const isTestFlow = record.flow_type === 'test';
+                    debugLog('handling method step', { requesterId: record.requester_id, useEmail, usePhoto, hasMedia: Boolean(msg.hasMedia) });
 
                     if (msg.hasMedia) {
                         if (!usePhoto) {
@@ -246,8 +300,10 @@ function initVerification(client, db, config, chat) {
                             await client.sendMessage(adminGroup, media, { caption: (isAr ? `تحقق بالصورة لطلب انضمام.\nالمستخدم: @${senderId.split('@')[0]}\nالمعرف: ${groupToJoin}` : `Photo verification for join request.\nUser: @${senderId.split('@')[0]}\nGroup ID: ${groupToJoin}`), mentions: [senderId] });
                             await msg.reply(isAr ? 'تم استلام الصورة. سيقوم أحد المشرفين بمراجعة طلبك.' : 'Photo received. An admin will review your request.');
                             db.prepare("DELETE FROM secondary_verification WHERE requester_id = ?").run(record.requester_id);
+                            debugLog('photo forwarded and session deleted', { requesterId: record.requester_id, adminGroup });
                         } else {
                             await msg.reply(isAr ? 'التحقق بالصورة مفعل، لكن مجموعة الإدارة غير مهيأة. يرجى إرسال بريد جامعي بدلاً من ذلك أو ضبط مجموعة الإدارة.' : 'Photo verification is enabled, but the admin group is not configured. Please send a college email instead or set the admin group.');
+                            debugLog('photo received but admin group missing', { requesterId: record.requester_id });
                             return true;
                         }
                     } else {
@@ -269,12 +325,14 @@ function initVerification(client, db, config, chat) {
                         const emailMatch = rawText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
                         
                         if (!emailMatch || !emailMatch[0].endsWith(`@${domain}`)) {
+                            debugLog('email rejected', { requesterId: record.requester_id, domain, received: rawText });
                             await msg.reply(isAr ? `بريد خاطئ. يجب أن ينتهي بـ @${domain}. يرجى المحاولة أو إرسال صورة.` : `Wrong email. It must end with @${domain}. Please try again or send a photo.`);
                         } else {
                             const userEmail = emailMatch[0];
                             const code = Math.floor(100000 + Math.random() * 900000).toString();
                             
                             db.prepare("UPDATE secondary_verification SET state = 'PENDING_CODE', email = ?, code = ? WHERE requester_id = ?").run(userEmail, code, record.requester_id);
+                            debugLog('state transition', { requesterId: record.requester_id, from: 'PENDING_METHOD', to: 'PENDING_CODE', email: userEmail });
 
                             // Send email via Outlook
                             if (config.outlookEmail && config.outlookPassword) {
@@ -299,14 +357,17 @@ function initVerification(client, db, config, chat) {
                                         text: isAr ? `رمز التحقق الخاص بك هو: ${code}` : `Your verification code is: ${code}`
                                     });
                                     await msg.reply(isAr ? 'تم إرسال الرمز! تحقق من بريدك (والمجلد غير الهام) ورد بالرمز المكون من 6 أرقام.' : 'Code sent! Check your email (including spam folder) and reply with the 6-digit code.');
+                                    debugLog('verification email sent', { requesterId: record.requester_id, email: userEmail });
                                 } catch(e) {
                                     console.error('SMTP Error', e);
                                     await msg.reply(isAr ? 'خطأ في إرسال البريد. يرجى التواصل مع الإدارة أو إرسال صورة بدلاً من ذلك.' : 'Error sending email. Please contact an admin or send a photo instead.');
                                     db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD' WHERE requester_id = ?").run(record.requester_id);
+                                    debugLog('smtp send failed; reverted to method step', { requesterId: record.requester_id, error: e && e.message ? e.message : String(e) });
                                 }
                             } else {
                                 await msg.reply(isAr ? 'التحقق بالبريد غير مكون بشكل صحيح من قبل المسؤول. يرجى إرسال صورة بدلاً من ذلك.' : 'Email verification is not configured properly by the admin. Please send a photo instead.');
                                 db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD' WHERE requester_id = ?").run(record.requester_id);
+                                debugLog('email settings missing; stayed at method step', { requesterId: record.requester_id });
                             }
                         }
                     }
@@ -326,13 +387,16 @@ function initVerification(client, db, config, chat) {
                         
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                         await msg.reply(isAr ? 'تم التحقق بنجاح! تمت الموافقة عليك وإضافتك إلى قائمة المتحقق منهم.' : 'Verification successful! You have been approved and added to the verified list.');
+                        debugLog('code accepted; session completed', { requesterId: record.requester_id });
                         return true;
                     } else {
+                        debugLog('code rejected', { requesterId: record.requester_id, provided: rawText });
                         await msg.reply(isAr ? 'رمز غير صحيح. يرجى المحاولة مرة أخرى.' : 'Incorrect code. Please try again.');
                     }
                 }
             } catch (e) {
                 console.error('[Verification] Error handling msg:', e);
+                debugLog('handler exception', { requesterId: record && record.requester_id ? record.requester_id : senderId, error: e && e.message ? e.message : String(e) });
             }
 
             return wasHandled;
