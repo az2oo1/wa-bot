@@ -752,7 +752,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             <div class="field-row" style="margin-bottom:10px;">
                                 <div class="field-group" style="margin-bottom:0;">
                                     <label class="field-label">${t('رقم للاختبار', 'Test Number')}</label>
-                                    <input type="text" id="secondaryVerificationTestNumber" placeholder="${t('مثال: 9665XXXXXXXX', 'Example: 15551234567')}">
+                                    <input type="text" id="secondaryVerificationTestNumber" placeholder="${t('مثال: 9665XXXXXXXX', 'Example: 9665123456')}">
                                 </div>
                                 <div class="field-group" style="margin-bottom:0;">
                                     <label class="field-label">${t('المجموعة (اختياري)', 'Group (Optional)')}</label>
@@ -3464,10 +3464,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             });
 
             function formatPendingVerificationItem(item) {
-                const requester = String(item.requesterId || '')
+                const requesterId = String(item.requesterId || '')
                     .replace(/:[0-9]+/, '')
-                    .replace('@lid', '')
-                    .replace('@c.us', '');
+                    .replace('@lid', '@c.us');
                 const groupName = item.groupName || item.groupId || '-';
                 const state = item.state || '-';
                 const ageText = item.createdAt ? new Date(item.createdAt).toLocaleString() : '-';
@@ -3475,7 +3474,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 const groupData = encodeURIComponent(String(item.groupId || ''));
                 return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:1px dashed var(--card-border);padding:8px 0;">'
                     + '<div style="min-width:0;">'
-                    + '<div style="color:var(--text);font-weight:600;">' + requester + '</div>'
+                    + '<div style="color:var(--text);font-weight:600;">' + (currentLang === 'en' ? 'WhatsApp ID: ' : 'معرّف واتساب: ') + requesterId + '</div>'
                     + '<div style="font-size:11px;color:var(--text-muted);">' + groupName + ' • ' + state + '</div>'
                     + '<div style="font-size:10px;color:var(--text-muted);">' + ageText + '</div>'
                     + '</div>'

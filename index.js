@@ -238,7 +238,15 @@ db.exec(`
         require_photo INTEGER,
         email TEXT,
         code TEXT,
-        created_at INTEGER
+        created_at INTEGER,
+        admin_group_id TEXT,
+        admin_decision_msg_id TEXT,
+        admin_last_reminder_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS secondary_verification_bait_log (
+        requester_key TEXT PRIMARY KEY,
+        last_sent_at INTEGER NOT NULL,
+        sent_count INTEGER NOT NULL DEFAULT 0
     );
     CREATE TABLE IF NOT EXISTS whatsapp_groups (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE IF NOT EXISTS custom_groups (
@@ -256,6 +264,9 @@ db.exec(`
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN flow_type TEXT'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN require_email INTEGER'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN require_photo INTEGER'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_group_id TEXT'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_decision_msg_id TEXT'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_last_reminder_at INTEGER'); } catch (e) { }
 
 db.exec(`
     CREATE TABLE IF NOT EXISTS app_users (
@@ -2879,6 +2890,10 @@ client.on('message', async msg => {
         if (chat.isGroup) {
             if (msg.fromMe) return;
 
+            const verificationAdmin = initVerification(client, db, config);
+            const handledAdminDecision = await verificationAdmin.handleAdminDecisionReply(msg);
+            if (handledAdminDecision) return;
+
             const rawAuthorId = msg.author || msg.from;
             let cleanAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
 
@@ -4032,7 +4047,12 @@ async function rejectExpiredSecondaryVerificationSessions() {
         const timeoutDays = Math.max(1, parseInt(config.secondaryVerificationTimeoutDays, 10) || 2);
         const timeoutMs = timeoutDays * 24 * 60 * 60 * 1000;
         const cutoff = Date.now() - timeoutMs;
-        const expiredRows = db.prepare('SELECT requester_id, group_id, created_at FROM secondary_verification WHERE created_at IS NULL OR created_at <= ?').all(cutoff);
+        const expiredRows = db.prepare(`
+            SELECT requester_id, group_id, created_at, state
+            FROM secondary_verification
+            WHERE (created_at IS NULL OR created_at <= ?)
+              AND state NOT IN ('WAITING_ADMIN_PHOTO_REVIEW', 'WAITING_ADMIN_CONTACT_DECISION')
+        `).all(cutoff);
         if (!expiredRows || expiredRows.length === 0) return;
 
         let rejected = 0;
@@ -4041,7 +4061,22 @@ async function rejectExpiredSecondaryVerificationSessions() {
             if (chatObj) {
                 try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [row.requester_id] }); } catch (e) { }
             }
-            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
+            const isAr = config.secondaryVerificationLanguage === 'ar';
+            const approvalKeywords = String(config.approvalKeyword || 'yes')
+                .split(',')
+                .map(value => value.trim())
+                .filter(Boolean);
+            const keywordHint = approvalKeywords.length > 0 ? approvalKeywords.join(' / ') : (isAr ? 'موافقة' : 'yes');
+            const expiryMessage = isAr
+                ? `انتهت فترة التحقق هذه. إذا أردت إعادة التحقق، أرسل كلمة: ${keywordHint}`
+                : `This verification window has expired. If you want to authenticate again, send: ${keywordHint}`;
+            await client.sendMessage(row.requester_id, expiryMessage).catch(() => { });
+
+            db.prepare(`
+                UPDATE secondary_verification
+                SET state = 'EXPIRED_WAITING_REENTRY'
+                WHERE requester_id = ? AND group_id = ?
+            `).run(row.requester_id, row.group_id);
             rejected += 1;
         }
         if (rejected > 0) {
@@ -4059,6 +4094,11 @@ setInterval(() => {
 setInterval(() => {
     rejectExpiredSecondaryVerificationSessions().catch(() => { });
 }, 30 * 60 * 1000);
+
+setInterval(() => {
+    const verification = initVerification(client, db, config);
+    verification.sendAdminDecisionReminders().catch(() => { });
+}, 60 * 60 * 1000);
 
 // ── Admin auto-sync: extract as named function ────────────────────────────────
 async function runAdminSync() {

@@ -5,6 +5,13 @@ const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
 const VERIFICATION_DEBUG = process.env.WA_VERIFICATION_DEBUG === 'true';
 const pendingUserMethodPolls = new Map();
 const pendingAdminPhotoPolls = new Map();
+const pendingAdminContactPolls = new Map();
+const ADMIN_WAIT_STATES = new Set(['WAITING_ADMIN_PHOTO_REVIEW', 'WAITING_ADMIN_CONTACT_DECISION']);
+const REENTRY_READY_STATES = new Set(['EXPIRED_WAITING_REENTRY']);
+const BAIT_REPEAT_COOLDOWN_MS = Math.max(
+    0,
+    parseInt(process.env.WA_BAIT_REPEAT_COOLDOWN_HOURS || '24', 10) * 60 * 60 * 1000
+);
 
 function getSessionTimeoutMs(config) {
     const rawDays = parseFloat(config && config.secondaryVerificationTimeoutDays);
@@ -26,6 +33,31 @@ function normalizeVerificationId(value) {
     let normalized = value.replace(/:[0-9]+/, '');
     if (normalized.includes('@lid')) normalized = normalized.replace('@lid', '@c.us');
     return normalized;
+}
+
+function toRequesterKey(value) {
+    return normalizeVerificationId(value).replace('@c.us', '').trim();
+}
+
+function hasRecentBait(db, requesterId) {
+    if (!BAIT_REPEAT_COOLDOWN_MS) return false;
+    const requesterKey = toRequesterKey(requesterId);
+    if (!requesterKey) return false;
+    const row = db.prepare('SELECT last_sent_at FROM secondary_verification_bait_log WHERE requester_key = ?').get(requesterKey);
+    if (!row || !row.last_sent_at) return false;
+    return Date.now() - Number(row.last_sent_at) < BAIT_REPEAT_COOLDOWN_MS;
+}
+
+function markBaitSent(db, requesterId) {
+    const requesterKey = toRequesterKey(requesterId);
+    if (!requesterKey) return;
+    db.prepare(`
+        INSERT INTO secondary_verification_bait_log (requester_key, last_sent_at, sent_count)
+        VALUES (?, ?, 1)
+        ON CONFLICT(requester_key) DO UPDATE SET
+            last_sent_at = excluded.last_sent_at,
+            sent_count = COALESCE(secondary_verification_bait_log.sent_count, 0) + 1
+    `).run(requesterKey, Date.now());
 }
 
 function getVerificationIdCandidates(value) {
@@ -53,11 +85,27 @@ function extractIncomingText(msg) {
     return [directBody, caption, dataBody, dataCaption].find(value => typeof value === 'string' && value.trim()) || '';
 }
 
+function isAdminWaitState(state) {
+    return ADMIN_WAIT_STATES.has(String(state || '').trim());
+}
+
+function isUserTimeoutState(state) {
+    return !isAdminWaitState(state) && !REENTRY_READY_STATES.has(String(state || '').trim());
+}
+
 function resolveAdminGroupForVerification(config, groupId) {
     const groupConfig = config && config.groupsConfig ? config.groupsConfig[groupId] : null;
     const scopedAdmin = groupConfig && typeof groupConfig.adminGroup === 'string' ? groupConfig.adminGroup.trim() : '';
     const fallbackAdmin = typeof config.defaultAdminGroup === 'string' ? config.defaultAdminGroup.trim() : '';
     return scopedAdmin || fallbackAdmin || '';
+}
+
+function getApprovalKeywords(config) {
+    const keywords = String(config && config.approvalKeyword ? config.approvalKeyword : 'yes')
+        .split(',')
+        .map(value => value.trim())
+        .filter(Boolean);
+    return keywords.length > 0 ? keywords : ['yes'];
 }
 
 async function resolveGroupName(client, groupId) {
@@ -78,9 +126,12 @@ function getVoteSelectionNumber(vote) {
         const joined = `${name} ${localId}`.trim();
         const match = joined.match(/(^|\D)([1-4])(\D|$)/);
         if (match) return match[2];
-        if (/approve|موافقة|قبول/.test(joined.toLowerCase())) return '1';
-        if (/deny|رفض/.test(joined.toLowerCase())) return '2';
-        if (/another|اخرى|أخرى|اعادة|إعادة/.test(joined.toLowerCase())) return '3';
+        const normalized = joined.toLowerCase();
+        if (/approve|موافقة|قبول/.test(normalized)) return '1';
+        if (/deny|رفض/.test(normalized)) return '2';
+        if (/another|اخرى|أخرى|اعادة|إعادة/.test(normalized)) return '3';
+        if (/cancel|إلغاء|الغاء/.test(normalized)) return '4';
+        if (/ban|حظر/.test(normalized)) return '4';
     }
     return '';
 }
@@ -92,16 +143,16 @@ async function sendMethodSelectionPoll(client, config, record, isAr) {
         : `Welcome. You requested to join "${groupName}". Please choose how you want to continue verification:`;
     const options = isAr
         ? [
-            '1 - إرسال رمز تحقق إلى بريدك الجامعي',
-            '2 - إرسال صورة مقرراتك من البلاك بورد',
-            '3 - طلب تواصل مباشر من المشرف',
-            '4 - إلغاء الطلب حالياً'
+            'إرسال رمز تحقق إلى بريدك الجامعي',
+            'إرسال صورة مقرراتك من البلاك بورد',
+            'طلب تواصل مباشر من المشرف',
+            'إلغاء الطلب حالياً'
         ]
         : [
-            '1 - Send a verification code to your student email',
-            '2 - Send a screenshot of your Blackboard courses',
-            '3 - Request direct contact from an admin',
-            '4 - Cancel this request for now'
+            'Send a verification code to your student email',
+            'Send a screenshot of your Blackboard courses',
+            'Request direct contact from an admin',
+            'Cancel this request for now'
         ];
     const poll = new Poll(title, options);
     const pollMsg = await client.sendMessage(record.requester_id, poll);
@@ -170,11 +221,33 @@ function initVerification(client, db, config, chat) {
                             : `Assistance request: user @${normalizeVerificationId(record.requester_id).replace('@c.us', '')} needs admin help to join "${groupName}".`, {
                             mentions: [record.requester_id]
                         });
+
+                        const contactPoll = new Poll(
+                            isAr ? 'قرار الإدارة لطلب التواصل المباشر:' : 'Admin decision for direct-contact request:',
+                            isAr
+                                ? ['1 - موافقة', '2 - رفض', '3 - حظر']
+                                : ['1 - Approve', '2 - Reject', '3 - Ban']
+                        );
+                        const pollMsg = await client.sendMessage(adminGroup, contactPoll, { mentions: [record.requester_id] });
+                        pendingAdminContactPolls.set(pollMsg.id._serialized, {
+                            requesterId: record.requester_id,
+                            groupId: record.group_id
+                        });
+
+                        db.prepare(`
+                            UPDATE secondary_verification
+                            SET state = 'WAITING_ADMIN_CONTACT_DECISION', admin_group_id = ?, admin_decision_msg_id = ?, admin_last_reminder_at = 0
+                            WHERE requester_id = ? AND group_id = ?
+                        `).run(adminGroup, pollMsg.id._serialized, record.requester_id, record.group_id);
+
+                        await client.sendMessage(record.requester_id, isAr
+                            ? 'تم إرسال طلبك إلى المشرفين. سيبقى طلبك معلقاً حتى يراجع المشرفون حالتك.'
+                            : 'Your request has been sent to the admins. It will remain pending until an admin reviews your case.');
+                        return true;
                     }
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
                     await client.sendMessage(record.requester_id, isAr
-                        ? 'تم إرسال طلبك إلى المشرفين، وسيتم التواصل معك قريباً. تم إغلاق جلسة التحقق حالياً.'
-                        : 'Your request was sent to the admins, and they will contact you soon. Your verification session is now closed.');
+                        ? 'تعذر إرسال طلبك للإدارة لأن مجموعة المشرفين غير مهيأة. حاول لاحقاً.'
+                        : 'Could not send your request to admins because the admin group is not configured. Please try again later.');
                     return true;
                 }
 
@@ -188,6 +261,61 @@ function initVerification(client, db, config, chat) {
 
                 await client.sendMessage(record.requester_id, isAr ? 'لم أفهم الخيار. سأعيد إرسال القائمة مرة أخرى.' : 'I could not understand that option. I will resend the menu.');
                 await sendMethodSelectionPoll(client, config, record, isAr);
+                return true;
+            }
+
+            if (pendingAdminContactPolls.has(pollId)) {
+                const ctx = pendingAdminContactPolls.get(pollId);
+                const record = findSessionByRequester(db, ctx.requesterId);
+                const isAr = config.secondaryVerificationLanguage === 'ar';
+                const choice = getVoteSelectionNumber(vote);
+
+                if (!record) {
+                    pendingAdminContactPolls.delete(pollId);
+                    return true;
+                }
+
+                const joinChat = await client.getChatById(record.group_id).catch(() => null);
+                const cleanId = normalizeVerificationId(record.requester_id).replace('@c.us', '');
+
+                if (choice === '1') {
+                    if (joinChat) {
+                        try { await joinChat.approveGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                    }
+                    db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
+                    pendingAdminContactPolls.delete(pollId);
+                    await client.sendMessage(record.requester_id, isAr
+                        ? 'تمت الموافقة على طلبك من قبل الإدارة. أهلاً وسهلاً بك.'
+                        : 'Your request was approved by the admin team. Welcome.');
+                    return true;
+                }
+
+                if (choice === '2') {
+                    if (joinChat) {
+                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                    }
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
+                    pendingAdminContactPolls.delete(pollId);
+                    await client.sendMessage(record.requester_id, isAr
+                        ? 'تم رفض طلب الانضمام من قبل الإدارة.'
+                        : 'Your join request was rejected by the admin team.');
+                    return true;
+                }
+
+                if (choice === '3') {
+                    if (joinChat) {
+                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                    }
+                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
+                    pendingAdminContactPolls.delete(pollId);
+                    await client.sendMessage(record.requester_id, isAr
+                        ? 'تم رفض الطلب وإضافة الرقم إلى القائمة السوداء.'
+                        : 'Your request was rejected and your number was added to the blacklist.');
+                    return true;
+                }
+
                 return true;
             }
 
@@ -219,11 +347,15 @@ function initVerification(client, db, config, chat) {
                 }
 
                 if (choice === '2') {
-                    db.prepare("UPDATE secondary_verification SET state = 'PENDING_PHOTO_UPLOAD' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
+                    const chatForReject = await client.getChatById(record.group_id).catch(() => null);
+                    if (chatForReject) {
+                        try { await chatForReject.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                    }
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
                     pendingAdminPhotoPolls.delete(pollId);
                     await client.sendMessage(record.requester_id, isAr
-                        ? 'تم رفض الصورة. الأسباب المحتملة: 1) قد تكون مستخدمة من شخص آخر 2) ليست المطلوب 3) الصورة غير واضحة 4) سبب آخر من المشرف. أرسل 1 للعودة إلى القائمة.'
-                        : 'Your photo was declined. Possible reasons: 1) it may belong to another user 2) it is not what we requested 3) the image is unclear 4) another admin reason. Send 1 to return to the menu.');
+                        ? 'تم رفض طلبك بعد مراجعة الصورة. يمكنك التقديم مرة أخرى لاحقاً.'
+                        : 'Your request was rejected after reviewing the screenshot. You may apply again later.');
                     return true;
                 }
 
@@ -236,10 +368,157 @@ function initVerification(client, db, config, chat) {
                     return true;
                 }
 
+                if (choice === '4') {
+                    const chatForBan = await client.getChatById(record.group_id).catch(() => null);
+                    if (chatForBan) {
+                        try { await chatForBan.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                    }
+                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
+                    pendingAdminPhotoPolls.delete(pollId);
+                    await client.sendMessage(record.requester_id, isAr
+                        ? 'تم رفض الطلب وإضافة الرقم إلى القائمة السوداء.'
+                        : 'Your request was rejected and your number was added to the blacklist.');
+                    return true;
+                }
+
                 return true;
             }
 
             return false;
+        },
+
+        handleAdminDecisionReply: async (msg) => {
+            try {
+                if (!msg || !msg.isGroupMsg || !msg.hasQuotedMsg) return false;
+
+                const body = extractIncomingText(msg).trim().toLowerCase();
+                if (!body) return false;
+
+                let action = '';
+                if (/approve|aprove|موافقة|قبول/.test(body)) action = 'approve';
+                else if (/reject|rejict|deny|رفض/.test(body)) action = 'reject';
+                else if (/ban|حظر/.test(body)) action = 'ban';
+                if (!action) return false;
+
+                const quoted = await msg.getQuotedMessage().catch(() => null);
+                const quotedId = quoted && quoted.id ? quoted.id._serialized : '';
+                if (!quotedId) return false;
+
+                const row = db.prepare(`
+                    SELECT * FROM secondary_verification
+                    WHERE admin_decision_msg_id = ?
+                      AND state IN ('WAITING_ADMIN_PHOTO_REVIEW', 'WAITING_ADMIN_CONTACT_DECISION')
+                    LIMIT 1
+                `).get(quotedId);
+                if (!row) return false;
+
+                const groupChat = await msg.getChat().catch(() => null);
+                const actorId = normalizeVerificationId(msg.author || msg.from || '');
+                if (!groupChat || !groupChat.isGroup || !actorId) return false;
+                const actor = Array.isArray(groupChat.participants)
+                    ? groupChat.participants.find(p => normalizeVerificationId(p.id && p.id._serialized) === actorId)
+                    : null;
+                const isActorAdmin = Boolean(actor && (actor.isAdmin || actor.isSuperAdmin));
+                if (!isActorAdmin) {
+                    await msg.reply(config.secondaryVerificationLanguage === 'ar'
+                        ? 'هذا القرار متاح للمشرفين فقط.'
+                        : 'This action is available to admins only.');
+                    return true;
+                }
+
+                const isAr = config.secondaryVerificationLanguage === 'ar';
+                const requesterId = row.requester_id;
+                const cleanId = normalizeVerificationId(requesterId).replace('@c.us', '');
+                const joinChat = await client.getChatById(row.group_id).catch(() => null);
+
+                if (action === 'approve') {
+                    if (joinChat) {
+                        try { await joinChat.approveGroupMembershipRequests({ requesterIds: [requesterId] }); } catch (e) { }
+                    }
+                    db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
+                    await client.sendMessage(requesterId, isAr
+                        ? 'تمت الموافقة على طلبك من قبل الإدارة. أهلاً وسهلاً بك.'
+                        : 'Your request has been approved by the admins. Welcome.');
+                    await msg.reply(isAr ? 'تم تنفيذ الموافقة بنجاح.' : 'Approval has been applied successfully.');
+                    return true;
+                }
+
+                if (action === 'reject') {
+                    if (joinChat) {
+                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [requesterId] }); } catch (e) { }
+                    }
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
+                    await client.sendMessage(requesterId, isAr
+                        ? 'تم رفض طلب الانضمام من قبل الإدارة.'
+                        : 'Your join request was rejected by the admins.');
+                    await msg.reply(isAr ? 'تم تنفيذ الرفض بنجاح.' : 'Rejection has been applied successfully.');
+                    return true;
+                }
+
+                if (action === 'ban') {
+                    if (joinChat) {
+                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [requesterId] }); } catch (e) { }
+                    }
+                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
+                    await client.sendMessage(requesterId, isAr
+                        ? 'تم رفض الطلب وإضافة الرقم إلى القائمة السوداء.'
+                        : 'Your request was rejected and your number was added to the blacklist.');
+                    await msg.reply(isAr ? 'تم تنفيذ الحظر بنجاح.' : 'Ban has been applied successfully.');
+                    return true;
+                }
+
+                return false;
+            } catch (e) {
+                debugLog('admin decision reply error', { error: e && e.message ? e.message : String(e) });
+                return false;
+            }
+        },
+
+        sendAdminDecisionReminders: async () => {
+            try {
+                const reminderIntervalMs = 6 * 60 * 60 * 1000;
+                const now = Date.now();
+                const rows = db.prepare(`
+                    SELECT requester_id, group_id, state, admin_group_id, admin_decision_msg_id, admin_last_reminder_at
+                    FROM secondary_verification
+                    WHERE state IN ('WAITING_ADMIN_PHOTO_REVIEW', 'WAITING_ADMIN_CONTACT_DECISION')
+                      AND admin_group_id IS NOT NULL
+                      AND admin_group_id != ''
+                      AND admin_decision_msg_id IS NOT NULL
+                      AND admin_decision_msg_id != ''
+                `).all();
+
+                for (const row of rows) {
+                    const lastReminderAt = Number(row.admin_last_reminder_at || 0);
+                    if (lastReminderAt > 0 && now - lastReminderAt < reminderIntervalMs) continue;
+
+                    const isAr = config.secondaryVerificationLanguage === 'ar';
+                    const reminderText = row.state === 'WAITING_ADMIN_CONTACT_DECISION'
+                        ? (isAr
+                            ? 'تذكير: يوجد طلب تواصل مباشر بانتظار قرار الإدارة. يرجى التصويت أو الرد: موافقة / رفض / حظر.'
+                            : 'Reminder: a direct-contact request is pending admin decision. Please vote or reply: approve / reject / ban.')
+                        : (isAr
+                            ? 'تذكير: توجد صورة تحقق بانتظار قرار الإدارة. يرجى التصويت أو الرد: موافقة / رفض / حظر.'
+                            : 'Reminder: a verification screenshot is pending admin decision. Please vote or reply: approve / reject / ban.');
+
+                    try {
+                        await client.sendMessage(row.admin_group_id, reminderText, { quotedMessageId: row.admin_decision_msg_id });
+                    } catch (e) {
+                        await client.sendMessage(row.admin_group_id, reminderText).catch(() => { });
+                    }
+
+                    db.prepare(`
+                        UPDATE secondary_verification
+                        SET admin_last_reminder_at = ?
+                        WHERE requester_id = ? AND group_id = ?
+                    `).run(now, row.requester_id, row.group_id);
+                }
+            } catch (e) {
+                debugLog('admin reminders error', { error: e && e.message ? e.message : String(e) });
+            }
         },
 
         // Triggered after bio check is passed
@@ -274,6 +553,11 @@ function initVerification(client, db, config, chat) {
 
             const flowType = options.flowType === 'test' ? 'test' : 'join';
             const forceRestart = Boolean(options.forceRestart);
+
+            if (!forceRestart && flowType !== 'test' && hasRecentBait(db, rawRequesterId)) {
+                debugLog('start blocked: bait cooldown active', { requesterId: rawRequesterId, groupId, cooldownMs: BAIT_REPEAT_COOLDOWN_MS });
+                return false;
+            }
 
             // PREVENT SPAM: match existing session by normalized requester id in the same group.
             // WhatsApp may alternate identifiers between @lid and @c.us for the same user.
@@ -334,6 +618,9 @@ function initVerification(client, db, config, chat) {
             }
             try {
                 await client.sendMessage(rawRequesterId, initMsg);
+                if (flowType !== 'test') {
+                    markBaitSent(db, rawRequesterId);
+                }
                 if (!useKeyword && (useEmail || usePhoto)) {
                     const seededRecord = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(rawRequesterId, groupId);
                     if (seededRecord) {
@@ -388,7 +675,7 @@ function initVerification(client, db, config, chat) {
 
             const now = Date.now();
             const ttlMs = getSessionTimeoutMs(config);
-            if (!record.created_at || now - record.created_at > ttlMs) {
+            if (isUserTimeoutState(record.state) && (!record.created_at || now - record.created_at > ttlMs)) {
                 const chatObj = await client.getChatById(record.group_id).catch(() => null);
                 if (chatObj) {
                     try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
@@ -429,6 +716,57 @@ function initVerification(client, db, config, chat) {
 
             try {
                 const isAr = config.secondaryVerificationLanguage === 'ar';
+                const approvalKeywords = getApprovalKeywords(config);
+                const approvalKeywordMatch = (() => {
+                    if (!isTextMessage) return false;
+                    const normalizedKeywords = config.enableSecondarySmartMatch
+                        ? approvalKeywords.map(value => applySmartMatch(value.toLowerCase()))
+                        : approvalKeywords.map(value => value.toLowerCase());
+                    return normalizedKeywords.some(keyword => keyword && smartText.includes(keyword));
+                })();
+
+                if (record.state === 'EXPIRED_WAITING_REENTRY') {
+                    if (!isTextMessage) return false;
+
+                    if (!approvalKeywordMatch) {
+                        const keywordHint = approvalKeywords.join(' / ');
+                        await msg.reply(isAr
+                            ? `انتهت فترة التحقق. إذا أردت إعادة التحقق، أرسل كلمة: ${keywordHint}`
+                            : `Your verification window has expired. If you want to authenticate again, send: ${keywordHint}`);
+                        return true;
+                    }
+
+                    const useKeyword = config.enableKeywordVerification;
+                    const useEmail = config.enableEmailVerification;
+                    const usePhoto = config.enablePhotoVerification;
+                    const initialState = useKeyword ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
+                    db.prepare(`
+                        UPDATE secondary_verification
+                        SET state = ?, flow_type = COALESCE(flow_type, 'join'), require_email = ?, require_photo = ?, email = '', code = '', created_at = ?
+                        WHERE requester_id = ? AND group_id = ?
+                    `).run(initialState, useEmail ? 1 : 0, usePhoto ? 1 : 0, Date.now(), record.requester_id, record.group_id);
+
+                    const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
+                    const initMsg = useKeyword
+                        ? (() => {
+                            const baits = config.customMessageText ? config.customMessageText.split('||').map(s => s.trim()).filter(s => s) : [];
+                            if (baits.length > 0) return baits[Math.floor(Math.random() * baits.length)];
+                            return isAr ? 'أهلاً بك. لإكمال الطلب، يرجى الرد بكلمة الموافقة المعتمدة.' : 'Welcome. To continue your request, please reply with the approved keyword.';
+                        })()
+                        : (isAr
+                            ? 'تمت إعادة تفعيل التحقق. سأرسل لك الآن قائمة خيارات التحقق.'
+                            : 'Verification has been reactivated. I will now send you the verification options.');
+
+                    try {
+                        await client.sendMessage(record.requester_id, initMsg);
+                        if (!useKeyword && (useEmail || usePhoto) && refreshed) {
+                            await sendMethodSelectionPoll(client, config, refreshed, isAr);
+                        }
+                    } catch (e) {
+                        debugLog('expired reentry message failed', { requesterId: record.requester_id, error: e && e.message ? e.message : String(e) });
+                    }
+                    return true;
+                }
                 
                 if (record.state === 'PENDING_CUSTOM') {
                     if (!isTextMessage) {
@@ -637,13 +975,23 @@ function initVerification(client, db, config, chat) {
                     const caption = isAr
                         ? `المستخدم @${normalizeVerificationId(record.requester_id).replace('@c.us', '')} طلب الانضمام إلى "${groupName}" وأرسل صورة من البلاك بورد.`
                         : `User @${normalizeVerificationId(record.requester_id).replace('@c.us', '')} requested to join "${groupName}" and sent a Blackboard screenshot.`;
-                    await client.sendMessage(adminGroup, media, { caption, mentions: [record.requester_id] });
+                    const mediaMsg = await client.sendMessage(adminGroup, media, { caption, mentions: [record.requester_id] });
+
+                    const decisionMsg = await client.sendMessage(adminGroup, isAr
+                        ? 'يرجى الرد على هذه الرسالة بكلمة: موافقة أو رفض أو حظر. ويمكنك أيضاً التصويت من الاستطلاع أدناه.'
+                        : 'Please reply to this message with: approve, reject, or ban. You can also vote using the poll below.', {
+                        quotedMessageId: mediaMsg.id._serialized
+                    }).catch(async () => {
+                        return client.sendMessage(adminGroup, isAr
+                            ? 'تعليمات القرار: اكتب موافقة أو رفض أو حظر مع الرد على رسالة الصورة.'
+                            : 'Decision instruction: reply with approve, reject, or ban to the screenshot message.');
+                    });
 
                     const adminPoll = new Poll(
                         isAr ? 'قرار الإدارة على الصورة:' : 'Admin decision for this screenshot:',
                         isAr
-                            ? ['1 - موافقة', '2 - رفض', '3 - طلب صورة أخرى']
-                            : ['1 - Approve', '2 - Deny', '3 - Ask for another photo']
+                            ? ['1 - موافقة', '2 - رفض', '3 - طلب صورة أخرى', '4 - حظر']
+                            : ['1 - Approve', '2 - Deny', '3 - Ask for another photo', '4 - Ban']
                     );
                     const pollMsg = await client.sendMessage(adminGroup, adminPoll, { mentions: [record.requester_id] });
                     pendingAdminPhotoPolls.set(pollMsg.id._serialized, {
@@ -651,8 +999,11 @@ function initVerification(client, db, config, chat) {
                         groupId: record.group_id
                     });
 
-                    db.prepare("UPDATE secondary_verification SET state = 'WAITING_ADMIN_PHOTO_REVIEW' WHERE requester_id = ? AND group_id = ?")
-                        .run(record.requester_id, record.group_id);
+                    db.prepare(`
+                        UPDATE secondary_verification
+                        SET state = 'WAITING_ADMIN_PHOTO_REVIEW', admin_group_id = ?, admin_decision_msg_id = ?, admin_last_reminder_at = 0
+                        WHERE requester_id = ? AND group_id = ?
+                    `).run(adminGroup, decisionMsg && decisionMsg.id ? decisionMsg.id._serialized : '', record.requester_id, record.group_id);
                     await msg.reply(isAr ? 'تم إرسال الصورة للإدارة للمراجعة.' : 'Your screenshot was sent to admins for review.');
                     return true;
                 } else if (record.state === 'WAITING_ADMIN_PHOTO_REVIEW') {
