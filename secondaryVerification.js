@@ -176,6 +176,18 @@ function upsertReplyLogNoReply(db, requesterId, groupId, state = '') {
     `).run(requesterKey, normalizeVerificationId(requesterId), groupId || '', String(state || ''), now);
 }
 
+function logEmail(db, requesterId, groupId, email, status, errorCode = '', errorMessage = '') {
+    const requesterKey = normalizeReplyLogKey(requesterId);
+    if (!requesterKey) return;
+    const now = Date.now();
+    const sentAt = status === 'sent' ? now : null;
+    db.prepare(`
+        INSERT INTO email_log (
+            requester_key, requester_id, group_id, email, status, error_code, error_message, sent_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(requesterKey, normalizeVerificationId(requesterId), groupId || '', email || '', status, errorCode || '', errorMessage || '', sentAt, now);
+}
+
 async function resolveGroupName(client, groupId) {
     try {
         const chatObj = await client.getChatById(groupId);
@@ -213,18 +225,11 @@ function getVoteSelectionNumber(vote) {
 }
 
 function getMethodSelectionAction(vote) {
-    const options = Array.isArray(vote && vote.selectedOptions) ? vote.selectedOptions : [];
-    for (const option of options) {
-        const name = option && typeof option === 'object'
-            ? (typeof option.name === 'string' ? option.name : '')
-            : (typeof option === 'string' ? option : '');
-        const normalized = name.toLowerCase();
-
-        if (/verification code|student email|بريد|رمز تحقق/.test(normalized)) return 'email';
-        if (/screenshot|blackboard|صورة|بلاك بورد/.test(normalized)) return 'photo';
-        if (/direct contact|admin help|contact from an admin|تواصل مباشر|المشرف/.test(normalized)) return 'contact';
-        if (/cancel this request|cancel|إلغاء|الغاء/.test(normalized)) return 'cancel';
-    }
+    const optionNumber = getVoteSelectionNumber(vote);
+    if (optionNumber === '1') return 'email';
+    if (optionNumber === '2') return 'photo';
+    if (optionNumber === '3') return 'contact';
+    if (optionNumber === '4') return 'cancel';
     return 'unknown';
 }
 
@@ -330,7 +335,7 @@ function initVerification(client, db, config, chat) {
                 if (choice === 'contact') {
                     const adminGroup = resolveAdminGroupForVerification(config, record.group_id);
                     if (adminGroup) {
-                        const requesterHandle = normalizeVerificationId(record.requester_id).replace('@c.us', '');
+                        const requesterHandle = toRequesterKey(record.requester_id);
                         const contactPoll = new Poll(
                             isAr
                                 ? `طلب تواصل مباشر من @${requesterHandle} للانضمام إلى "${groupName}". اختر قرار الإدارة:`
@@ -388,7 +393,7 @@ function initVerification(client, db, config, chat) {
                 }
 
                 const joinChat = await client.getChatById(record.group_id).catch(() => null);
-                const cleanId = normalizeVerificationId(record.requester_id).replace('@c.us', '');
+                const cleanId = toRequesterKey(record.requester_id);
 
                 if (choice === '1') {
                     if (joinChat) {
@@ -443,7 +448,7 @@ function initVerification(client, db, config, chat) {
                 }
 
                 const chatObj = await client.getChatById(record.group_id).catch(() => null);
-                const cleanId = normalizeVerificationId(record.requester_id).replace('@c.us', '');
+                const cleanId = toRequesterKey(record.requester_id);
 
                 if (choice === '1') {
                     if (chatObj) {
@@ -541,7 +546,7 @@ function initVerification(client, db, config, chat) {
 
                 const isAr = config.secondaryVerificationLanguage === 'ar';
                 const requesterId = row.requester_id;
-                const cleanId = normalizeVerificationId(requesterId).replace('@c.us', '');
+                const cleanId = toRequesterKey(requesterId);
                 const joinChat = await client.getChatById(row.group_id).catch(() => null);
 
                 if (action === 'approve') {
@@ -769,7 +774,7 @@ function initVerification(client, db, config, chat) {
                         const methodsEnabled = (seededRecord.require_email === 1) || (seededRecord.require_photo === 1);
                         if (!methodsEnabled) {
                             const chatObj = await client.getChatById(groupId).catch(() => null);
-                            const cleanId = normalizeVerificationId(rawRequesterId).replace('@c.us', '');
+                            const cleanId = toRequesterKey(rawRequesterId);
                             if (chatObj) {
                                 try { await chatObj.approveGroupMembershipRequests({ requesterIds: [rawRequesterId] }); } catch (e) { }
                             }
@@ -961,7 +966,7 @@ function initVerification(client, db, config, chat) {
                         }
                         // Reject and ban
                         const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
-                        const cleanId = normalizeVerificationId(senderId).replace('@c.us', '');
+                        const cleanId = toRequesterKey(record.requester_id);
                         if (chatObj) await chatObj.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] });
                         
                         // Add to blacklist (ban)
@@ -982,7 +987,7 @@ function initVerification(client, db, config, chat) {
                         if (!useEmail && !usePhoto) {
                             // Keyword was the only verification needed
                             const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
-                            const cleanId = normalizeVerificationId(senderId).replace('@c.us', '');
+                            const cleanId = toRequesterKey(record.requester_id);
                             const groupName = await resolveGroupName(client, groupToJoin);
                             if (chatObj) {
                                 try {
@@ -1018,7 +1023,7 @@ function initVerification(client, db, config, chat) {
                         }
                         // If the bait answer is wrong, reject and blacklist for join flow.
                         const chatObj = await client.getChatById(groupToJoin).catch(() => null);
-                        const cleanId = normalizeVerificationId(senderId).replace('@c.us', '');
+                        const cleanId = toRequesterKey(record.requester_id);
                         if (chatObj) {
                             try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
                         }
@@ -1033,7 +1038,7 @@ function initVerification(client, db, config, chat) {
                     const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
                     if (!useEmail && !usePhoto) {
                         const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
-                        const cleanId = normalizeVerificationId(senderId).replace('@c.us', '');
+                        const cleanId = toRequesterKey(record.requester_id);
                         const groupName = await resolveGroupName(client, groupToJoin);
                         if (chatObj) {
                             try {
@@ -1119,11 +1124,15 @@ function initVerification(client, db, config, chat) {
                                 subject: isAr ? 'رمز التحقق لمجموعة الجامعة' : 'College Group Verification Code',
                                 text: isAr ? `رمز التحقق الخاص بك هو: ${code}` : `Your verification code is: ${code}`
                             });
+                            logEmail(db, record.requester_id, record.group_id, userEmail, 'sent');
                             await msg.reply(isAr
                                 ? 'تم إرسال رمز التحقق إلى بريدك. إن لم تجده، افحص البريد غير الهام. وللرجوع للقائمة أرسل 1.'
                                 : 'A verification code has been sent to your email. If you cannot find it, please check junk mail. Send 1 to return to the menu.');
                         } catch (e) {
                             const isAuthError = e && (e.code === 'EAUTH' || e.responseCode === 535);
+                            const errorCode = e && e.code ? String(e.code) : (e && e.responseCode ? String(e.responseCode) : 'UNKNOWN_ERROR');
+                            const errorMessage = e && e.message ? String(e.message) : String(e);
+                            logEmail(db, record.requester_id, record.group_id, userEmail, 'failed', errorCode, errorMessage);
                             await msg.reply(isAr
                                 ? (isAuthError
                                     ? 'تعذر إرسال البريد بسبب إعدادات SMTP. سنعيدك للقائمة السابقة.'
@@ -1137,6 +1146,7 @@ function initVerification(client, db, config, chat) {
                             if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
                         }
                     } else {
+                        logEmail(db, record.requester_id, record.group_id, userEmail, 'failed', 'NO_SMTP_CONFIG', 'Email settings not configured');
                         await msg.reply(isAr
                             ? 'إعدادات البريد غير مكتملة لدى الإدارة. سنعيدك إلى القائمة السابقة.'
                             : 'Email settings are not configured by the admin. Returning you to the previous menu.');
@@ -1171,8 +1181,8 @@ function initVerification(client, db, config, chat) {
 
                     const groupName = await resolveGroupName(client, record.group_id);
                     const caption = isAr
-                        ? `المستخدم @${normalizeVerificationId(record.requester_id).replace('@c.us', '')} طلب الانضمام إلى "${groupName}" وأرسل صورة من البلاك بورد.`
-                        : `User @${normalizeVerificationId(record.requester_id).replace('@c.us', '')} requested to join "${groupName}" and sent a Blackboard screenshot.`;
+                        ? `المستخدم @${toRequesterKey(record.requester_id)} طلب الانضمام إلى "${groupName}" وأرسل صورة من البلاك بورد.`
+                        : `User @${toRequesterKey(record.requester_id)} requested to join "${groupName}" and sent a Blackboard screenshot.`;
                     const mediaMsg = await client.sendMessage(adminGroup, media, { caption, mentions: [record.requester_id] });
 
                     const decisionMsg = await client.sendMessage(adminGroup, isAr
@@ -1230,7 +1240,7 @@ function initVerification(client, db, config, chat) {
                     }
                     if (rawText === record.code) {
                         const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
-                        const cleanId = normalizeVerificationId(senderId).replace('@c.us', '');
+                        const cleanId = toRequesterKey(record.requester_id);
                         if (chatObj) {
                             await chatObj.approveGroupMembershipRequests({ requesterIds: [record.requester_id] });
                         }

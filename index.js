@@ -261,6 +261,18 @@ db.exec(`
         last_state TEXT,
         updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS email_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        requester_key TEXT NOT NULL,
+        requester_id TEXT NOT NULL,
+        group_id TEXT,
+        email TEXT,
+        status TEXT NOT NULL,
+        error_code TEXT,
+        error_message TEXT,
+        sent_at INTEGER,
+        created_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS whatsapp_groups (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE IF NOT EXISTS custom_groups (
         group_id TEXT PRIMARY KEY, admin_group TEXT, use_default_words INTEGER,
@@ -290,6 +302,9 @@ try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN replied_t
 try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN reply_count INTEGER'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN last_state TEXT'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN updated_at INTEGER'); } catch (e) { }
+try { db.exec('ALTER TABLE email_log ADD COLUMN requester_key TEXT'); } catch (e) { }
+try { db.exec('ALTER TABLE email_log ADD COLUMN error_code TEXT'); } catch (e) { }
+try { db.exec('ALTER TABLE email_log ADD COLUMN error_message TEXT'); } catch (e) { }
 
 db.exec(`
     CREATE TABLE IF NOT EXISTS app_users (
@@ -1681,6 +1696,62 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
     } catch (e) {
         console.error('[Secondary Verification] Pending list error:', e);
         return res.status(500).json({ error: 'Failed to fetch pending approvals.' });
+    }
+});
+
+app.get('/api/email-log', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    try {
+        const limit = Math.min(Math.max(parseInt(req.query.limit || '100', 10), 1), 1000);
+        const offset = Math.max(parseInt(req.query.offset || '0', 10), 0);
+        const status = req.query.status ? String(req.query.status).toLowerCase() : '';
+        const searchEmail = req.query.email ? String(req.query.email).trim() : '';
+
+        let query = 'SELECT * FROM email_log';
+        const params = [];
+        
+        if (status && ['sent', 'failed', 'pending'].includes(status)) {
+            query += ' WHERE status = ?';
+            params.push(status);
+        }
+        if (searchEmail) {
+            query += (params.length > 0 ? ' AND' : ' WHERE') + ' email LIKE ?';
+            params.push(`%${searchEmail}%`);
+        }
+
+        query += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+        params.push(limit, offset);
+
+        const logs = db.prepare(query).all(...params);
+        const countStmt = 'SELECT COUNT(*) as total FROM email_log' + 
+            (status ? ' WHERE status = ?' : '') + 
+            (searchEmail ? (status ? ' AND' : ' WHERE') + ' email LIKE ?' : '');
+        const countParams = [];
+        if (status) countParams.push(status);
+        if (searchEmail) countParams.push(`%${searchEmail}%`);
+        const { total } = db.prepare(countStmt).get(...countParams);
+
+        const mapped = logs.map(row => ({
+            id: row.id,
+            requesterKey: row.requester_key,
+            requesterId: row.requester_id,
+            groupId: row.group_id,
+            email: row.email,
+            status: row.status,
+            errorCode: row.error_code || '',
+            errorMessage: row.error_message || '',
+            sentAt: Number(row.sent_at || 0),
+            createdAt: Number(row.created_at || 0)
+        }));
+
+        return res.json({ 
+            total, 
+            limit, 
+            offset, 
+            logs: mapped 
+        });
+    } catch (e) {
+        console.error('[Email Log] Fetch error:', e);
+        return res.status(500).json({ error: 'Failed to fetch email logs.' });
     }
 });
 
