@@ -3,6 +3,12 @@ const nodemailer = require('nodemailer');
 const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
 const VERIFICATION_DEBUG = process.env.WA_VERIFICATION_DEBUG === 'true';
 
+function getSessionTimeoutMs(config) {
+    const rawDays = parseFloat(config && config.secondaryVerificationTimeoutDays);
+    const days = Number.isFinite(rawDays) && rawDays > 0 ? rawDays : 2;
+    return Math.round(days * 24 * 60 * 60 * 1000);
+}
+
 function debugLog(message, meta = {}) {
     if (!VERIFICATION_DEBUG) return;
     try {
@@ -82,8 +88,7 @@ function initVerification(client, db, config, chat) {
             // PREVENT SPAM: Check if this user already has an active verification process
             const existingRecord = db.prepare('SELECT requester_id, group_id, created_at FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(rawRequesterId, groupId);
             if (existingRecord) {
-                const rawTtlSec = parseInt(config.secondaryVerificationDelay, 10);
-                const ttlMs = Number.isFinite(rawTtlSec) && rawTtlSec > 0 ? rawTtlSec * 1000 : DEFAULT_SESSION_TTL_MS;
+                const ttlMs = getSessionTimeoutMs(config);
                 const isExpired = !existingRecord.created_at || Date.now() - existingRecord.created_at > ttlMs;
                 if (forceRestart || isExpired) {
                     debugLog('start replacing existing session', { requesterId: rawRequesterId, groupId, forceRestart, isExpired });
@@ -179,9 +184,12 @@ function initVerification(client, db, config, chat) {
             });
 
             const now = Date.now();
-            const rawTtlSec = parseInt(config.secondaryVerificationDelay, 10);
-            const ttlMs = Number.isFinite(rawTtlSec) && rawTtlSec > 0 ? rawTtlSec * 1000 : DEFAULT_SESSION_TTL_MS;
+            const ttlMs = getSessionTimeoutMs(config);
             if (!record.created_at || now - record.created_at > ttlMs) {
+                const chatObj = await client.getChatById(record.group_id).catch(() => null);
+                if (chatObj) {
+                    try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                }
                 db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                 debugLog('session expired and deleted', { requesterId: record.requester_id, state: record.state, ttlMs });
                 return false;
@@ -198,9 +206,23 @@ function initVerification(client, db, config, chat) {
 
             const rawText = incomingText.trim().toLowerCase();
             const smartText = config.enableSecondarySmartMatch ? applySmartMatch(rawText) : rawText;
+            const stopCode = String(config.secondaryVerificationStopCode || '').trim().toLowerCase();
             
             const groupToJoin = record.group_id;
             let wasHandled = false;
+
+            if (stopCode && rawText === stopCode) {
+                const chatObj = await client.getChatById(groupToJoin).catch(() => null);
+                if (chatObj) {
+                    try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                }
+                db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
+                await msg.reply(config.secondaryVerificationLanguage === 'ar'
+                    ? 'تم إيقاف عملية التحقق وإلغاء طلب الانضمام.'
+                    : 'Verification process stopped and join request rejected.');
+                debugLog('session stopped by stop code from requester', { requesterId: record.requester_id });
+                return true;
+            }
 
             try {
                 const isAr = config.secondaryVerificationLanguage === 'ar';
@@ -363,7 +385,7 @@ function initVerification(client, db, config, chat) {
                                         pass: config.outlookPassword
                                     },
                                     tls: {
-                                        ciphers: 'SSLv3'
+                                        minVersion: 'TLSv1.2'
                                     }
                                 });
 
@@ -378,9 +400,22 @@ function initVerification(client, db, config, chat) {
                                     debugLog('verification email sent', { requesterId: record.requester_id, email: userEmail });
                                 } catch(e) {
                                     console.error('SMTP Error', e);
-                                    await msg.reply(isAr ? 'خطأ في إرسال البريد. يرجى التواصل مع الإدارة أو إرسال صورة بدلاً من ذلك.' : 'Error sending email. Please contact an admin or send a photo instead.');
+                                    const isAuthError = e && (e.code === 'EAUTH' || e.responseCode === 535);
+                                    if (isAuthError) {
+                                        await msg.reply(isAr
+                                            ? 'تعذر إرسال رمز البريد لأن حساب Outlook مرفوض (SMTP). يجب على المسؤول استخدام App Password وتفعيل SMTP AUTH للحساب، أو استخدم التحقق بالصورة الآن.'
+                                            : 'Could not send the email code because the Outlook account was rejected by SMTP auth. Admin must use an App Password and enable SMTP AUTH for the account, or use photo verification now.');
+                                    } else {
+                                        await msg.reply(isAr ? 'خطأ في إرسال البريد. يرجى التواصل مع الإدارة أو إرسال صورة بدلاً من ذلك.' : 'Error sending email. Please contact an admin or send a photo instead.');
+                                    }
                                     db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD' WHERE requester_id = ?").run(record.requester_id);
-                                    debugLog('smtp send failed; reverted to method step', { requesterId: record.requester_id, error: e && e.message ? e.message : String(e) });
+                                    debugLog('smtp send failed; reverted to method step', {
+                                        requesterId: record.requester_id,
+                                        error: e && e.message ? e.message : String(e),
+                                        code: e && e.code ? e.code : null,
+                                        responseCode: e && e.responseCode ? e.responseCode : null,
+                                        authError: isAuthError
+                                    });
                                 }
                             } else {
                                 await msg.reply(isAr ? 'التحقق بالبريد غير مكون بشكل صحيح من قبل المسؤول. يرجى إرسال صورة بدلاً من ذلك.' : 'Email verification is not configured properly by the admin. Please send a photo instead.');

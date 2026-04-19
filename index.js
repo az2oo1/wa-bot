@@ -328,10 +328,12 @@ function loadConfigFromDB() {
         secondaryVerificationGroups: [],
         secondaryVerificationLanguage: "en",
         secondaryVerificationDelay: 3600,
+        secondaryVerificationTimeoutDays: 2,
         enableKeywordVerification: false,
         enableEmailVerification: false,
         enablePhotoVerification: false,
         enableSecondarySmartMatch: false,
+        secondaryVerificationStopCode: "",
         customMessageText: "",
         approvalKeyword: "yes",
         banKeyword: "no",
@@ -358,7 +360,7 @@ function loadConfigFromDB() {
         }
         else if (['enableWordFilter', 'enableWordFilterSmartMatch', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled', 'enableQASmartMatch', 'autoPurgeScheduleEnabled', 'adminWhitelistSyncEnabled', 'enableSecondaryVerification', 'enableKeywordVerification', 'enableEmailVerification', 'enablePhotoVerification', 'enableSecondarySmartMatch'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
-        } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes', 'secondaryVerificationDelay'].includes(row.key)) {
+        } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes', 'secondaryVerificationDelay', 'secondaryVerificationTimeoutDays'].includes(row.key)) {
             newConfig[row.key] = parseInt(row.value, 10);
         } else newConfig[row.key] = row.value;
     });
@@ -431,6 +433,7 @@ function saveConfigToDB(conf) {
         setGlobal.run('enableSecondaryVerification', conf.enableSecondaryVerification ? '1' : '0');
         setGlobal.run('secondaryVerificationGroups', JSON.stringify(conf.secondaryVerificationGroups || []));
         setGlobal.run('secondaryVerificationLanguage', conf.secondaryVerificationLanguage || 'en');
+        setGlobal.run('secondaryVerificationTimeoutDays', String(Math.max(1, parseInt(conf.secondaryVerificationTimeoutDays, 10) || 2)));
         setGlobal.run('enableKeywordVerification', conf.enableKeywordVerification ? '1' : '0');
         setGlobal.run('enableEmailVerification', conf.enableEmailVerification ? '1' : '0');
         setGlobal.run('enablePhotoVerification', conf.enablePhotoVerification ? '1' : '0');
@@ -448,6 +451,7 @@ function saveConfigToDB(conf) {
         setGlobal.run('enablePhotoVerification', conf.enablePhotoVerification ? '1' : '0');
         setGlobal.run('enableSecondarySmartMatch', conf.enableSecondarySmartMatch ? '1' : '0');
         setGlobal.run('customMessageText', conf.customMessageText || '');
+        setGlobal.run('secondaryVerificationStopCode', conf.secondaryVerificationStopCode || '');
         setGlobal.run('approvalKeyword', conf.approvalKeyword || '');
         setGlobal.run('banKeyword', conf.banKeyword || '');
         setGlobal.run('emailDomain', conf.emailDomain || '');
@@ -1557,6 +1561,119 @@ app.post('/api/secondary-verification/test', requireAuthApi, requirePermission('
     } catch (e) {
         console.error('[Verification Test] Error:', e);
         return res.status(500).json({ error: 'حدث خطأ أثناء الاختبار. / Failed to run verification test.' });
+    }
+});
+
+app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+    try {
+        const rows = db.prepare(`
+            SELECT sv.requester_id, sv.group_id, sv.state, sv.flow_type, sv.created_at, sv.email, sv.require_email, sv.require_photo,
+                   wg.name AS group_name
+            FROM secondary_verification sv
+            LEFT JOIN whatsapp_groups wg ON wg.id = sv.group_id
+            ORDER BY sv.created_at DESC
+        `).all();
+        const timeoutDays = Math.max(1, parseInt(config.secondaryVerificationTimeoutDays, 10) || 2);
+        const timeoutMs = timeoutDays * 24 * 60 * 60 * 1000;
+        const now = Date.now();
+        const mapped = rows.map(row => {
+            const createdAt = Number(row.created_at || 0);
+            const expiresAt = createdAt > 0 ? createdAt + timeoutMs : 0;
+            return {
+                requesterId: row.requester_id,
+                groupId: row.group_id,
+                groupName: row.group_name || row.group_id,
+                state: row.state,
+                flowType: row.flow_type || 'join',
+                email: row.email || '',
+                requireEmail: row.require_email === 1,
+                requirePhoto: row.require_photo === 1,
+                createdAt,
+                expiresAt,
+                isExpired: expiresAt > 0 ? now > expiresAt : false
+            };
+        });
+        return res.json({ timeoutDays, pending: mapped });
+    } catch (e) {
+        console.error('[Secondary Verification] Pending list error:', e);
+        return res.status(500).json({ error: 'Failed to fetch pending approvals.' });
+    }
+});
+
+app.post('/api/secondary-verification/pending/remove', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    try {
+        const inputRequesterId = String((req.body && req.body.requesterId) || '').trim();
+        const inputNumber = String((req.body && req.body.number) || '').replace(/[^0-9]/g, '');
+        const groupId = String((req.body && req.body.groupId) || '').trim();
+        const addBlacklist = Boolean(req.body && req.body.addBlacklist);
+
+        let requesterId = inputRequesterId;
+        if (!requesterId && inputNumber) requesterId = `${inputNumber}@c.us`;
+        if (!requesterId) return res.status(400).json({ error: 'requesterId or number is required.' });
+
+        const normalizeId = (value) => String(value || '').replace(/:[0-9]+/, '').replace('@lid', '@c.us').trim();
+        const targetNormalized = normalizeId(requesterId);
+        const rows = db.prepare('SELECT * FROM secondary_verification').all().filter(row => {
+            const sameRequester = normalizeId(row.requester_id) === targetNormalized;
+            const sameGroup = groupId ? row.group_id === groupId : true;
+            return sameRequester && sameGroup;
+        });
+
+        if (!rows || rows.length === 0) return res.status(404).json({ error: 'Pending approval not found.' });
+
+        let removed = 0;
+        for (const row of rows) {
+            const chatObj = await client.getChatById(row.group_id).catch(() => null);
+            if (chatObj) {
+                try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [row.requester_id] }); } catch (e) { }
+            }
+            if (addBlacklist) {
+                const cleanNumber = String(row.requester_id || '').replace(/:[0-9]+/, '').replace('@lid', '@c.us').replace('@c.us', '');
+                if (cleanNumber) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanNumber);
+            }
+            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
+            removed += 1;
+        }
+
+        return res.json({ success: true, removed });
+    } catch (e) {
+        console.error('[Secondary Verification] Remove pending error:', e);
+        return res.status(500).json({ error: 'Failed to remove pending approval.' });
+    }
+});
+
+app.post('/api/secondary-verification/stop', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    try {
+        const providedCode = String((req.body && req.body.code) || '').trim().toLowerCase();
+        const expectedCode = String(config.secondaryVerificationStopCode || '').trim().toLowerCase();
+        if (!expectedCode) return res.status(400).json({ error: 'Stop code is not configured.' });
+        if (!providedCode || providedCode !== expectedCode) return res.status(403).json({ error: 'Invalid stop code.' });
+
+        const inputRequesterId = String((req.body && req.body.requesterId) || '').trim();
+        const inputNumber = String((req.body && req.body.number) || '').replace(/[^0-9]/g, '');
+        let requesterId = inputRequesterId;
+        if (!requesterId && inputNumber) requesterId = `${inputNumber}@c.us`;
+        if (!requesterId) return res.status(400).json({ error: 'requesterId or number is required.' });
+
+        const normalizeId = (value) => String(value || '').replace(/:[0-9]+/, '').replace('@lid', '@c.us').trim();
+        const targetNormalized = normalizeId(requesterId);
+        const rows = db.prepare('SELECT * FROM secondary_verification').all().filter(row => normalizeId(row.requester_id) === targetNormalized);
+        if (!rows || rows.length === 0) return res.status(404).json({ error: 'No active approval process found.' });
+
+        let stopped = 0;
+        for (const row of rows) {
+            const chatObj = await client.getChatById(row.group_id).catch(() => null);
+            if (chatObj) {
+                try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [row.requester_id] }); } catch (e) { }
+            }
+            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
+            stopped += 1;
+        }
+
+        return res.json({ success: true, stopped });
+    } catch (e) {
+        console.error('[Secondary Verification] Stop process error:', e);
+        return res.status(500).json({ error: 'Failed to stop approval process.' });
     }
 });
 
@@ -3900,9 +4017,38 @@ async function screenPendingMembershipRequests() {
     } catch (e) { } finally { isScreeningRunning = false; }
 }
 
+async function rejectExpiredSecondaryVerificationSessions() {
+    try {
+        const timeoutDays = Math.max(1, parseInt(config.secondaryVerificationTimeoutDays, 10) || 2);
+        const timeoutMs = timeoutDays * 24 * 60 * 60 * 1000;
+        const cutoff = Date.now() - timeoutMs;
+        const expiredRows = db.prepare('SELECT requester_id, group_id, created_at FROM secondary_verification WHERE created_at IS NULL OR created_at <= ?').all(cutoff);
+        if (!expiredRows || expiredRows.length === 0) return;
+
+        let rejected = 0;
+        for (const row of expiredRows) {
+            const chatObj = await client.getChatById(row.group_id).catch(() => null);
+            if (chatObj) {
+                try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [row.requester_id] }); } catch (e) { }
+            }
+            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
+            rejected += 1;
+        }
+        if (rejected > 0) {
+            console.log(`[Verification] Auto-rejected ${rejected} expired approval session(s).`);
+        }
+    } catch (e) {
+        console.error('[Verification] Failed to auto-reject expired sessions:', e.message || e);
+    }
+}
+
 setInterval(() => {
     screenPendingMembershipRequests().catch(() => { });
 }, 30000);
+
+setInterval(() => {
+    rejectExpiredSecondaryVerificationSessions().catch(() => { });
+}, 30 * 60 * 1000);
 
 // ── Admin auto-sync: extract as named function ────────────────────────────────
 async function runAdminSync() {

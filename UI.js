@@ -733,6 +733,17 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             <input type="number" id="secondaryVerificationDelay" class="form-control" value="${config.secondaryVerificationDelay !== undefined ? config.secondaryVerificationDelay : 3600}" min="1" max="86400" style="width: 80px;">
                         </div>
 
+                        <div class="field-row" style="margin-bottom:12px;">
+                            <div class="field-group" style="margin-bottom:0; background: rgba(0,0,0,0.1); border-radius: 6px; padding: 12px;">
+                                <label class="field-label">${t('مهلة الرد التلقائي (أيام)', 'Auto-reject timeout (days)')}</label>
+                                <input type="number" id="secondaryVerificationTimeoutDays" class="form-control" value="${config.secondaryVerificationTimeoutDays !== undefined ? config.secondaryVerificationTimeoutDays : 2}" min="1" max="30">
+                            </div>
+                            <div class="field-group" style="margin-bottom:0; background: rgba(0,0,0,0.1); border-radius: 6px; padding: 12px;">
+                                <label class="field-label">${t('كود إيقاف التحقق', 'Stop Verification Code')}</label>
+                                <input type="text" id="secondaryVerificationStopCode" class="form-control" value="${(config.secondaryVerificationStopCode || '').replace(/"/g, '&quot;')}" placeholder="${t('مثال: STOP123', 'Example: STOP123')}">
+                            </div>
+                        </div>
+
                         <div class="sub-panel" style="margin-top:0; margin-bottom:12px; border-color:rgba(64,196,255,0.3);">
                             <h4><i class="fas fa-flask"></i> ${t('اختبار التحقق الثنائي', 'Secondary Verification Test')}</h4>
                             <div class="field-row" style="margin-bottom:10px;">
@@ -754,6 +765,30 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             <div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6;">
                                 ${t('يرسل نفس رسالة التحقق لهذا الرقم في الخاص بدون انتظار طلب انضمام جديد.', 'Sends the same verification DM flow to this number without waiting for a new join request.')}
                             </div>
+                        </div>
+
+                        <div class="sub-panel" style="margin-top:0; margin-bottom:12px; border-color:rgba(255,193,7,0.35);">
+                            <h4><i class="fas fa-user-clock"></i> ${t('طلبات التحقق المعلقة', 'Pending Verification Approvals')}</h4>
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap;">
+                                <button type="button" class="btn btn-sm" onclick="refreshPendingSecondaryApprovals()"><i class="fas fa-sync"></i> ${t('تحديث', 'Refresh')}</button>
+                                <span id="pendingSecondaryMeta" style="font-size:11px;color:var(--text-muted);"></span>
+                            </div>
+                            <div id="pendingSecondaryList" style="max-height:220px;overflow:auto;border:1px solid var(--card-border);border-radius:8px;padding:10px;background:rgba(0,0,0,0.08);font-size:12px;color:var(--text-muted);"></div>
+                        </div>
+
+                        <div class="sub-panel" style="margin-top:0; margin-bottom:12px; border-color:rgba(255,82,82,0.35);">
+                            <h4><i class="fas fa-stop-circle"></i> ${t('إيقاف عملية تحقق يدوياً', 'Stop Verification Process Manually')}</h4>
+                            <div class="field-row">
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('رقم المستخدم', 'User Number')}</label>
+                                    <input type="text" id="stopVerificationNumber" class="form-control" placeholder="${t('مثال: 9665XXXXXXXX', 'Example: 15551234567')}">
+                                </div>
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('كود الإيقاف', 'Stop Code')}</label>
+                                    <input type="text" id="stopVerificationCodeInput" class="form-control" placeholder="${t('أدخل الكود', 'Enter code')}">
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-danger btn-sm" onclick="stopVerificationProcessByCode()"><i class="fas fa-ban"></i> ${t('إيقاف العملية', 'Stop Process')}</button>
                         </div>
                         
                         <div class="toggle-row" style="margin-bottom:10px; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 6px;">
@@ -3410,7 +3445,97 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 if(typeof renderCustomMessages === 'function') renderCustomMessages();
                 if(typeof renderApprovalWords === 'function') renderApprovalWords();
                 if(typeof renderBanWords === 'function') renderBanWords();
+                if(typeof refreshPendingSecondaryApprovals === 'function') refreshPendingSecondaryApprovals();
             });
+
+            function formatPendingVerificationItem(item) {
+                const requester = (item.requesterId || '').replace('@c.us', '');
+                const groupName = item.groupName || item.groupId || '-';
+                const state = item.state || '-';
+                const ageText = item.createdAt ? new Date(item.createdAt).toLocaleString() : '-';
+                return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:1px dashed var(--card-border);padding:8px 0;">'
+                    + '<div style="min-width:0;">'
+                    + '<div style="color:var(--text);font-weight:600;">' + requester + '</div>'
+                    + '<div style="font-size:11px;color:var(--text-muted);">' + groupName + ' • ' + state + '</div>'
+                    + '<div style="font-size:10px;color:var(--text-muted);">' + ageText + '</div>'
+                    + '</div>'
+                    + '<button class="btn btn-danger btn-sm" style="padding:4px 8px;" onclick="removePendingSecondaryApproval(\'' + (item.requesterId || '').replace(/'/g, "\\'") + '\',\'' + (item.groupId || '').replace(/'/g, "\\'") + '\')">'
+                    + (currentLang === 'en' ? 'Reject' : 'رفض')
+                    + '</button>'
+                    + '</div>';
+            }
+
+            async function refreshPendingSecondaryApprovals() {
+                const listEl = document.getElementById('pendingSecondaryList');
+                const metaEl = document.getElementById('pendingSecondaryMeta');
+                if (!listEl) return;
+                try {
+                    listEl.innerHTML = (currentLang === 'en' ? 'Loading...' : 'جاري التحميل...');
+                    const res = await fetch('/api/secondary-verification/pending');
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        listEl.innerHTML = '<div style="color:#ffb3b3;">' + (data.error || 'Failed') + '</div>';
+                        return;
+                    }
+                    const items = Array.isArray(data.pending) ? data.pending : [];
+                    if (metaEl) metaEl.textContent = (currentLang === 'en' ? 'Timeout: ' : 'المهلة: ') + (data.timeoutDays || 2) + (currentLang === 'en' ? ' day(s)' : ' يوم');
+                    if (items.length === 0) {
+                        listEl.innerHTML = '<div>' + (currentLang === 'en' ? 'No pending approvals.' : 'لا توجد طلبات معلقة.') + '</div>';
+                        return;
+                    }
+                    listEl.innerHTML = items.map(formatPendingVerificationItem).join('');
+                } catch (e) {
+                    listEl.innerHTML = '<div style="color:#ffb3b3;">' + (e.message || 'Error') + '</div>';
+                }
+            }
+
+            async function removePendingSecondaryApproval(requesterId, groupId) {
+                try {
+                    const res = await fetch('/api/secondary-verification/pending/remove', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ requesterId, groupId })
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        showToast((currentLang === 'en' ? '❌ Remove failed: ' : '❌ فشل الحذف: ') + (data.error || 'Unknown error'));
+                        return;
+                    }
+                    showToast(currentLang === 'en' ? '✅ Removed from pending list' : '✅ تم الحذف من قائمة المعلق');
+                    refreshPendingSecondaryApprovals();
+                } catch (e) {
+                    showToast((currentLang === 'en' ? '❌ Remove failed: ' : '❌ فشل الحذف: ') + (e.message || 'Network error'));
+                }
+            }
+
+            async function stopVerificationProcessByCode() {
+                const numberEl = document.getElementById('stopVerificationNumber');
+                const codeEl = document.getElementById('stopVerificationCodeInput');
+                const number = numberEl ? (numberEl.value || '').trim() : '';
+                const code = codeEl ? (codeEl.value || '').trim() : '';
+                if (!number || !code) {
+                    showToast(currentLang === 'en' ? '⚠️ Enter number and code' : '⚠️ أدخل الرقم والكود');
+                    return;
+                }
+                try {
+                    const res = await fetch('/api/secondary-verification/stop', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ number, code })
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        showToast((currentLang === 'en' ? '❌ Stop failed: ' : '❌ فشل الإيقاف: ') + (data.error || 'Unknown error'));
+                        return;
+                    }
+                    showToast(currentLang === 'en' ? '✅ Process stopped and request rejected' : '✅ تم إيقاف العملية ورفض الطلب');
+                    if (numberEl) numberEl.value = '';
+                    if (codeEl) codeEl.value = '';
+                    refreshPendingSecondaryApprovals();
+                } catch (e) {
+                    showToast((currentLang === 'en' ? '❌ Stop failed: ' : '❌ فشل الإيقاف: ') + (e.message || 'Network error'));
+                }
+            }
 
             async function addBlacklistNumber() {
                 const input = document.getElementById('newBlacklistNumber');
@@ -4869,10 +4994,12 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     secondaryVerificationGroups: document.getElementById('secondaryVerificationGroupsContainer') ? Array.from(document.querySelectorAll('.sec-verification-grp-cb:checked')).map(cb => cb.value) : [],
                     secondaryVerificationLanguage: document.getElementById('secondaryVerificationLanguage') ? document.getElementById('secondaryVerificationLanguage').value : 'en',
                     secondaryVerificationDelay: document.getElementById('secondaryVerificationDelay') ? parseInt(document.getElementById('secondaryVerificationDelay').value, 10) : 3600,
+                    secondaryVerificationTimeoutDays: document.getElementById('secondaryVerificationTimeoutDays') ? parseInt(document.getElementById('secondaryVerificationTimeoutDays').value, 10) : 2,
                     enableKeywordVerification: document.getElementById('enableKeywordVerification') ? document.getElementById('enableKeywordVerification').checked : false,
                     enableEmailVerification: document.getElementById('enableEmailVerification') ? document.getElementById('enableEmailVerification').checked : false,
                     enablePhotoVerification: document.getElementById('enablePhotoVerification') ? document.getElementById('enablePhotoVerification').checked : false,
                     enableSecondarySmartMatch: document.getElementById('enableSecondarySmartMatch') ? document.getElementById('enableSecondarySmartMatch').checked : false,
+                    secondaryVerificationStopCode: document.getElementById('secondaryVerificationStopCode') ? document.getElementById('secondaryVerificationStopCode').value.trim() : '',
                     customMessageText: customMessagesArr.join(' || '),
                     approvalKeyword: approvalWordsArr.join(','),
                     banKeyword: banWordsArr.join(','),
