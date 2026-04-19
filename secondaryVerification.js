@@ -35,6 +35,15 @@ function getVerificationIdCandidates(value) {
     return candidates;
 }
 
+function extractIncomingText(msg) {
+    if (!msg || typeof msg !== 'object') return '';
+    const directBody = typeof msg.body === 'string' ? msg.body : '';
+    const caption = typeof msg.caption === 'string' ? msg.caption : '';
+    const dataBody = msg._data && typeof msg._data.body === 'string' ? msg._data.body : '';
+    const dataCaption = msg._data && typeof msg._data.caption === 'string' ? msg._data.caption : '';
+    return [directBody, caption, dataBody, dataCaption].find(value => typeof value === 'string' && value.trim()) || '';
+}
+
 function initVerification(client, db, config, chat) {
     return {
         // Triggered after bio check is passed
@@ -143,6 +152,7 @@ function initVerification(client, db, config, chat) {
             const senderId = msg.from;
             const normalizedSenderId = normalizeVerificationId(senderId);
             const senderCandidates = new Set(getVerificationIdCandidates(senderId));
+            const incomingText = extractIncomingText(msg);
             let record = null;
             for (const row of db.prepare('SELECT * FROM secondary_verification').all()) {
                 const rowId = row && row.requester_id ? row.requester_id : '';
@@ -162,7 +172,10 @@ function initVerification(client, db, config, chat) {
                 requesterId: record.requester_id,
                 state: record.state,
                 flowType: record.flow_type || 'join',
-                msgType: msg.type
+                msgType: msg.type,
+                hasMedia: Boolean(msg.hasMedia),
+                hasQuotedMsg: Boolean(msg.hasQuotedMsg),
+                textPreview: typeof incomingText === 'string' ? incomingText.slice(0, 120) : ''
             });
 
             const now = Date.now();
@@ -183,7 +196,7 @@ function initVerification(client, db, config, chat) {
                 return res;
             };
 
-            const rawText = (msg.body || '').trim().toLowerCase();
+            const rawText = incomingText.trim().toLowerCase();
             const smartText = config.enableSecondarySmartMatch ? applySmartMatch(rawText) : rawText;
             
             const groupToJoin = record.group_id;
@@ -193,7 +206,10 @@ function initVerification(client, db, config, chat) {
                 const isAr = config.secondaryVerificationLanguage === 'ar';
                 
                 if (record.state === 'PENDING_CUSTOM') {
-                    if (!isTextMessage) return false;
+                    if (!isTextMessage) {
+                        debugLog('pending custom ignored: non-text', { requesterId: record.requester_id, msgType: msg.type, hasMedia: Boolean(msg.hasMedia) });
+                        return false;
+                    }
 
                     let approveWs = (config.approvalKeyword || 'yes').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
                     let banWs = (config.banKeyword || 'no').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
@@ -310,8 +326,10 @@ function initVerification(client, db, config, chat) {
                         if (!isTextMessage) {
                             if (isTestFlow) {
                                 await msg.reply(isAr ? 'الاختبار بانتظار بريد جامعي أو صورة حسب الإعدادات.' : 'Test is waiting for a college email or a photo based on your settings.');
+                                debugLog('method step ignored: non-text test reply', { requesterId: record.requester_id, msgType: msg.type, hasMedia: Boolean(msg.hasMedia) });
                                 return true;
                             }
+                            debugLog('method step ignored: non-text', { requesterId: record.requester_id, msgType: msg.type, hasMedia: Boolean(msg.hasMedia) });
                             return false;
                         }
 
