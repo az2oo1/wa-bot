@@ -3474,7 +3474,11 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     const res = await fetch('/api/secondary-verification/pending');
                     const data = await res.json().catch(() => ({}));
                     if (!res.ok) {
-                        listEl.innerHTML = '<div style="color:#ffb3b3;">' + (data.error || 'Failed') + '</div>';
+                        if (res.status === 403) {
+                            listEl.innerHTML = '<div style="color:var(--text-muted);">' + (currentLang === 'en' ? 'You do not have permission to view pending approvals.' : 'ليس لديك صلاحية لعرض الطلبات المعلقة.') + '</div>';
+                        } else {
+                            listEl.innerHTML = '<div style="color:#ffb3b3;">' + (data.error || 'Failed') + '</div>';
+                        }
                         return;
                     }
                     const items = Array.isArray(data.pending) ? data.pending : [];

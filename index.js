@@ -1567,8 +1567,7 @@ app.post('/api/secondary-verification/test', requireAuthApi, requirePermission('
 app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission('security:manage'), (req, res) => {
     try {
         const rows = db.prepare(`
-            SELECT sv.requester_id, sv.group_id, sv.state, sv.flow_type, sv.created_at, sv.email, sv.require_email, sv.require_photo,
-                   wg.name AS group_name
+            SELECT sv.*, wg.name AS group_name
             FROM secondary_verification sv
             LEFT JOIN whatsapp_groups wg ON wg.id = sv.group_id
             ORDER BY sv.created_at DESC
