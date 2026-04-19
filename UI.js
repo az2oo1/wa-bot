@@ -3453,13 +3453,15 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 const groupName = item.groupName || item.groupId || '-';
                 const state = item.state || '-';
                 const ageText = item.createdAt ? new Date(item.createdAt).toLocaleString() : '-';
+                const requesterArg = JSON.stringify(item.requesterId || '');
+                const groupArg = JSON.stringify(item.groupId || '');
                 return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:1px dashed var(--card-border);padding:8px 0;">'
                     + '<div style="min-width:0;">'
                     + '<div style="color:var(--text);font-weight:600;">' + requester + '</div>'
                     + '<div style="font-size:11px;color:var(--text-muted);">' + groupName + ' • ' + state + '</div>'
                     + '<div style="font-size:10px;color:var(--text-muted);">' + ageText + '</div>'
                     + '</div>'
-                    + '<button class="btn btn-danger btn-sm" style="padding:4px 8px;" onclick="removePendingSecondaryApproval(\'' + (item.requesterId || '').replace(/'/g, "\\'") + '\',\'' + (item.groupId || '').replace(/'/g, "\\'") + '\')">'
+                    + '<button class="btn btn-danger btn-sm" style="padding:4px 8px;" onclick="removePendingSecondaryApproval(' + requesterArg + ',' + groupArg + ')">'
                     + (currentLang === 'en' ? 'Reject' : 'رفض')
                     + '</button>'
                     + '</div>';
