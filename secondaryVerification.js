@@ -120,6 +120,30 @@ function buildBaitMessage(config, isAr) {
         : 'Welcome. To continue your request, please reply with the approved keyword.';
 }
 
+function normalizeKeywordMatchText(value) {
+    if (typeof value !== 'string') return '';
+    let result = value.toLowerCase().trim();
+    result = result.replace(/[!@#$%^&*()_+=\-\[\]{}:;"'<>.,.?\/\\|~`]/g, '');
+    result = result.replace(/[\u064B-\u0652\u0640\u0670]/g, '');
+    result = result.replace(/[أإآ]/g, 'ا');
+    return result.replace(/\s+/g, ' ').trim();
+}
+
+function keywordMatchesText(text, keywords, useSmartMatch) {
+    const haystack = useSmartMatch ? normalizeKeywordMatchText(text) : String(text || '').toLowerCase().trim();
+    if (!haystack) return false;
+
+    const words = Array.isArray(keywords) ? keywords : [];
+    for (const keyword of words) {
+        const needle = useSmartMatch ? normalizeKeywordMatchText(keyword) : String(keyword || '').toLowerCase().trim();
+        if (!needle) continue;
+        if (haystack === needle) return true;
+        if (haystack.includes(needle)) return true;
+    }
+
+    return false;
+}
+
 function normalizeReplyLogKey(value) {
     return normalizeVerificationId(value).replace('@c.us', '').trim();
 }
@@ -880,14 +904,12 @@ function initVerification(client, db, config, chat) {
 
             try {
                 const isAr = config.secondaryVerificationLanguage === 'ar';
+                const useSmartMatch = Boolean(config.enableSecondarySmartMatch);
                 const approvalKeywords = getApprovalKeywords(config);
-                const approvalKeywordMatch = (() => {
-                    if (!isTextMessage) return false;
-                    const normalizedKeywords = config.enableSecondarySmartMatch
-                        ? approvalKeywords.map(value => applySmartMatch(value.toLowerCase()))
-                        : approvalKeywords.map(value => value.toLowerCase());
-                    return normalizedKeywords.some(keyword => keyword && smartText.includes(keyword));
-                })();
+                const banKeywords = String(config.banKeyword || 'no').split(',').map(s => s.trim()).filter(Boolean);
+                const isTestFlow = record.flow_type === 'test';
+                const approvalKeywordMatch = isTextMessage && keywordMatchesText(rawText, approvalKeywords, useSmartMatch);
+                const banKeywordMatch = isTextMessage && keywordMatchesText(rawText, banKeywords.length > 0 ? banKeywords : ['no'], useSmartMatch);
 
                 if (record.state === 'EXPIRED_WAITING_REENTRY') {
                     if (!isTextMessage) return false;
@@ -942,18 +964,7 @@ function initVerification(client, db, config, chat) {
                         return true;
                     }
 
-                    let approveWs = (config.approvalKeyword || 'yes').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
-                    let banWs = (config.banKeyword || 'no').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
-                    if (approveWs.length === 0) approveWs = ['yes'];
-                    if (banWs.length === 0) banWs = ['no'];
-                    const isTestFlow = record.flow_type === 'test';
-                    
-                    if (config.enableSecondarySmartMatch) {
-                        approveWs = approveWs.map(s => applySmartMatch(s));
-                        banWs = banWs.map(s => applySmartMatch(s));
-                    }
-
-                    if (banWs.some(w => smartText.includes(w))) {
+                    if (banKeywordMatch) {
                         wasHandled = true;
                         upsertReplyLogReply(db, record.requester_id, record.group_id, incomingText, record.state);
                         debugLog('ban keyword matched', { requesterId: record.requester_id, flowType: record.flow_type || 'join' });
@@ -977,7 +988,7 @@ function initVerification(client, db, config, chat) {
                         debugLog('ban applied and session deleted', { requesterId: record.requester_id });
                         // Make it a silent trap: no rejection notification
                         return true;
-                    } else if (approveWs.some(w => smartText.includes(w))) {
+                    } else if (approvalKeywordMatch) {
                         wasHandled = true;
                                                 upsertReplyLogReply(db, record.requester_id, record.group_id, incomingText, record.state);
                         const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
@@ -1015,7 +1026,7 @@ function initVerification(client, db, config, chat) {
                         }
                     } else {
                         if (record.flow_type === 'test') {
-                            const expectedWords = approveWs.filter(Boolean).join(', ');
+                            const expectedWords = approvalKeywords.filter(Boolean).join(', ');
                             await msg.reply(isAr
                                 ? `الاختبار يعمل، لكن رسالتك لم تطابق كلمات الموافقة الحالية. الكلمات المعتمدة الآن: ${expectedWords || 'yes'}.`
                                 : `The test is working, but your reply did not match the current approval keywords. Current accepted words: ${expectedWords || 'yes'}.`);
@@ -1036,6 +1047,36 @@ function initVerification(client, db, config, chat) {
                     wasHandled = true;
                     const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
                     const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
+                    if (isTestFlow && isTextMessage && (approvalKeywordMatch || banKeywordMatch)) {
+                        if (banKeywordMatch) {
+                            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
+                            await msg.reply(isAr ? 'تم التقاط كلمة الرفض في وضع الاختبار. لم يتم تنفيذ أي إجراء حظر.' : 'Ban keyword detected in test mode. No blacklist action was applied.');
+                            return true;
+                        }
+
+                        if (!useEmail && !usePhoto) {
+                            const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
+                            const cleanId = toRequesterKey(record.requester_id);
+                            const groupName = await resolveGroupName(client, groupToJoin);
+                            if (chatObj) {
+                                try {
+                                    await chatObj.approveGroupMembershipRequests({ requesterIds: [record.requester_id] });
+                                } catch (e) { }
+                            }
+                            db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
+                            await msg.reply(isAr
+                                ? `تمت الموافقة على انضمامك إلى "${groupName}"، وتمت إضافتك إلى قائمة المتحقق منهم.`
+                                : `You have been approved to join "${groupName}" and added to the verified list.`);
+                            return true;
+                        }
+
+                        const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
+                        if (refreshed) {
+                            await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
+                        }
+                        return true;
+                    }
                     if (!useEmail && !usePhoto) {
                         const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
                         const cleanId = toRequesterKey(record.requester_id);
