@@ -108,6 +108,74 @@ function getApprovalKeywords(config) {
     return keywords.length > 0 ? keywords : ['yes'];
 }
 
+function buildBaitMessage(config, isAr) {
+    const baits = config && config.customMessageText
+        ? config.customMessageText.split('||').map(s => s.trim()).filter(Boolean)
+        : [];
+    if (baits.length > 0) {
+        return baits[Math.floor(Math.random() * baits.length)];
+    }
+    return isAr
+        ? 'أهلاً بك. لإكمال الطلب، يرجى الرد بكلمة الموافقة المعتمدة.'
+        : 'Welcome. To continue your request, please reply with the approved keyword.';
+}
+
+function normalizeReplyLogKey(value) {
+    return normalizeVerificationId(value).replace('@c.us', '').trim();
+}
+
+function upsertReplyLogSent(db, requesterId, groupId, state = '') {
+    const requesterKey = normalizeReplyLogKey(requesterId);
+    if (!requesterKey) return;
+    const now = Date.now();
+    db.prepare(`
+        INSERT INTO secondary_verification_reply_log (
+            requester_key, requester_id, group_id, bait_sent_at, replied_at, replied_text, reply_count, last_state, updated_at
+        ) VALUES (?, ?, ?, ?, NULL, '', 0, ?, ?)
+        ON CONFLICT(requester_key) DO UPDATE SET
+            requester_id = excluded.requester_id,
+            group_id = excluded.group_id,
+            bait_sent_at = excluded.bait_sent_at,
+            last_state = excluded.last_state,
+            updated_at = excluded.updated_at
+    `).run(requesterKey, normalizeVerificationId(requesterId), groupId || '', now, String(state || ''), now);
+}
+
+function upsertReplyLogReply(db, requesterId, groupId, text, state = '') {
+    const requesterKey = normalizeReplyLogKey(requesterId);
+    if (!requesterKey) return;
+    const now = Date.now();
+    db.prepare(`
+        INSERT INTO secondary_verification_reply_log (
+            requester_key, requester_id, group_id, bait_sent_at, replied_at, replied_text, reply_count, last_state, updated_at
+        ) VALUES (?, ?, ?, 0, ?, ?, 1, ?, ?)
+        ON CONFLICT(requester_key) DO UPDATE SET
+            requester_id = excluded.requester_id,
+            group_id = excluded.group_id,
+            replied_at = excluded.replied_at,
+            replied_text = excluded.replied_text,
+            reply_count = COALESCE(secondary_verification_reply_log.reply_count, 0) + 1,
+            last_state = excluded.last_state,
+            updated_at = excluded.updated_at
+    `).run(requesterKey, normalizeVerificationId(requesterId), groupId || '', now, text || '', String(state || ''), now);
+}
+
+function upsertReplyLogNoReply(db, requesterId, groupId, state = '') {
+    const requesterKey = normalizeReplyLogKey(requesterId);
+    if (!requesterKey) return;
+    const now = Date.now();
+    db.prepare(`
+        INSERT INTO secondary_verification_reply_log (
+            requester_key, requester_id, group_id, bait_sent_at, replied_at, replied_text, reply_count, last_state, updated_at
+        ) VALUES (?, ?, ?, 0, NULL, '', 0, ?, ?)
+        ON CONFLICT(requester_key) DO UPDATE SET
+            requester_id = excluded.requester_id,
+            group_id = excluded.group_id,
+            last_state = excluded.last_state,
+            updated_at = excluded.updated_at
+    `).run(requesterKey, normalizeVerificationId(requesterId), groupId || '', String(state || ''), now);
+}
+
 async function resolveGroupName(client, groupId) {
     try {
         const chatObj = await client.getChatById(groupId);
@@ -144,27 +212,52 @@ function getVoteSelectionNumber(vote) {
     return '';
 }
 
+function getMethodSelectionAction(vote) {
+    const options = Array.isArray(vote && vote.selectedOptions) ? vote.selectedOptions : [];
+    for (const option of options) {
+        const name = option && typeof option === 'object'
+            ? (typeof option.name === 'string' ? option.name : '')
+            : (typeof option === 'string' ? option : '');
+        const normalized = name.toLowerCase();
+
+        if (/verification code|student email|بريد|رمز تحقق/.test(normalized)) return 'email';
+        if (/screenshot|blackboard|صورة|بلاك بورد/.test(normalized)) return 'photo';
+        if (/direct contact|admin help|contact from an admin|تواصل مباشر|المشرف/.test(normalized)) return 'contact';
+        if (/cancel this request|cancel|إلغاء|الغاء/.test(normalized)) return 'cancel';
+    }
+    return 'unknown';
+}
+
 async function sendMethodSelectionPoll(client, db, config, record, isAr) {
     if (record && record.user_method_poll_id) {
         return record.user_method_poll_id;
     }
+    const useEmail = record && record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
+    const usePhoto = record && record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
+    if (!useEmail && !usePhoto) {
+        return '';
+    }
     const groupName = await resolveGroupName(client, record.group_id);
-        const title = isAr
-            ? `مرحباً بك. طلبت الانضمام إلى "${groupName}". اختر الطريقة الأنسب لإكمال التحقق:`
-            : `Welcome. You requested to join "${groupName}". Please choose how you want to continue verification:`;
-    const options = isAr
-        ? [
-            'إرسال رمز تحقق إلى بريدك الجامعي',
-            'إرسال صورة مقرراتك من البلاك بورد',
-            'طلب تواصل مباشر من المشرف',
-            'إلغاء الطلب حالياً'
-        ]
-        : [
-            'Send a verification code to your student email',
-            'Send a screenshot of your Blackboard courses',
-            'Request direct contact from an admin',
-            'Cancel this request for now'
-        ];
+    const title = isAr
+        ? `مرحباً بك. طلبت الانضمام إلى "${groupName}". اختر الطريقة الأنسب لإكمال التحقق:`
+        : `Welcome. You requested to join "${groupName}". Please choose how you want to continue verification:`;
+    const options = [];
+    if (useEmail) {
+        options.push(isAr
+            ? 'إرسال رمز تحقق إلى بريدك الجامعي'
+            : 'Send a verification code to your student email');
+    }
+    if (usePhoto) {
+        options.push(isAr
+            ? 'إرسال صورة مقرراتك من البلاك بورد'
+            : 'Send a screenshot of your Blackboard courses');
+    }
+    options.push(isAr
+        ? 'طلب تواصل مباشر من المشرف'
+        : 'Request direct contact from an admin');
+    options.push(isAr
+        ? 'إلغاء الطلب حالياً'
+        : 'Cancel this request for now');
     const poll = new Poll(title, options);
     const pollMsg = await client.sendMessage(record.requester_id, poll);
     db.prepare(`
@@ -202,13 +295,13 @@ function initVerification(client, db, config, chat) {
                     if (!record) return true;
 
                 const isAr = config.secondaryVerificationLanguage === 'ar';
-                const choice = getVoteSelectionNumber(vote);
+                const choice = getMethodSelectionAction(vote);
                 const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
                 const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
                 const domain = config.emailDomain || 'college.edu';
                 const groupName = await resolveGroupName(client, record.group_id);
 
-                if (choice === '1') {
+                if (choice === 'email') {
                     if (!useEmail) {
                         await client.sendMessage(record.requester_id, isAr ? 'خيار البريد غير متاح حالياً. اختر خياراً آخر من القائمة.' : 'Email verification is not available right now. Please choose another option from the menu.');
                         await sendMethodSelectionPoll(client, db, config, record, isAr);
@@ -221,7 +314,7 @@ function initVerification(client, db, config, chat) {
                     return true;
                 }
 
-                if (choice === '2') {
+                if (choice === 'photo') {
                     if (!usePhoto) {
                         await client.sendMessage(record.requester_id, isAr ? 'خيار الصورة غير متاح حالياً. اختر خياراً آخر من القائمة.' : 'Photo verification is not available right now. Please choose another option from the menu.');
                         await sendMethodSelectionPoll(client, db, config, record, isAr);
@@ -234,7 +327,7 @@ function initVerification(client, db, config, chat) {
                     return true;
                 }
 
-                if (choice === '3') {
+                if (choice === 'contact') {
                     const adminGroup = resolveAdminGroupForVerification(config, record.group_id);
                     if (adminGroup) {
                         const requesterHandle = normalizeVerificationId(record.requester_id).replace('@c.us', '');
@@ -269,7 +362,7 @@ function initVerification(client, db, config, chat) {
                     return true;
                 }
 
-                if (choice === '4') {
+                if (choice === 'cancel') {
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
                     await client.sendMessage(record.requester_id, isAr
                         ? 'شكراً لوقتك. تم إلغاء الطلب بنجاح.'
@@ -572,6 +665,7 @@ function initVerification(client, db, config, chat) {
 
             const flowType = options.flowType === 'test' ? 'test' : 'join';
             const forceRestart = Boolean(options.forceRestart);
+            let skipKeywordForNewGroup = false;
 
             if (!forceRestart && flowType !== 'test' && hasRecentBait(db, rawRequesterId)) {
                 debugLog('start blocked: bait cooldown active', { requesterId: rawRequesterId, groupId, cooldownMs: BAIT_REPEAT_COOLDOWN_MS });
@@ -587,7 +681,34 @@ function initVerification(client, db, config, chat) {
                 const ttlMs = getSessionTimeoutMs(config);
                 const isSameGroup = String(existingRecord.group_id || '') === String(groupId || '');
                 const isExpired = !existingRecord.created_at || Date.now() - existingRecord.created_at > ttlMs;
-                if (isSameGroup && (forceRestart || isExpired)) {
+                const isStillInBait = String(existingRecord.state || '') === 'PENDING_CUSTOM';
+
+                if (!isSameGroup && isStillInBait && !forceRestart) {
+                    const isAr = config.secondaryVerificationLanguage === 'ar';
+                    await client.sendMessage(rawRequesterId, isAr
+                        ? 'ما زلت في خطوة كلمة التحقق للسابق. هل يمكنك الرد على الرسالة السابقة أولاً؟'
+                        : 'You are still on the previous bait/keyword step. Can you reply to the previous verification message first?');
+                    await client.sendMessage(rawRequesterId, buildBaitMessage(config, isAr));
+                    debugLog('start blocked: still in bait for another group', {
+                        requesterId: rawRequesterId,
+                        requestedGroupId: groupId,
+                        existingGroupId: existingRecord.group_id
+                    });
+                    return false;
+                }
+
+                if (!isSameGroup && !isStillInBait) {
+                    // User already passed bait in another group, so switch to new group and start from method poll.
+                    skipKeywordForNewGroup = true;
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?')
+                        .run(existingRecord.requester_id, existingRecord.group_id);
+                    debugLog('start switching group after bait passed', {
+                        requesterId: rawRequesterId,
+                        fromGroupId: existingRecord.group_id,
+                        toGroupId: groupId,
+                        previousState: existingRecord.state
+                    });
+                } else if (isSameGroup && (forceRestart || isExpired)) {
                     debugLog('start replacing existing session', {
                         requesterId: rawRequesterId,
                         existingRequesterId: existingRecord.requester_id,
@@ -609,7 +730,7 @@ function initVerification(client, db, config, chat) {
             
             console.log(`[Verification] Starting for ${cleanUserId}`);
             
-            const initialState = useKeyword ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
+            const initialState = (useKeyword && !skipKeywordForNewGroup) ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
             const insertStmt = db.prepare(`
                 INSERT OR REPLACE INTO secondary_verification 
                 (requester_id, group_id, state, flow_type, require_email, require_photo, user_method_poll_id, email, code, created_at, admin_poll_msg_id)
@@ -629,13 +750,8 @@ function initVerification(client, db, config, chat) {
             const isAr = config.secondaryVerificationLanguage === 'ar';
             // Send initial custom message or method prompt
             let initMsg = '';
-            if (useKeyword) {
-                const baits = config.customMessageText ? config.customMessageText.split('||').map(s => s.trim()).filter(s => s) : [];
-                if (baits.length > 0) {
-                    initMsg = baits[Math.floor(Math.random() * baits.length)];
-                } else {
-                    initMsg = isAr ? 'أهلاً بك. لإكمال الطلب، يرجى الرد بكلمة الموافقة المعتمدة.' : 'Welcome. To continue your request, please reply with the approved keyword.';
-                }
+            if (useKeyword && !skipKeywordForNewGroup) {
+                initMsg = buildBaitMessage(config, isAr);
             } else {
                 initMsg = isAr
                     ? 'تم قبول طلبك مبدئياً. سأرسل لك الآن قائمة خيارات التحقق.'
@@ -645,11 +761,27 @@ function initVerification(client, db, config, chat) {
                 await client.sendMessage(rawRequesterId, initMsg);
                 if (flowType !== 'test') {
                     markBaitSent(db, rawRequesterId);
+                    upsertReplyLogSent(db, rawRequesterId, groupId, initialState);
                 }
-                if (!useKeyword && (useEmail || usePhoto)) {
+                if (initialState === 'PENDING_METHOD') {
                     const seededRecord = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(rawRequesterId, groupId);
                     if (seededRecord) {
-                        await sendMethodSelectionPoll(client, db, config, seededRecord, isAr);
+                        const methodsEnabled = (seededRecord.require_email === 1) || (seededRecord.require_photo === 1);
+                        if (!methodsEnabled) {
+                            const chatObj = await client.getChatById(groupId).catch(() => null);
+                            const cleanId = normalizeVerificationId(rawRequesterId).replace('@c.us', '');
+                            if (chatObj) {
+                                try { await chatObj.approveGroupMembershipRequests({ requesterIds: [rawRequesterId] }); } catch (e) { }
+                            }
+                            db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(rawRequesterId, groupId);
+                            const groupName = await resolveGroupName(client, groupId);
+                            await client.sendMessage(rawRequesterId, isAr
+                                ? `تمت الموافقة على انضمامك إلى "${groupName}"، وتمت إضافتك إلى قائمة المتحقق منهم.`
+                                : `You have been approved to join "${groupName}" and added to the verified list.`);
+                        } else {
+                            await sendMethodSelectionPoll(client, db, config, seededRecord, isAr);
+                        }
                     }
                 }
                 debugLog('initial message sent', { requesterId: rawRequesterId, groupId, initialState });
@@ -706,6 +838,7 @@ function initVerification(client, db, config, chat) {
                     try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
                 }
                 db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
+                upsertReplyLogNoReply(db, record.requester_id, record.group_id, `expired:${record.state}`);
                 debugLog('session expired and deleted', { requesterId: record.requester_id, state: record.state, ttlMs });
                 return false;
             }
@@ -732,6 +865,7 @@ function initVerification(client, db, config, chat) {
                     try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
                 }
                 db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
+                upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'stopped');
                 await msg.reply(config.secondaryVerificationLanguage === 'ar'
                     ? 'تم إيقاف جلسة التحقق وإلغاء طلب الانضمام.'
                     : 'Your verification session has been stopped and the join request was cancelled.');
@@ -773,11 +907,7 @@ function initVerification(client, db, config, chat) {
 
                     const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
                     const initMsg = useKeyword
-                        ? (() => {
-                            const baits = config.customMessageText ? config.customMessageText.split('||').map(s => s.trim()).filter(s => s) : [];
-                            if (baits.length > 0) return baits[Math.floor(Math.random() * baits.length)];
-                            return isAr ? 'أهلاً بك. لإكمال الطلب، يرجى الرد بكلمة الموافقة المعتمدة.' : 'Welcome. To continue your request, please reply with the approved keyword.';
-                        })()
+                        ? buildBaitMessage(config, isAr)
                         : (isAr
                             ? 'تمت إعادة تفعيل التحقق. سأرسل لك الآن قائمة خيارات التحقق.'
                             : 'Verification has been reactivated. I will now send you the verification options.');
@@ -799,6 +929,14 @@ function initVerification(client, db, config, chat) {
                         return false;
                     }
 
+                    // If the user lost/deleted chat history, a question-mark ping resends the bait safely.
+                    const resendBaitRequest = ['?', '؟', '؟؟'].includes(rawText);
+                    if (resendBaitRequest) {
+                        await msg.reply(buildBaitMessage(config, isAr));
+                        debugLog('bait resent on user request', { requesterId: record.requester_id, triggerText: rawText });
+                        return true;
+                    }
+
                     let approveWs = (config.approvalKeyword || 'yes').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
                     let banWs = (config.banKeyword || 'no').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
                     if (approveWs.length === 0) approveWs = ['yes'];
@@ -812,9 +950,11 @@ function initVerification(client, db, config, chat) {
 
                     if (banWs.some(w => smartText.includes(w))) {
                         wasHandled = true;
+                        upsertReplyLogReply(db, record.requester_id, record.group_id, incomingText, record.state);
                         debugLog('ban keyword matched', { requesterId: record.requester_id, flowType: record.flow_type || 'join' });
                         if (isTestFlow) {
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
+                            upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'test_ban');
                             await msg.reply(isAr ? 'تم التقاط كلمة الرفض في وضع الاختبار. لن يتم تنفيذ الحظر أثناء الاختبار.' : 'Ban keyword detected in test mode. No blacklist action is applied during tests.');
                             debugLog('test flow ban handled and session deleted', { requesterId: record.requester_id });
                             return true;
@@ -828,11 +968,13 @@ function initVerification(client, db, config, chat) {
                         db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
                         
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
+                                                upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'wrong_bait');
                         debugLog('ban applied and session deleted', { requesterId: record.requester_id });
                         // Make it a silent trap: no rejection notification
                         return true;
                     } else if (approveWs.some(w => smartText.includes(w))) {
                         wasHandled = true;
+                                                upsertReplyLogReply(db, record.requester_id, record.group_id, incomingText, record.state);
                         const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
                         const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
                         debugLog('approval keyword matched', { requesterId: record.requester_id, useEmail, usePhoto });
@@ -849,6 +991,7 @@ function initVerification(client, db, config, chat) {
                             }
                             db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
+                            upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'approved_keyword_only');
                             await msg.reply(isAr
                                 ? `تمت الموافقة على انضمامك إلى "${groupName}"، وتمت إضافتك إلى قائمة المتحقق منهم.`
                                 : `You have been approved to join "${groupName}" and added to the verified list.`);
@@ -881,15 +1024,36 @@ function initVerification(client, db, config, chat) {
                         }
                         db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
+                        upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'wrong_bait');
                         return true;
                     }
                 } else if (record.state === 'PENDING_METHOD') {
                     wasHandled = true;
+                    const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
+                    const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
+                    if (!useEmail && !usePhoto) {
+                        const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
+                        const cleanId = normalizeVerificationId(senderId).replace('@c.us', '');
+                        const groupName = await resolveGroupName(client, groupToJoin);
+                        if (chatObj) {
+                            try {
+                                await chatObj.approveGroupMembershipRequests({ requesterIds: [record.requester_id] });
+                            } catch (e) { }
+                        }
+                        db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                        db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
+                        upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'auto_approved_no_methods');
+                        await msg.reply(isAr
+                            ? `تمت الموافقة على انضمامك إلى "${groupName}"، وتمت إضافتك إلى قائمة المتحقق منهم.`
+                            : `You have been approved to join "${groupName}" and added to the verified list.`);
+                        return true;
+                    }
                     const menuHints = isAr
                         ? ['1', 'قائمة', 'القائمة', 'خيارات']
                         : ['1', 'menu', 'options', 'help'];
                     const wantsMenu = isTextMessage && menuHints.some(word => rawText === word || rawText.includes(word));
                     if (wantsMenu || !record.user_method_poll_id) {
+                        upsertReplyLogReply(db, record.requester_id, record.group_id, incomingText, record.state);
                         if (record.user_method_poll_id) {
                             db.prepare("UPDATE secondary_verification SET user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?")
                                 .run(record.requester_id, record.group_id);

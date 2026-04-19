@@ -250,6 +250,17 @@ db.exec(`
         last_sent_at INTEGER NOT NULL,
         sent_count INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS secondary_verification_reply_log (
+        requester_key TEXT PRIMARY KEY,
+        requester_id TEXT NOT NULL,
+        group_id TEXT,
+        bait_sent_at INTEGER NOT NULL,
+        replied_at INTEGER,
+        replied_text TEXT,
+        reply_count INTEGER NOT NULL DEFAULT 0,
+        last_state TEXT,
+        updated_at INTEGER NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS whatsapp_groups (id TEXT PRIMARY KEY, name TEXT);
     CREATE TABLE IF NOT EXISTS custom_groups (
         group_id TEXT PRIMARY KEY, admin_group TEXT, use_default_words INTEGER,
@@ -271,6 +282,14 @@ try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_group_id TEXT
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_decision_msg_id TEXT'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_poll_msg_id TEXT'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_last_reminder_at INTEGER'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN requester_id TEXT'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN group_id TEXT'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN bait_sent_at INTEGER'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN replied_at INTEGER'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN replied_text TEXT'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN reply_count INTEGER'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN last_state TEXT'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN updated_at INTEGER'); } catch (e) { }
 
 db.exec(`
     CREATE TABLE IF NOT EXISTS app_users (
@@ -1592,6 +1611,7 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
         const now = Date.now();
 
         const normalizeRequesterId = (value) => String(value || '').replace(/:[0-9]+/, '').trim();
+        const toReplyLogKey = (value) => normalizeRequesterId(value).replace('@lid', '@c.us').replace('@c.us', '').trim();
         const toDigits = (value) => String(value || '').replace(/\D/g, '');
         const resolvePhoneNumber = async (rawRequesterId) => {
             const normalized = normalizeRequesterId(rawRequesterId);
@@ -1622,6 +1642,20 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
             const createdAt = Number(row.created_at || 0);
             const expiresAt = createdAt > 0 ? createdAt + timeoutMs : 0;
             const phoneNumber = await resolvePhoneNumber(row.requester_id);
+            const replyRow = db.prepare(`
+                SELECT bait_sent_at, replied_at, replied_text, reply_count, last_state
+                FROM secondary_verification_reply_log
+                WHERE requester_key = ?
+                LIMIT 1
+            `).get(toReplyLogKey(row.requester_id));
+            const baitSentAt = Number(replyRow && replyRow.bait_sent_at || 0);
+            const repliedAt = Number(replyRow && replyRow.replied_at || 0);
+            const replyCount = Number(replyRow && replyRow.reply_count || 0);
+            const replyStatus = repliedAt > 0
+                ? 'replied'
+                : baitSentAt > 0
+                    ? 'pending'
+                    : 'not_sent';
             return {
                 requesterId: row.requester_id,
                 phoneNumber,
@@ -1634,7 +1668,13 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
                 requirePhoto: row.require_photo === 1,
                 createdAt,
                 expiresAt,
-                isExpired: expiresAt > 0 ? now > expiresAt : false
+                isExpired: expiresAt > 0 ? now > expiresAt : false,
+                baitSentAt,
+                repliedAt,
+                replyCount,
+                replyStatus,
+                repliedText: replyRow && replyRow.replied_text ? replyRow.replied_text : '',
+                replyLogState: replyRow && replyRow.last_state ? replyRow.last_state : ''
             };
         }));
         return res.json({ timeoutDays, pending: mapped });
