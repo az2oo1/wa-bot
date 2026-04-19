@@ -37,7 +37,8 @@ function initVerification(client, db, config, chat) {
             const enabledGroups = Array.isArray(config.secondaryVerificationGroups)
                 ? config.secondaryVerificationGroups.map(normalizeGroupId).filter(Boolean)
                 : [];
-            if (enabledGroups.length > 0 && !enabledGroups.includes(normalizedGroupId)) return false;
+            if (enabledGroups.length === 0) return false;
+            if (!enabledGroups.includes(normalizedGroupId)) return false;
 
             const useKeyword = config.enableKeywordVerification;
             const useEmail = config.enableEmailVerification;

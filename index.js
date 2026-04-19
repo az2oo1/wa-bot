@@ -1521,14 +1521,13 @@ app.post('/api/secondary-verification/test', requireAuthApi, requirePermission('
             ? config.secondaryVerificationGroups.filter(Boolean)
             : [];
 
+        if (selectedGroups.length === 0) {
+            return res.status(400).json({ error: 'لم يتم تحديد أي مجموعة للتحقق الثنائي. / No secondary verification groups are selected.' });
+        }
+
         let targetGroupId = requestedGroupId;
         if (!targetGroupId) {
-            if (selectedGroups.length > 0) {
-                targetGroupId = selectedGroups[0];
-            } else {
-                const firstGroup = db.prepare('SELECT id FROM whatsapp_groups ORDER BY name LIMIT 1').get();
-                targetGroupId = firstGroup ? firstGroup.id : '';
-            }
+            targetGroupId = selectedGroups[0];
         }
 
         if (!targetGroupId) {
@@ -3839,30 +3838,48 @@ async function screenPendingMembershipRequests() {
                     continue;
                 }
 
-                if (!isJoinProfileScreeningEnabled || (!isWordFilterEnabled && !isAIFilterEnabled)) continue;
+                const normalizeGroupId = value => String(value || '').trim();
+                const selectedSecondaryGroups = Array.isArray(config.secondaryVerificationGroups)
+                    ? config.secondaryVerificationGroups.map(normalizeGroupId).filter(Boolean)
+                    : [];
+                const currentGroupId = normalizeGroupId(chat.id._serialized);
+                const shouldRunSecondaryVerification = Boolean(config.enableSecondaryVerification)
+                    && selectedSecondaryGroups.includes(currentGroupId);
 
-                const profileResult = await evaluateJoinProfileViolation({
-                    participantId: rawRequesterId,
-                    cleanUserId: cleanRequesterId,
-                    groupName: chat.name,
-                    isWordFilterEnabled,
-                    isAIFilterEnabled,
-                    forbiddenWords,
-                    aiTriggerWords
-                });
-                if (!profileResult.isViolating) {
-                    const normalizeGroupId = value => String(value || '').trim();
-                    const selectedSecondaryGroups = Array.isArray(config.secondaryVerificationGroups)
-                        ? config.secondaryVerificationGroups.map(normalizeGroupId).filter(Boolean)
-                        : [];
-                    const currentGroupId = normalizeGroupId(chat.id._serialized);
-                    const shouldRunSecondaryVerification = !config.enableSecondaryVerification
-                        ? false
-                        : (selectedSecondaryGroups.length === 0 || selectedSecondaryGroups.includes(currentGroupId));
-                    if (!shouldRunSecondaryVerification) {
+                const shouldRunProfileScreening = Boolean(isJoinProfileScreeningEnabled && (isWordFilterEnabled || isAIFilterEnabled));
+                if (shouldRunProfileScreening) {
+                    const profileResult = await evaluateJoinProfileViolation({
+                        participantId: rawRequesterId,
+                        cleanUserId: cleanRequesterId,
+                        groupName: chat.name,
+                        isWordFilterEnabled,
+                        isAIFilterEnabled,
+                        forbiddenWords,
+                        aiTriggerWords
+                    });
+                    if (profileResult.isViolating) {
+                        try {
+                            await chat.rejectGroupMembershipRequests({ requesterIds: [rawRequesterId] });
+                        } catch (e) {
+                            continue;
+                        }
+
+                        if (isBlacklistEnabled) {
+                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanRequesterId); } catch (e) { }
+                        }
+
+                        const reportText = tAdmin(
+                            groupConfig,
+                            config,
+                            `🚫 *فحص طلب الانضمام*\nتم رفض طلب انضمام بعد فحص الاسم/النبذة.\nالمجموعة: "${chat.name}"\nالرقم: @${cleanRequesterId.split('@')[0]}\nالسبب: ${profileResult.reason}\nالبيانات:\n"${profileResult.profileText || 'غير متوفر'}"`,
+                            `🚫 *Join Request Screening*\nJoin request was rejected after profile screening.\nGroup: "${chat.name}"\nNumber: @${cleanRequesterId.split('@')[0]}\nReason: ${profileResult.reason}\nProfile:\n"${profileResult.profileText || 'Unavailable'}"`
+                        );
+                        try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanRequesterId] }); } catch (e) { }
                         continue;
                     }
+                }
 
+                if (shouldRunSecondaryVerification) {
                     const verification = initVerification(client, db, config);
                     const didStart = await verification.startVerification(rawRequesterId, cleanRequesterId, chat.id._serialized);
                     if (didStart) {
@@ -3873,35 +3890,7 @@ async function screenPendingMembershipRequests() {
                     continue;
                 }
 
-                try {
-                    await chat.rejectGroupMembershipRequests({ requesterIds: [rawRequesterId] });
-                } catch (e) {
-                    continue;
-                }
-
-                if (isBlacklistEnabled) {
-                    try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanRequesterId); } catch (e) { }
-                }
-
-                const reportText = tAdmin(
-                    groupConfig,
-                    config,
-                    `🚫 *فحص طلب الانضمام*
-تم رفض طلب انضمام بعد فحص الاسم/النبذة.
-المجموعة: "${chat.name}"
-الرقم: @${cleanRequesterId.split('@')[0]}
-السبب: ${profileResult.reason}
-البيانات:
-"${profileResult.profileText || 'غير متوفر'}"`,
-                    `🚫 *Join Request Screening*
-Join request was rejected after profile screening.
-Group: "${chat.name}"
-Number: @${cleanRequesterId.split('@')[0]}
-Reason: ${profileResult.reason}
-Profile:
-"${profileResult.profileText || 'Unavailable'}"`
-                );
-                try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanRequesterId] }); } catch (e) { }
+                if (!shouldRunProfileScreening) continue;
             }
         }
     } catch (e) { } finally { isScreeningRunning = false; }
