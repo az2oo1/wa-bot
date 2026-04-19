@@ -66,10 +66,10 @@ function initVerification(client, db, config, chat) {
             const initialState = useKeyword ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
             const insertStmt = db.prepare(`
                 INSERT OR REPLACE INTO secondary_verification 
-                (requester_id, group_id, state, flow_type, email, code, created_at) 
-                VALUES (?, ?, ?, ?, '', '', ?)
+                (requester_id, group_id, state, flow_type, require_email, require_photo, email, code, created_at) 
+                VALUES (?, ?, ?, ?, ?, ?, '', '', ?)
             `);
-            insertStmt.run(rawRequesterId, groupId, initialState, flowType, Date.now());
+            insertStmt.run(rawRequesterId, groupId, initialState, flowType, useEmail ? 1 : 0, usePhoto ? 1 : 0, Date.now());
 
             const isAr = config.secondaryVerificationLanguage === 'ar';
             // Send initial custom message or method prompt
@@ -136,10 +136,8 @@ function initVerification(client, db, config, chat) {
                 return res;
             };
 
-            let text = (msg.body || '').trim().toLowerCase();
-            if (config.enableSecondarySmartMatch) {
-                text = applySmartMatch(text);
-            }
+            const rawText = (msg.body || '').trim().toLowerCase();
+            const smartText = config.enableSecondarySmartMatch ? applySmartMatch(rawText) : rawText;
             
             const groupToJoin = record.group_id;
             let wasHandled = false;
@@ -161,7 +159,7 @@ function initVerification(client, db, config, chat) {
                         banWs = banWs.map(s => applySmartMatch(s));
                     }
 
-                    if (banWs.some(w => text.includes(w))) {
+                    if (banWs.some(w => smartText.includes(w))) {
                         wasHandled = true;
                         if (isTestFlow) {
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
@@ -179,10 +177,10 @@ function initVerification(client, db, config, chat) {
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                         // Make it a silent trap: no rejection notification
                         return true;
-                    } else if (approveWs.some(w => text.includes(w))) {
+                    } else if (approveWs.some(w => smartText.includes(w))) {
                         wasHandled = true;
-                        const useEmail = config.enableEmailVerification;
-                        const usePhoto = config.enablePhotoVerification;
+                        const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
+                        const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
 
                         if (!useEmail && !usePhoto) {
                             // Keyword was the only verification needed
@@ -227,8 +225,9 @@ function initVerification(client, db, config, chat) {
                     }
                 } else if (record.state === 'PENDING_METHOD') {
                     wasHandled = true;
-                    const useEmail = config.enableEmailVerification;
-                    const usePhoto = config.enablePhotoVerification;
+                    const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
+                    const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
+                    const isTestFlow = record.flow_type === 'test';
 
                     if (msg.hasMedia) {
                         if (!usePhoto) {
@@ -236,17 +235,29 @@ function initVerification(client, db, config, chat) {
                             return true;
                         }
                         const media = await msg.downloadMedia();
-                        if (media) {
-                            // Forward to admin
-                            const adminGroup = config.defaultAdminGroup;
-                            if (adminGroup) {
-                                await client.sendMessage(adminGroup, media, { caption: (isAr ? `تحقق بالصورة لطلب انضمام.\nالمستخدم: @${senderId.split('@')[0]}\nالمعرف: ${groupToJoin}` : `Photo verification for join request.\nUser: @${senderId.split('@')[0]}\nGroup ID: ${groupToJoin}`), mentions: [senderId] });
-                                await msg.reply(isAr ? 'تم استلام الصورة. سيقوم أحد المشرفين بمراجعة طلبك.' : 'Photo received. An admin will review your request.');
-                                db.prepare("DELETE FROM secondary_verification WHERE requester_id = ?").run(record.requester_id);
-                            }
+                        if (!media) {
+                            await msg.reply(isAr ? 'تعذر قراءة الصورة. يرجى المحاولة مرة أخرى.' : 'Could not read the photo. Please try again.');
+                            return true;
+                        }
+
+                        // Forward to admin
+                        const adminGroup = config.defaultAdminGroup;
+                        if (adminGroup) {
+                            await client.sendMessage(adminGroup, media, { caption: (isAr ? `تحقق بالصورة لطلب انضمام.\nالمستخدم: @${senderId.split('@')[0]}\nالمعرف: ${groupToJoin}` : `Photo verification for join request.\nUser: @${senderId.split('@')[0]}\nGroup ID: ${groupToJoin}`), mentions: [senderId] });
+                            await msg.reply(isAr ? 'تم استلام الصورة. سيقوم أحد المشرفين بمراجعة طلبك.' : 'Photo received. An admin will review your request.');
+                            db.prepare("DELETE FROM secondary_verification WHERE requester_id = ?").run(record.requester_id);
+                        } else {
+                            await msg.reply(isAr ? 'التحقق بالصورة مفعل، لكن مجموعة الإدارة غير مهيأة. يرجى إرسال بريد جامعي بدلاً من ذلك أو ضبط مجموعة الإدارة.' : 'Photo verification is enabled, but the admin group is not configured. Please send a college email instead or set the admin group.');
+                            return true;
                         }
                     } else {
-                        if (!isTextMessage) return false;
+                        if (!isTextMessage) {
+                            if (isTestFlow) {
+                                await msg.reply(isAr ? 'الاختبار بانتظار بريد جامعي أو صورة حسب الإعدادات.' : 'Test is waiting for a college email or a photo based on your settings.');
+                                return true;
+                            }
+                            return false;
+                        }
 
                         if (!useEmail) {
                             const pMsg = usePhoto ? (isAr ? 'يرجى إرسال صورة بدلاً من ذلك.' : 'Please send a photo instead.') : '';
@@ -255,7 +266,7 @@ function initVerification(client, db, config, chat) {
                         }
                         // Check email
                         const domain = config.emailDomain || 'college.edu';
-                        const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+                        const emailMatch = rawText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
                         
                         if (!emailMatch || !emailMatch[0].endsWith(`@${domain}`)) {
                             await msg.reply(isAr ? `بريد خاطئ. يجب أن ينتهي بـ @${domain}. يرجى المحاولة أو إرسال صورة.` : `Wrong email. It must end with @${domain}. Please try again or send a photo.`);
@@ -303,9 +314,9 @@ function initVerification(client, db, config, chat) {
                     if (!isTextMessage) return false;
 
                     wasHandled = true;
-                    if (text === record.code) {
+                    if (rawText === record.code) {
                         const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
-                        const cleanId = senderId.replace('@c.us', '');
+                        const cleanId = normalizeVerificationId(senderId).replace('@c.us', '');
                         if (chatObj) {
                             await chatObj.approveGroupMembershipRequests({ requesterIds: [senderId] });
                         }

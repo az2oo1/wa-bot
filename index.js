@@ -234,6 +234,8 @@ db.exec(`
         group_id TEXT,
         state TEXT,
         flow_type TEXT,
+        require_email INTEGER,
+        require_photo INTEGER,
         email TEXT,
         code TEXT,
         created_at INTEGER
@@ -252,6 +254,8 @@ db.exec(`
 `);
 
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN flow_type TEXT'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification ADD COLUMN require_email INTEGER'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification ADD COLUMN require_photo INTEGER'); } catch (e) { }
 
 db.exec(`
     CREATE TABLE IF NOT EXISTS app_users (
