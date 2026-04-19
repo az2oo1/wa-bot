@@ -5,7 +5,7 @@ const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
 function initVerification(client, db, config, chat) {
     return {
         // Triggered after bio check is passed
-        startVerification: async (rawRequesterId, cleanUserId, groupId) => {
+        startVerification: async (rawRequesterId, cleanUserId, groupId, options = {}) => {
             if (!config.enableSecondaryVerification) return false;
             
             // Check if feature applies to this group
@@ -16,6 +16,8 @@ function initVerification(client, db, config, chat) {
             const useEmail = config.enableEmailVerification;
             const usePhoto = config.enablePhotoVerification;
             if (!useKeyword && !useEmail && !usePhoto) return false;
+
+            const flowType = options.flowType === 'test' ? 'test' : 'join';
 
             // PREVENT SPAM: Check if this user already has an active verification process
             const existingRecord = db.prepare('SELECT 1 FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(rawRequesterId, groupId);
@@ -28,10 +30,10 @@ function initVerification(client, db, config, chat) {
             const initialState = useKeyword ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
             const insertStmt = db.prepare(`
                 INSERT OR REPLACE INTO secondary_verification 
-                (requester_id, group_id, state, email, code, created_at) 
-                VALUES (?, ?, ?, '', '', ?)
+                (requester_id, group_id, state, flow_type, email, code, created_at) 
+                VALUES (?, ?, ?, ?, '', '', ?)
             `);
-            insertStmt.run(rawRequesterId, groupId, initialState, Date.now());
+            insertStmt.run(rawRequesterId, groupId, initialState, flowType, Date.now());
 
             const isAr = config.secondaryVerificationLanguage === 'ar';
             // Send initial custom message or method prompt
@@ -127,15 +129,20 @@ function initVerification(client, db, config, chat) {
                         wasHandled = true;
                         const useEmail = config.enableEmailVerification;
                         const usePhoto = config.enablePhotoVerification;
+                        const isTestFlow = record.flow_type === 'test';
 
-                        if (!useEmail && !usePhoto) {
+                        if (isTestFlow || (!useEmail && !usePhoto)) {
                             // Keyword was the only verification needed
                             const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
                             const cleanId = senderId.replace('@c.us', '');
-                            if (chatObj) await chatObj.approveGroupMembershipRequests({ requesterIds: [senderId] });
+                            if (chatObj) {
+                                try {
+                                    await chatObj.approveGroupMembershipRequests({ requesterIds: [senderId] });
+                                } catch (e) {}
+                            }
                             db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(senderId);
-                            await msg.reply(isAr ? 'تم التحقق بنجاح! تمت الموافقة عليك وإضافتك إلى قائمة المتحقق منهم.' : 'Verification successful! You have been approved and added to the verified list.');
+                            await msg.reply(isAr ? 'تم التحقق بنجاح! انتهى اختبار التحقق الثنائي وتمت الموافقة عليك.' : 'Verification successful! The secondary verification test is complete and you have been approved.');
                             return true;
                         }
 

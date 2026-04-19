@@ -233,6 +233,7 @@ db.exec(`
         requester_id TEXT PRIMARY KEY,
         group_id TEXT,
         state TEXT,
+        flow_type TEXT,
         email TEXT,
         code TEXT,
         created_at INTEGER
@@ -249,6 +250,8 @@ db.exec(`
         use_global_qa INTEGER DEFAULT 0
     );
 `);
+
+try { db.exec('ALTER TABLE secondary_verification ADD COLUMN flow_type TEXT'); } catch (e) { }
 
 db.exec(`
     CREATE TABLE IF NOT EXISTS app_users (
@@ -1542,7 +1545,7 @@ app.post('/api/secondary-verification/test', requireAuthApi, requirePermission('
         }
 
         const verification = initVerification(client, db, config);
-        const didStart = await verification.startVerification(requesterId, cleanUserId, targetGroupId);
+        const didStart = await verification.startVerification(requesterId, cleanUserId, targetGroupId, { flowType: 'test' });
         if (!didStart) {
             return res.status(400).json({ error: 'تعذر بدء جلسة الاختبار. / Could not start test verification session.' });
         }
