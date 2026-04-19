@@ -3467,6 +3467,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 const requesterId = String(item.requesterId || '')
                     .replace(/:[0-9]+/, '')
                     .replace('@lid', '@c.us');
+                const phoneNumber = String(item.phoneNumber || '').replace(/\D/g, '');
                 const groupName = item.groupName || item.groupId || '-';
                 const state = item.state || '-';
                 const ageText = item.createdAt ? new Date(item.createdAt).toLocaleString() : '-';
@@ -3474,7 +3475,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 const groupData = encodeURIComponent(String(item.groupId || ''));
                 return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:1px dashed var(--card-border);padding:8px 0;">'
                     + '<div style="min-width:0;">'
-                    + '<div style="color:var(--text);font-weight:600;">' + (currentLang === 'en' ? 'WhatsApp ID: ' : 'معرّف واتساب: ') + requesterId + '</div>'
+                    + '<div style="color:var(--text);font-weight:600;">' + (currentLang === 'en' ? 'Phone: ' : 'الرقم: ') + (phoneNumber || (currentLang === 'en' ? 'Not available' : 'غير متوفر')) + '</div>'
+                    + '<div style="font-size:10px;color:var(--text-muted);">' + (currentLang === 'en' ? 'WhatsApp ID: ' : 'معرّف واتساب: ') + requesterId + '</div>'
                     + '<div style="font-size:11px;color:var(--text-muted);">' + groupName + ' • ' + state + '</div>'
                     + '<div style="font-size:10px;color:var(--text-muted);">' + ageText + '</div>'
                     + '</div>'

@@ -127,6 +127,14 @@ function getVoteSelectionNumber(vote) {
         const match = joined.match(/(^|\D)([1-4])(\D|$)/);
         if (match) return match[2];
         const normalized = joined.toLowerCase();
+
+        // User method-selection poll options (Arabic/English)
+        if (/verification code|student email|بريد|رمز تحقق/.test(normalized)) return '1';
+        if (/screenshot|blackboard|صورة|بلاك بورد/.test(normalized)) return '2';
+        if (/direct contact|admin help|contact from an admin|تواصل مباشر|المشرف/.test(normalized)) return '3';
+        if (/cancel this request|cancel|إلغاء|الغاء/.test(normalized)) return '4';
+
+        // Admin decision poll/reply options
         if (/approve|موافقة|قبول/.test(normalized)) return '1';
         if (/deny|رفض/.test(normalized)) return '2';
         if (/another|اخرى|أخرى|اعادة|إعادة/.test(normalized)) return '3';
@@ -136,11 +144,14 @@ function getVoteSelectionNumber(vote) {
     return '';
 }
 
-async function sendMethodSelectionPoll(client, config, record, isAr) {
+async function sendMethodSelectionPoll(client, db, config, record, isAr) {
+    if (record && record.user_method_poll_id) {
+        return record.user_method_poll_id;
+    }
     const groupName = await resolveGroupName(client, record.group_id);
-    const title = isAr
-        ? `مرحباً بك. طلبت الانضمام إلى "${groupName}". اختر الطريقة الأنسب لإكمال التحقق:`
-        : `Welcome. You requested to join "${groupName}". Please choose how you want to continue verification:`;
+        const title = isAr
+            ? `مرحباً بك. طلبت الانضمام إلى "${groupName}". اختر الطريقة الأنسب لإكمال التحقق:`
+            : `Welcome. You requested to join "${groupName}". Please choose how you want to continue verification:`;
     const options = isAr
         ? [
             'إرسال رمز تحقق إلى بريدك الجامعي',
@@ -156,10 +167,16 @@ async function sendMethodSelectionPoll(client, config, record, isAr) {
         ];
     const poll = new Poll(title, options);
     const pollMsg = await client.sendMessage(record.requester_id, poll);
+    db.prepare(`
+        UPDATE secondary_verification
+        SET user_method_poll_id = ?
+        WHERE requester_id = ? AND group_id = ?
+    `).run(pollMsg.id._serialized, record.requester_id, record.group_id);
     pendingUserMethodPolls.set(pollMsg.id._serialized, {
         requesterId: record.requester_id,
         groupId: record.group_id
     });
+    return pollMsg.id._serialized;
 }
 
 function findSessionByRequester(db, requesterId) {
@@ -174,11 +191,15 @@ function initVerification(client, db, config, chat) {
             const pollId = vote && vote.parentMessage && vote.parentMessage.id ? vote.parentMessage.id._serialized : '';
             if (!pollId) return false;
 
-            if (pendingUserMethodPolls.has(pollId)) {
+            const dbMethodRecord = db.prepare('SELECT * FROM secondary_verification WHERE user_method_poll_id = ? LIMIT 1').get(pollId);
+            const dbContactRecord = db.prepare("SELECT * FROM secondary_verification WHERE admin_poll_msg_id = ? AND state = 'WAITING_ADMIN_CONTACT_DECISION' LIMIT 1").get(pollId);
+            const dbPhotoRecord = db.prepare("SELECT * FROM secondary_verification WHERE admin_poll_msg_id = ? AND state = 'WAITING_ADMIN_PHOTO_REVIEW' LIMIT 1").get(pollId);
+
+            if (pendingUserMethodPolls.has(pollId) || dbMethodRecord) {
                 const ctx = pendingUserMethodPolls.get(pollId);
-                const record = ctx ? findSessionByRequester(db, ctx.requesterId) : null;
+                const record = ctx ? findSessionByRequester(db, ctx.requesterId) : dbMethodRecord;
                 pendingUserMethodPolls.delete(pollId);
-                if (!ctx || !record) return true;
+                    if (!record) return true;
 
                 const isAr = config.secondaryVerificationLanguage === 'ar';
                 const choice = getVoteSelectionNumber(vote);
@@ -190,10 +211,10 @@ function initVerification(client, db, config, chat) {
                 if (choice === '1') {
                     if (!useEmail) {
                         await client.sendMessage(record.requester_id, isAr ? 'خيار البريد غير متاح حالياً. اختر خياراً آخر من القائمة.' : 'Email verification is not available right now. Please choose another option from the menu.');
-                        await sendMethodSelectionPoll(client, config, record, isAr);
+                        await sendMethodSelectionPoll(client, db, config, record, isAr);
                         return true;
                     }
-                    db.prepare("UPDATE secondary_verification SET state = 'PENDING_EMAIL_INPUT' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
+                    db.prepare("UPDATE secondary_verification SET state = 'PENDING_EMAIL_INPUT', user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
                     await client.sendMessage(record.requester_id, isAr
                         ? `أرسل بريدك الجامعي الذي ينتهي بـ @${domain}. وإذا رغبت بالرجوع للقائمة، أرسل الرقم 1.`
                         : `Please send your student email ending with @${domain}. If you want to return to the menu, send 1.`);
@@ -203,10 +224,10 @@ function initVerification(client, db, config, chat) {
                 if (choice === '2') {
                     if (!usePhoto) {
                         await client.sendMessage(record.requester_id, isAr ? 'خيار الصورة غير متاح حالياً. اختر خياراً آخر من القائمة.' : 'Photo verification is not available right now. Please choose another option from the menu.');
-                        await sendMethodSelectionPoll(client, config, record, isAr);
+                        await sendMethodSelectionPoll(client, db, config, record, isAr);
                         return true;
                     }
-                    db.prepare("UPDATE secondary_verification SET state = 'PENDING_PHOTO_UPLOAD' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
+                    db.prepare("UPDATE secondary_verification SET state = 'PENDING_PHOTO_UPLOAD', user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
                     await client.sendMessage(record.requester_id, isAr
                         ? 'يرجى إرسال صورة واضحة لمقرراتك من البلاك بورد الآن. وللرجوع إلى القائمة، أرسل الرقم 1.'
                         : 'Please send a clear screenshot of your Blackboard courses now. To go back to the menu, send 1.');
@@ -216,14 +237,11 @@ function initVerification(client, db, config, chat) {
                 if (choice === '3') {
                     const adminGroup = resolveAdminGroupForVerification(config, record.group_id);
                     if (adminGroup) {
-                        await client.sendMessage(adminGroup, isAr
-                            ? `طلب مساعدة: المستخدم @${normalizeVerificationId(record.requester_id).replace('@c.us', '')} يريد التواصل مع مشرف للانضمام إلى "${groupName}".`
-                            : `Assistance request: user @${normalizeVerificationId(record.requester_id).replace('@c.us', '')} needs admin help to join "${groupName}".`, {
-                            mentions: [record.requester_id]
-                        });
-
+                        const requesterHandle = normalizeVerificationId(record.requester_id).replace('@c.us', '');
                         const contactPoll = new Poll(
-                            isAr ? 'قرار الإدارة لطلب التواصل المباشر:' : 'Admin decision for direct-contact request:',
+                            isAr
+                                ? `طلب تواصل مباشر من @${requesterHandle} للانضمام إلى "${groupName}". اختر قرار الإدارة:`
+                                : `Direct-contact request from @${requesterHandle} to join "${groupName}". Choose admin decision:`,
                             isAr
                                 ? ['1 - موافقة', '2 - رفض', '3 - حظر']
                                 : ['1 - Approve', '2 - Reject', '3 - Ban']
@@ -236,9 +254,9 @@ function initVerification(client, db, config, chat) {
 
                         db.prepare(`
                             UPDATE secondary_verification
-                            SET state = 'WAITING_ADMIN_CONTACT_DECISION', admin_group_id = ?, admin_decision_msg_id = ?, admin_last_reminder_at = 0
+                            SET state = 'WAITING_ADMIN_CONTACT_DECISION', user_method_poll_id = '', admin_group_id = ?, admin_decision_msg_id = ?, admin_poll_msg_id = ?, admin_last_reminder_at = 0
                             WHERE requester_id = ? AND group_id = ?
-                        `).run(adminGroup, pollMsg.id._serialized, record.requester_id, record.group_id);
+                        `).run(adminGroup, pollMsg.id._serialized, pollMsg.id._serialized, record.requester_id, record.group_id);
 
                         await client.sendMessage(record.requester_id, isAr
                             ? 'تم إرسال طلبك إلى المشرفين. سيبقى طلبك معلقاً حتى يراجع المشرفون حالتك.'
@@ -260,13 +278,14 @@ function initVerification(client, db, config, chat) {
                 }
 
                 await client.sendMessage(record.requester_id, isAr ? 'لم أفهم الخيار. سأعيد إرسال القائمة مرة أخرى.' : 'I could not understand that option. I will resend the menu.');
-                await sendMethodSelectionPoll(client, config, record, isAr);
+                db.prepare("UPDATE secondary_verification SET user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
+                await sendMethodSelectionPoll(client, db, config, record, isAr);
                 return true;
             }
 
-            if (pendingAdminContactPolls.has(pollId)) {
+            if (pendingAdminContactPolls.has(pollId) || dbContactRecord) {
                 const ctx = pendingAdminContactPolls.get(pollId);
-                const record = findSessionByRequester(db, ctx.requesterId);
+                const record = ctx ? findSessionByRequester(db, ctx.requesterId) : dbContactRecord;
                 const isAr = config.secondaryVerificationLanguage === 'ar';
                 const choice = getVoteSelectionNumber(vote);
 
@@ -319,9 +338,9 @@ function initVerification(client, db, config, chat) {
                 return true;
             }
 
-            if (pendingAdminPhotoPolls.has(pollId)) {
+            if (pendingAdminPhotoPolls.has(pollId) || dbPhotoRecord) {
                 const ctx = pendingAdminPhotoPolls.get(pollId);
-                const record = findSessionByRequester(db, ctx.requesterId);
+                const record = ctx ? findSessionByRequester(db, ctx.requesterId) : dbPhotoRecord;
                 const isAr = config.secondaryVerificationLanguage === 'ar';
                 const choice = getVoteSelectionNumber(vote);
 
@@ -559,15 +578,16 @@ function initVerification(client, db, config, chat) {
                 return false;
             }
 
-            // PREVENT SPAM: match existing session by normalized requester id in the same group.
+            // Only one active verification session per requester across all groups.
             // WhatsApp may alternate identifiers between @lid and @c.us for the same user.
             const normalizedIncomingId = normalizeVerificationId(rawRequesterId);
-            const existingRecord = db.prepare('SELECT requester_id, group_id, created_at FROM secondary_verification WHERE group_id = ?').all(groupId)
+            const existingRecord = db.prepare('SELECT requester_id, group_id, created_at, state FROM secondary_verification').all()
                 .find(row => normalizeVerificationId(row.requester_id) === normalizedIncomingId);
             if (existingRecord) {
                 const ttlMs = getSessionTimeoutMs(config);
+                const isSameGroup = String(existingRecord.group_id || '') === String(groupId || '');
                 const isExpired = !existingRecord.created_at || Date.now() - existingRecord.created_at > ttlMs;
-                if (forceRestart || isExpired) {
+                if (isSameGroup && (forceRestart || isExpired)) {
                     debugLog('start replacing existing session', {
                         requesterId: rawRequesterId,
                         existingRequesterId: existingRecord.requester_id,
@@ -577,7 +597,12 @@ function initVerification(client, db, config, chat) {
                     });
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(existingRecord.requester_id, groupId);
                 } else {
-                    debugLog('start blocked: active session exists', { requesterId: rawRequesterId, groupId });
+                    debugLog('start blocked: active session exists in another group', {
+                        requesterId: rawRequesterId,
+                        requestedGroupId: groupId,
+                        existingGroupId: existingRecord.group_id,
+                        existingState: existingRecord.state
+                    });
                     return false; // Already sent them a message, waiting for their reply
                 }
             }
@@ -587,8 +612,8 @@ function initVerification(client, db, config, chat) {
             const initialState = useKeyword ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
             const insertStmt = db.prepare(`
                 INSERT OR REPLACE INTO secondary_verification 
-                (requester_id, group_id, state, flow_type, require_email, require_photo, email, code, created_at) 
-                VALUES (?, ?, ?, ?, ?, ?, '', '', ?)
+                (requester_id, group_id, state, flow_type, require_email, require_photo, user_method_poll_id, email, code, created_at, admin_poll_msg_id)
+                VALUES (?, ?, ?, ?, ?, ?, '', '', '', ?, '')
             `);
             insertStmt.run(rawRequesterId, groupId, initialState, flowType, useEmail ? 1 : 0, usePhoto ? 1 : 0, Date.now());
             debugLog('session started', {
@@ -624,7 +649,7 @@ function initVerification(client, db, config, chat) {
                 if (!useKeyword && (useEmail || usePhoto)) {
                     const seededRecord = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(rawRequesterId, groupId);
                     if (seededRecord) {
-                        await sendMethodSelectionPoll(client, config, seededRecord, isAr);
+                        await sendMethodSelectionPoll(client, db, config, seededRecord, isAr);
                     }
                 }
                 debugLog('initial message sent', { requesterId: rawRequesterId, groupId, initialState });
@@ -760,7 +785,7 @@ function initVerification(client, db, config, chat) {
                     try {
                         await client.sendMessage(record.requester_id, initMsg);
                         if (!useKeyword && (useEmail || usePhoto) && refreshed) {
-                            await sendMethodSelectionPoll(client, config, refreshed, isAr);
+                            await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
                         }
                     } catch (e) {
                         debugLog('expired reentry message failed', { requesterId: record.requester_id, error: e && e.message ? e.message : String(e) });
@@ -832,12 +857,12 @@ function initVerification(client, db, config, chat) {
                         }
 
                         // Move to next step
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD' WHERE requester_id = ?").run(record.requester_id);
+                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '' WHERE requester_id = ?").run(record.requester_id);
                         debugLog('state transition', { requesterId: record.requester_id, from: 'PENDING_CUSTOM', to: 'PENDING_METHOD', useEmail, usePhoto });
                         if (useEmail || usePhoto) {
                             const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
                             if (refreshed) {
-                                await sendMethodSelectionPoll(client, config, refreshed, isAr);
+                                await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
                             }
                         }
                     } else {
@@ -860,30 +885,39 @@ function initVerification(client, db, config, chat) {
                     }
                 } else if (record.state === 'PENDING_METHOD') {
                     wasHandled = true;
-                    const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
-                    const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
-                    const isTestFlow = record.flow_type === 'test';
-                    debugLog('handling method step', { requesterId: record.requester_id, useEmail, usePhoto, hasMedia: Boolean(msg.hasMedia) });
-
-                    const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                    if (refreshed) {
-                        await sendMethodSelectionPoll(client, config, refreshed, isAr);
+                    const menuHints = isAr
+                        ? ['1', 'قائمة', 'القائمة', 'خيارات']
+                        : ['1', 'menu', 'options', 'help'];
+                    const wantsMenu = isTextMessage && menuHints.some(word => rawText === word || rawText.includes(word));
+                    if (wantsMenu || !record.user_method_poll_id) {
+                        if (record.user_method_poll_id) {
+                            db.prepare("UPDATE secondary_verification SET user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?")
+                                .run(record.requester_id, record.group_id);
+                        }
+                        const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
+                        if (refreshed) {
+                            await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
+                        }
+                    } else {
+                        await msg.reply(isAr
+                            ? 'يرجى اختيار إحدى خيارات الاستطلاع السابق. لإعادة إرسال القائمة أرسل 1.'
+                            : 'Please choose one of the options in the previous poll. Send 1 to resend the menu.');
                     }
                 } else if (record.state === 'PENDING_EMAIL_INPUT') {
                     if (!isTextMessage) return false;
                     wasHandled = true;
                     const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
                     if (rawText === '1') {
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
+                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
                         const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) await sendMethodSelectionPoll(client, config, refreshed, isAr);
+                        if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
                         return true;
                     }
                     if (!useEmail) {
                         await msg.reply(isAr ? 'خيار البريد غير متاح حالياً. سأعيدك إلى القائمة.' : 'Email verification is not available right now. I will return you to the menu.');
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
+                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
                         const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) await sendMethodSelectionPoll(client, config, refreshed, isAr);
+                        if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
                         return true;
                     }
                     const domain = config.emailDomain || 'college.edu';
@@ -933,26 +967,26 @@ function initVerification(client, db, config, chat) {
                                 : (isAuthError
                                     ? 'Could not send email due to SMTP settings. Returning you to the previous list.'
                                     : 'An error occurred while sending the email. Returning you to the previous list.'));
-                            db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', email = '', code = '' WHERE requester_id = ? AND group_id = ?")
+                            db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '', email = '', code = '' WHERE requester_id = ? AND group_id = ?")
                                 .run(record.requester_id, record.group_id);
                             const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                            if (refreshed) await sendMethodSelectionPoll(client, config, refreshed, isAr);
+                            if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
                         }
                     } else {
                         await msg.reply(isAr
                             ? 'إعدادات البريد غير مكتملة لدى الإدارة. سنعيدك إلى القائمة السابقة.'
                             : 'Email settings are not configured by the admin. Returning you to the previous menu.');
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', email = '', code = '' WHERE requester_id = ? AND group_id = ?")
+                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '', email = '', code = '' WHERE requester_id = ? AND group_id = ?")
                             .run(record.requester_id, record.group_id);
                         const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) await sendMethodSelectionPoll(client, config, refreshed, isAr);
+                        if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
                     }
                 } else if (record.state === 'PENDING_PHOTO_UPLOAD') {
                     wasHandled = true;
                     if (isTextMessage && rawText === '1') {
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
+                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
                         const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) await sendMethodSelectionPoll(client, config, refreshed, isAr);
+                        if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
                         return true;
                     }
                     if (!msg.hasMedia) {
@@ -1001,18 +1035,18 @@ function initVerification(client, db, config, chat) {
 
                     db.prepare(`
                         UPDATE secondary_verification
-                        SET state = 'WAITING_ADMIN_PHOTO_REVIEW', admin_group_id = ?, admin_decision_msg_id = ?, admin_last_reminder_at = 0
+                        SET state = 'WAITING_ADMIN_PHOTO_REVIEW', admin_group_id = ?, admin_decision_msg_id = ?, admin_poll_msg_id = ?, admin_last_reminder_at = 0
                         WHERE requester_id = ? AND group_id = ?
-                    `).run(adminGroup, decisionMsg && decisionMsg.id ? decisionMsg.id._serialized : '', record.requester_id, record.group_id);
+                    `).run(adminGroup, decisionMsg && decisionMsg.id ? decisionMsg.id._serialized : '', pollMsg.id._serialized, record.requester_id, record.group_id);
                     await msg.reply(isAr ? 'تم إرسال الصورة للإدارة للمراجعة.' : 'Your screenshot was sent to admins for review.');
                     return true;
                 } else if (record.state === 'WAITING_ADMIN_PHOTO_REVIEW') {
                     wasHandled = true;
                     if (isTextMessage && rawText === '1') {
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD' WHERE requester_id = ? AND group_id = ?")
+                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?")
                             .run(record.requester_id, record.group_id);
                         const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) await sendMethodSelectionPoll(client, config, refreshed, isAr);
+                        if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
                         return true;
                     }
                     await msg.reply(isAr
@@ -1024,10 +1058,10 @@ function initVerification(client, db, config, chat) {
 
                     wasHandled = true;
                     if (rawText === '1') {
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', email = '', code = '' WHERE requester_id = ? AND group_id = ?")
+                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '', email = '', code = '' WHERE requester_id = ? AND group_id = ?")
                             .run(record.requester_id, record.group_id);
                         const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) await sendMethodSelectionPoll(client, config, refreshed, isAr);
+                        if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
                         return true;
                     }
                     if (rawText === record.code) {

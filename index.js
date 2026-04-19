@@ -236,11 +236,13 @@ db.exec(`
         flow_type TEXT,
         require_email INTEGER,
         require_photo INTEGER,
+        user_method_poll_id TEXT,
         email TEXT,
         code TEXT,
         created_at INTEGER,
         admin_group_id TEXT,
         admin_decision_msg_id TEXT,
+        admin_poll_msg_id TEXT,
         admin_last_reminder_at INTEGER
     );
     CREATE TABLE IF NOT EXISTS secondary_verification_bait_log (
@@ -264,8 +266,10 @@ db.exec(`
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN flow_type TEXT'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN require_email INTEGER'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN require_photo INTEGER'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification ADD COLUMN user_method_poll_id TEXT'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_group_id TEXT'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_decision_msg_id TEXT'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_poll_msg_id TEXT'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_last_reminder_at INTEGER'); } catch (e) { }
 
 db.exec(`
@@ -1575,7 +1579,7 @@ app.post('/api/secondary-verification/test', requireAuthApi, requirePermission('
     }
 });
 
-app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission('security:manage'), (req, res) => {
+app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
     try {
         const rows = db.prepare(`
             SELECT sv.*, wg.name AS group_name
@@ -1586,11 +1590,41 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
         const timeoutDays = Math.max(1, parseInt(config.secondaryVerificationTimeoutDays, 10) || 2);
         const timeoutMs = timeoutDays * 24 * 60 * 60 * 1000;
         const now = Date.now();
-        const mapped = rows.map(row => {
+
+        const normalizeRequesterId = (value) => String(value || '').replace(/:[0-9]+/, '').trim();
+        const toDigits = (value) => String(value || '').replace(/\D/g, '');
+        const resolvePhoneNumber = async (rawRequesterId) => {
+            const normalized = normalizeRequesterId(rawRequesterId);
+            if (!normalized) return '';
+
+            if (normalized.endsWith('@c.us')) {
+                return toDigits(normalized.replace('@c.us', ''));
+            }
+
+            const candidates = [normalized];
+            if (normalized.endsWith('@lid')) {
+                const asCus = normalized.replace('@lid', '@c.us');
+                if (!candidates.includes(asCus)) candidates.push(asCus);
+            }
+
+            for (const candidate of candidates) {
+                try {
+                    const contact = await client.getContactById(candidate);
+                    const digits = toDigits(contact && contact.number ? contact.number : '');
+                    if (digits) return digits;
+                } catch (e) { }
+            }
+
+            return '';
+        };
+
+        const mapped = await Promise.all(rows.map(async (row) => {
             const createdAt = Number(row.created_at || 0);
             const expiresAt = createdAt > 0 ? createdAt + timeoutMs : 0;
+            const phoneNumber = await resolvePhoneNumber(row.requester_id);
             return {
                 requesterId: row.requester_id,
+                phoneNumber,
                 groupId: row.group_id,
                 groupName: row.group_name || row.group_id,
                 state: row.state,
@@ -1602,7 +1636,7 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
                 expiresAt,
                 isExpired: expiresAt > 0 ? now > expiresAt : false
             };
-        });
+        }));
         return res.json({ timeoutDays, pending: mapped });
     } catch (e) {
         console.error('[Secondary Verification] Pending list error:', e);
@@ -4051,7 +4085,7 @@ async function rejectExpiredSecondaryVerificationSessions() {
             SELECT requester_id, group_id, created_at, state
             FROM secondary_verification
             WHERE (created_at IS NULL OR created_at <= ?)
-              AND state NOT IN ('WAITING_ADMIN_PHOTO_REVIEW', 'WAITING_ADMIN_CONTACT_DECISION')
+              AND state NOT IN ('WAITING_ADMIN_PHOTO_REVIEW', 'WAITING_ADMIN_CONTACT_DECISION', 'EXPIRED_WAITING_REENTRY')
         `).all(cutoff);
         if (!expiredRows || expiredRows.length === 0) return;
 
