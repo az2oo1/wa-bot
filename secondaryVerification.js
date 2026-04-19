@@ -184,7 +184,7 @@ function initVerification(client, db, config, chat) {
                         const useEmail = config.enableEmailVerification;
                         const usePhoto = config.enablePhotoVerification;
 
-                        if (isTestFlow || (!useEmail && !usePhoto)) {
+                        if (!useEmail && !usePhoto) {
                             // Keyword was the only verification needed
                             const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
                             const cleanId = normalizeVerificationId(senderId).replace('@c.us', '');
@@ -195,7 +195,7 @@ function initVerification(client, db, config, chat) {
                             }
                             db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
-                            await msg.reply(isAr ? 'تم التحقق بنجاح! انتهى اختبار التحقق الثنائي وتمت الموافقة عليك.' : 'Verification successful! The secondary verification test is complete and you have been approved.');
+                            await msg.reply(isAr ? 'تم التحقق بنجاح! تمت الموافقة عليك وإضافتك إلى قائمة المتحقق منهم.' : 'Verification successful! You have been approved and added to the verified list.');
                             return true;
                         }
 

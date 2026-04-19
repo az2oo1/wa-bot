@@ -725,7 +725,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                                     </label>
                                 `).join('')}
                             </div>
-                            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${t('اختر المجموعات التي تريد تطبيق النظام عليها (اذا لم تحدد شيئاً سيعمل على الكل)', 'Select groups to apply the system to (if empty, applies to ALL groups)')}</div>
+                            <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">${t('اختر المجموعات التي تريد تطبيق النظام عليها (اذا لم تحدد شيئاً فلن يعمل على أي مجموعة)', 'Select groups to apply the system to (if empty, it will not run on any group)')}</div>
                         </div>
 
                         <div class="field-group" style="background: rgba(0,0,0,0.1); border-radius: 6px; padding: 12px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
@@ -743,8 +743,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                                 <div class="field-group" style="margin-bottom:0;">
                                     <label class="field-label">${t('المجموعة (اختياري)', 'Group (Optional)')}</label>
                                     <select id="secondaryVerificationTestGroup" class="form-control">
-                                        <option value="">${t('اختيار تلقائي حسب الإعدادات', 'Auto-select from settings')}</option>
-                                        ${groupsArr.map(g => `<option value="${g.id}">${(g.name || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</option>`).join('')}
+                                        <option value="">${t('اختيار تلقائي من المجموعات المحددة', 'Auto-select from selected groups')}</option>
+                                        ${(groupsArr.filter(g => (config.secondaryVerificationGroups || []).includes(g.id))).map(g => `<option value="${g.id}">${(g.name || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</option>`).join('')}
                                     </select>
                                 </div>
                             </div>
