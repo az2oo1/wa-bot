@@ -1545,7 +1545,7 @@ app.post('/api/secondary-verification/test', requireAuthApi, requirePermission('
         }
 
         const verification = initVerification(client, db, config);
-        const didStart = await verification.startVerification(requesterId, cleanUserId, targetGroupId, { flowType: 'test' });
+        const didStart = await verification.startVerification(requesterId, cleanUserId, targetGroupId, { flowType: 'test', forceRestart: true });
         if (!didStart) {
             return res.status(400).json({ error: 'تعذر بدء جلسة الاختبار. / Could not start test verification session.' });
         }

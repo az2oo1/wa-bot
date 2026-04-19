@@ -41,11 +41,19 @@ function initVerification(client, db, config, chat) {
             if (!useKeyword && !useEmail && !usePhoto) return false;
 
             const flowType = options.flowType === 'test' ? 'test' : 'join';
+            const forceRestart = Boolean(options.forceRestart);
 
             // PREVENT SPAM: Check if this user already has an active verification process
-            const existingRecord = db.prepare('SELECT 1 FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(rawRequesterId, groupId);
+            const existingRecord = db.prepare('SELECT requester_id, group_id, created_at FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(rawRequesterId, groupId);
             if (existingRecord) {
-                return false; // Already sent them a message, waiting for their reply
+                const rawTtlSec = parseInt(config.secondaryVerificationDelay, 10);
+                const ttlMs = Number.isFinite(rawTtlSec) && rawTtlSec > 0 ? rawTtlSec * 1000 : DEFAULT_SESSION_TTL_MS;
+                const isExpired = !existingRecord.created_at || Date.now() - existingRecord.created_at > ttlMs;
+                if (forceRestart || isExpired) {
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(rawRequesterId, groupId);
+                } else {
+                    return false; // Already sent them a message, waiting for their reply
+                }
             }
             
             console.log(`[Verification] Starting for ${cleanUserId}`);
@@ -195,6 +203,13 @@ function initVerification(client, db, config, chat) {
                         
                         await msg.reply(isAr ? `مقبول! لإكمال الانضمام لـ ${reqGroupName}، يرجى إرسال ${methods.join(' أو ')}.` : `Approved! To finish joining ${reqGroupName}, please send ${methods.join(' OR ')}.`);
                     } else {
+                        if (record.flow_type === 'test') {
+                            const expectedWords = approveWs.filter(Boolean).join(', ');
+                            await msg.reply(isAr
+                                ? `الاختبار يعمل، لكن هذه الرسالة لم تطابق كلمات الموافقة الحالية. الكلمات المعتمدة: ${expectedWords || 'yes'}.`
+                                : `The test is working, but this reply did not match the current approval keywords. Accepted words: ${expectedWords || 'yes'}.`);
+                            return true;
+                        }
                         // Ignore unrelated texts without hijacking all private messages.
                         return false;
                     }
