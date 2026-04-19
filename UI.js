@@ -3471,18 +3471,29 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 const groupName = item.groupName || item.groupId || '-';
                 const state = item.state || '-';
                 const ageText = item.createdAt ? new Date(item.createdAt).toLocaleString() : '-';
-                const requesterArg = JSON.stringify(item.requesterId || '');
-                const groupArg = JSON.stringify(item.groupId || '');
+                const requesterData = encodeURIComponent(String(item.requesterId || ''));
+                const groupData = encodeURIComponent(String(item.groupId || ''));
                 return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:1px dashed var(--card-border);padding:8px 0;">'
                     + '<div style="min-width:0;">'
                     + '<div style="color:var(--text);font-weight:600;">' + requester + '</div>'
                     + '<div style="font-size:11px;color:var(--text-muted);">' + groupName + ' • ' + state + '</div>'
                     + '<div style="font-size:10px;color:var(--text-muted);">' + ageText + '</div>'
                     + '</div>'
-                    + '<button class="btn btn-danger btn-sm" style="padding:4px 8px;" onclick=\'removePendingSecondaryApproval(' + requesterArg + ',' + groupArg + ')\'>'
+                    + '<button class="btn btn-danger btn-sm pending-secondary-reject-btn" style="padding:4px 8px;" data-requester-id="' + requesterData + '" data-group-id="' + groupData + '">'
                     + (currentLang === 'en' ? 'Reject' : 'رفض')
                     + '</button>'
                     + '</div>';
+            }
+
+            function bindPendingSecondaryActionButtons() {
+                const buttons = document.querySelectorAll('.pending-secondary-reject-btn');
+                buttons.forEach(btn => {
+                    btn.onclick = () => {
+                        const requesterId = decodeURIComponent(btn.getAttribute('data-requester-id') || '');
+                        const groupId = decodeURIComponent(btn.getAttribute('data-group-id') || '');
+                        removePendingSecondaryApproval(requesterId, groupId);
+                    };
+                });
             }
 
             async function refreshPendingSecondaryApprovals() {
@@ -3508,6 +3519,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         return;
                     }
                     listEl.innerHTML = items.map(formatPendingVerificationItem).join('');
+                    bindPendingSecondaryActionButtons();
                 } catch (e) {
                     listEl.innerHTML = '<div style="color:#ffb3b3;">' + (e.message || 'Error') + '</div>';
                 }
