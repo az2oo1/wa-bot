@@ -1539,11 +1539,6 @@ app.post('/api/secondary-verification/test', requireAuthApi, requirePermission('
             return res.status(400).json({ error: 'المجموعة ليست ضمن مجموعات التحقق. / Group is not included in verification groups.' });
         }
 
-        const existingRecord = db.prepare('SELECT 1 FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(requesterId, targetGroupId);
-        if (existingRecord) {
-            return res.status(400).json({ error: 'لدى هذا الرقم جلسة تحقق نشطة بالفعل. / This number already has an active verification session.' });
-        }
-
         const verification = initVerification(client, db, config);
         const didStart = await verification.startVerification(requesterId, cleanUserId, targetGroupId, { flowType: 'test', forceRestart: true });
         if (!didStart) {
@@ -3856,6 +3851,18 @@ async function screenPendingMembershipRequests() {
                     aiTriggerWords
                 });
                 if (!profileResult.isViolating) {
+                    const normalizeGroupId = value => String(value || '').trim();
+                    const selectedSecondaryGroups = Array.isArray(config.secondaryVerificationGroups)
+                        ? config.secondaryVerificationGroups.map(normalizeGroupId).filter(Boolean)
+                        : [];
+                    const currentGroupId = normalizeGroupId(chat.id._serialized);
+                    const shouldRunSecondaryVerification = !config.enableSecondaryVerification
+                        ? false
+                        : (selectedSecondaryGroups.length === 0 || selectedSecondaryGroups.includes(currentGroupId));
+                    if (!shouldRunSecondaryVerification) {
+                        continue;
+                    }
+
                     const verification = initVerification(client, db, config);
                     const didStart = await verification.startVerification(rawRequesterId, cleanRequesterId, chat.id._serialized);
                     if (didStart) {

@@ -32,8 +32,12 @@ function initVerification(client, db, config, chat) {
             if (!config.enableSecondaryVerification) return false;
             
             // Check if feature applies to this group
-            const enabledGroups = config.secondaryVerificationGroups || [];
-            if (enabledGroups.length > 0 && !enabledGroups.includes(groupId)) return false;
+            const normalizeGroupId = (value) => String(value || '').trim();
+            const normalizedGroupId = normalizeGroupId(groupId);
+            const enabledGroups = Array.isArray(config.secondaryVerificationGroups)
+                ? config.secondaryVerificationGroups.map(normalizeGroupId).filter(Boolean)
+                : [];
+            if (enabledGroups.length > 0 && !enabledGroups.includes(normalizedGroupId)) return false;
 
             const useKeyword = config.enableKeywordVerification;
             const useEmail = config.enableEmailVerification;
@@ -145,8 +149,11 @@ function initVerification(client, db, config, chat) {
                 if (record.state === 'PENDING_CUSTOM') {
                     if (!isTextMessage) return false;
 
-                    let approveWs = (config.approvalKeyword || 'yes').toLowerCase().split(',').map(s => s.trim());
-                    let banWs = (config.banKeyword || 'no').toLowerCase().split(',').map(s => s.trim());
+                    let approveWs = (config.approvalKeyword || 'yes').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+                    let banWs = (config.banKeyword || 'no').toLowerCase().split(',').map(s => s.trim()).filter(Boolean);
+                    if (approveWs.length === 0) approveWs = ['yes'];
+                    if (banWs.length === 0) banWs = ['no'];
+                    const isTestFlow = record.flow_type === 'test';
                     
                     if (config.enableSecondarySmartMatch) {
                         approveWs = approveWs.map(s => applySmartMatch(s));
@@ -155,6 +162,11 @@ function initVerification(client, db, config, chat) {
 
                     if (banWs.some(w => text.includes(w))) {
                         wasHandled = true;
+                        if (isTestFlow) {
+                            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
+                            await msg.reply(isAr ? 'تم التقاط كلمة الرفض في وضع الاختبار. لن يتم الحظر في الاختبار.' : 'Ban keyword detected in test mode. No blacklist action is applied during tests.');
+                            return true;
+                        }
                         // Reject and ban
                         const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
                         const cleanId = normalizeVerificationId(senderId).replace('@c.us', '');
@@ -170,7 +182,6 @@ function initVerification(client, db, config, chat) {
                         wasHandled = true;
                         const useEmail = config.enableEmailVerification;
                         const usePhoto = config.enablePhotoVerification;
-                        const isTestFlow = record.flow_type === 'test';
 
                         if (isTestFlow || (!useEmail && !usePhoto)) {
                             // Keyword was the only verification needed
