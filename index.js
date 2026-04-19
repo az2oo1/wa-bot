@@ -318,8 +318,9 @@ function loadConfigFromDB() {
         enableJoinProfileScreening: false,
         outlookPassword: "",
         enableSecondaryVerification: false,
-        secondaryVerificationGroups: "[]",
+        secondaryVerificationGroups: [],
         secondaryVerificationLanguage: "en",
+        secondaryVerificationDelay: 3600,
         enableKeywordVerification: false,
         enableEmailVerification: false,
         enablePhotoVerification: false,
@@ -348,9 +349,9 @@ function loadConfigFromDB() {
         if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits', 'aiFilterTriggerWords', 'globalQA', 'secondaryVerificationGroups'].includes(row.key)) {
             try { newConfig[row.key] = JSON.parse(row.value); } catch(e) { }
         }
-        else if (['enableWordFilter', 'enableWordFilterSmartMatch', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled', 'enableQASmartMatch', 'autoPurgeScheduleEnabled', 'adminWhitelistSyncEnabled'].includes(row.key)) {
+        else if (['enableWordFilter', 'enableWordFilterSmartMatch', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled', 'enableQASmartMatch', 'autoPurgeScheduleEnabled', 'adminWhitelistSyncEnabled', 'enableSecondaryVerification', 'enableKeywordVerification', 'enableEmailVerification', 'enablePhotoVerification', 'enableSecondarySmartMatch'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
-        } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes'].includes(row.key)) {
+        } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes', 'secondaryVerificationDelay'].includes(row.key)) {
             newConfig[row.key] = parseInt(row.value, 10);
         } else newConfig[row.key] = row.value;
     });
@@ -1480,6 +1481,82 @@ app.post('/api/logout', requireAuthApi, requirePermission('bot:logout'), async (
         await client.logout();
         res.sendStatus(200);
     } catch (error) { res.sendStatus(500); }
+});
+
+app.post('/api/secondary-verification/test', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    try {
+        if (!client.info || !client.info.wid) {
+            return res.status(400).json({ error: 'البوت غير متصل حالياً. / Bot is not connected right now.' });
+        }
+
+        const numberInput = String((req.body && req.body.number) || '').trim();
+        if (!numberInput) {
+            return res.status(400).json({ error: 'يرجى إدخال رقم. / Please provide a number.' });
+        }
+
+        const cleanedDigits = numberInput.replace(/[^0-9]/g, '');
+        if (!cleanedDigits || cleanedDigits.length < 7) {
+            return res.status(400).json({ error: 'صيغة رقم غير صحيحة. / Invalid number format.' });
+        }
+
+        if (!config.enableSecondaryVerification) {
+            return res.status(400).json({ error: 'التحقق الثنائي غير مفعل. / Secondary verification is disabled.' });
+        }
+
+        const useKeyword = Boolean(config.enableKeywordVerification);
+        const useEmail = Boolean(config.enableEmailVerification);
+        const usePhoto = Boolean(config.enablePhotoVerification);
+        if (!useKeyword && !useEmail && !usePhoto) {
+            return res.status(400).json({ error: 'لا توجد وسيلة تحقق مفعلة. / No verification method is enabled.' });
+        }
+
+        const requesterId = `${cleanedDigits}@c.us`;
+        const cleanUserId = cleanedDigits;
+        const requestedGroupId = String((req.body && req.body.groupId) || '').trim();
+
+        const selectedGroups = Array.isArray(config.secondaryVerificationGroups)
+            ? config.secondaryVerificationGroups.filter(Boolean)
+            : [];
+
+        let targetGroupId = requestedGroupId;
+        if (!targetGroupId) {
+            if (selectedGroups.length > 0) {
+                targetGroupId = selectedGroups[0];
+            } else {
+                const firstGroup = db.prepare('SELECT id FROM whatsapp_groups ORDER BY name LIMIT 1').get();
+                targetGroupId = firstGroup ? firstGroup.id : '';
+            }
+        }
+
+        if (!targetGroupId) {
+            return res.status(400).json({ error: 'لم يتم العثور على مجموعة. / No target group found.' });
+        }
+
+        if (selectedGroups.length > 0 && !selectedGroups.includes(targetGroupId)) {
+            return res.status(400).json({ error: 'المجموعة ليست ضمن مجموعات التحقق. / Group is not included in verification groups.' });
+        }
+
+        const existingRecord = db.prepare('SELECT 1 FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(requesterId, targetGroupId);
+        if (existingRecord) {
+            return res.status(400).json({ error: 'لدى هذا الرقم جلسة تحقق نشطة بالفعل. / This number already has an active verification session.' });
+        }
+
+        const verification = initVerification(client, db, config);
+        const didStart = await verification.startVerification(requesterId, cleanUserId, targetGroupId);
+        if (!didStart) {
+            return res.status(400).json({ error: 'تعذر بدء جلسة الاختبار. / Could not start test verification session.' });
+        }
+
+        return res.json({
+            success: true,
+            message: `تم إرسال اختبار التحقق إلى ${cleanedDigits}. / Verification test message sent to ${cleanedDigits}.`,
+            number: requesterId,
+            groupId: targetGroupId
+        });
+    } catch (e) {
+        console.error('[Verification Test] Error:', e);
+        return res.status(500).json({ error: 'حدث خطأ أثناء الاختبار. / Failed to run verification test.' });
+    }
 });
 
 app.post('/save', requireAuthApi, (req, res) => {
@@ -2669,6 +2746,9 @@ async function tryKickFromChat(chat, candidateIds) {
 
 client.on('message', async msg => {
     try {
+        const ignoredMessageTypes = new Set(['revoked', 'ciphertext', 'e2e_notification', 'notification_template', 'gp2', 'protocol']);
+        if (ignoredMessageTypes.has(msg.type)) return;
+
         const verification = initVerification(client, db, config);
         const handledByVerification = await verification.handleIncomingMessage(msg);
         if (handledByVerification) return;

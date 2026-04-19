@@ -1,5 +1,7 @@
 const nodemailer = require('nodemailer');
 
+const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
+
 function initVerification(client, db, config, chat) {
     return {
         // Triggered after bio check is passed
@@ -59,10 +61,23 @@ function initVerification(client, db, config, chat) {
         // Triggered on every incoming message
         handleIncomingMessage: async (msg) => {
             if (!config.enableSecondaryVerification || msg.isGroupMsg) return false;
+
+            const ignoredMessageTypes = new Set(['revoked', 'ciphertext', 'e2e_notification', 'notification_template', 'gp2', 'protocol']);
+            if (ignoredMessageTypes.has(msg.type)) return false;
+
+            const isTextMessage = msg.type === 'chat' || msg.type === 'text';
             
             const senderId = msg.from;
             const record = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(senderId);
             if (!record) return false;
+
+            const now = Date.now();
+            const rawTtlSec = parseInt(config.secondaryVerificationDelay, 10);
+            const ttlMs = Number.isFinite(rawTtlSec) && rawTtlSec > 0 ? rawTtlSec * 1000 : DEFAULT_SESSION_TTL_MS;
+            if (!record.created_at || now - record.created_at > ttlMs) {
+                db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(senderId);
+                return false;
+            }
 
             // Helper for smart match
             const applySmartMatch = (str) => {
@@ -79,11 +94,14 @@ function initVerification(client, db, config, chat) {
             }
             
             const groupToJoin = record.group_id;
+            let wasHandled = false;
 
             try {
                 const isAr = config.secondaryVerificationLanguage === 'ar';
                 
                 if (record.state === 'PENDING_CUSTOM') {
+                    if (!isTextMessage) return false;
+
                     let approveWs = (config.approvalKeyword || 'yes').toLowerCase().split(',').map(s => s.trim());
                     let banWs = (config.banKeyword || 'no').toLowerCase().split(',').map(s => s.trim());
                     
@@ -93,6 +111,7 @@ function initVerification(client, db, config, chat) {
                     }
 
                     if (banWs.some(w => text.includes(w))) {
+                        wasHandled = true;
                         // Reject and ban
                         const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
                         const cleanId = senderId.replace('@c.us', '');
@@ -105,6 +124,7 @@ function initVerification(client, db, config, chat) {
                         // Make it a silent trap: no rejection notification
                         return true;
                     } else if (approveWs.some(w => text.includes(w))) {
+                        wasHandled = true;
                         const useEmail = config.enableEmailVerification;
                         const usePhoto = config.enablePhotoVerification;
 
@@ -135,9 +155,11 @@ function initVerification(client, db, config, chat) {
                         
                         await msg.reply(isAr ? `مقبول! لإكمال الانضمام لـ ${reqGroupName}، يرجى إرسال ${methods.join(' أو ')}.` : `Approved! To finish joining ${reqGroupName}, please send ${methods.join(' OR ')}.`);
                     } else {
-                        // Silent trap - do nothing if the message didn't contain either keyword
+                        // Ignore unrelated texts without hijacking all private messages.
+                        return false;
                     }
                 } else if (record.state === 'PENDING_METHOD') {
+                    wasHandled = true;
                     const useEmail = config.enableEmailVerification;
                     const usePhoto = config.enablePhotoVerification;
 
@@ -157,6 +179,8 @@ function initVerification(client, db, config, chat) {
                             }
                         }
                     } else {
+                        if (!isTextMessage) return false;
+
                         if (!useEmail) {
                             const pMsg = usePhoto ? (isAr ? 'يرجى إرسال صورة بدلاً من ذلك.' : 'Please send a photo instead.') : '';
                             await msg.reply(isAr ? `التحقق بالبريد غير مفعل. ${pMsg}` : `Email verification is not enabled. ${pMsg}`);
@@ -209,6 +233,9 @@ function initVerification(client, db, config, chat) {
                         }
                     }
                 } else if (record.state === 'PENDING_CODE') {
+                    if (!isTextMessage) return false;
+
+                    wasHandled = true;
                     if (text === record.code) {
                         const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
                         const cleanId = senderId.replace('@c.us', '');
@@ -230,7 +257,7 @@ function initVerification(client, db, config, chat) {
                 console.error('[Verification] Error handling msg:', e);
             }
 
-            return true; // We handled the message, stop propagation
+            return wasHandled;
         }
     };
 }

@@ -732,6 +732,29 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             <label class="field-label" style="margin: 0;">${t('تأخير الإرسال لمنع الحظر (ثواني - مثلاً 3600 لانتظار ساعة)', 'DM Delay to prevent ban (secs - e.g. 3600 for 1 hr)')}</label>
                             <input type="number" id="secondaryVerificationDelay" class="form-control" value="${config.secondaryVerificationDelay !== undefined ? config.secondaryVerificationDelay : 3600}" min="1" max="86400" style="width: 80px;">
                         </div>
+
+                        <div class="sub-panel" style="margin-top:0; margin-bottom:12px; border-color:rgba(64,196,255,0.3);">
+                            <h4><i class="fas fa-flask"></i> ${t('اختبار التحقق الثنائي', 'Secondary Verification Test')}</h4>
+                            <div class="field-row" style="margin-bottom:10px;">
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('رقم للاختبار', 'Test Number')}</label>
+                                    <input type="text" id="secondaryVerificationTestNumber" placeholder="${t('مثال: 9665XXXXXXXX', 'Example: 15551234567')}">
+                                </div>
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('المجموعة (اختياري)', 'Group (Optional)')}</label>
+                                    <select id="secondaryVerificationTestGroup" class="form-control">
+                                        <option value="">${t('اختيار تلقائي حسب الإعدادات', 'Auto-select from settings')}</option>
+                                        ${groupsArr.map(g => `<option value="${g.id}">${(g.name || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;')}</option>`).join('')}
+                                    </select>
+                                </div>
+                            </div>
+                            <button type="button" class="btn btn-blue btn-sm" id="secondaryVerificationTestBtn" onclick="runSecondaryVerificationTest()">
+                                <i class="fas fa-paper-plane"></i> ${t('تنفيذ الاختبار', 'Run Test')}
+                            </button>
+                            <div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6;">
+                                ${t('يرسل نفس رسالة التحقق لهذا الرقم في الخاص بدون انتظار طلب انضمام جديد.', 'Sends the same verification DM flow to this number without waiting for a new join request.')}
+                            </div>
+                        </div>
                         
                         <div class="toggle-row" style="margin-bottom:10px; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 6px;">
                             <div class="toggle-left">
@@ -4762,6 +4785,45 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 } catch (error) {
                     console.error('Import error:', error);
                     showToast(currentLang==='en' ? '❌ Import error: ' + error.message : '❌ خطأ الاستيراد: ' + error.message);
+                }
+            }
+
+            async function runSecondaryVerificationTest() {
+                const numberEl = document.getElementById('secondaryVerificationTestNumber');
+                const groupEl = document.getElementById('secondaryVerificationTestGroup');
+                const btn = document.getElementById('secondaryVerificationTestBtn');
+                if (!numberEl || !btn) return;
+
+                const number = (numberEl.value || '').trim();
+                const groupId = groupEl ? groupEl.value : '';
+                if (!number) {
+                    showToast(currentLang === 'en' ? '⚠️ Please enter a number first' : '⚠️ أدخل رقمًا للاختبار أولاً');
+                    return;
+                }
+
+                const originalHtml = btn.innerHTML;
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + (currentLang === 'en' ? 'Running...' : 'جاري التنفيذ...');
+
+                try {
+                    const res = await fetch('/api/secondary-verification/test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ number, groupId })
+                    });
+
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        showToast((currentLang === 'en' ? '❌ Test failed: ' : '❌ فشل الاختبار: ') + (data.error || 'Unknown error'));
+                        return;
+                    }
+
+                    showToast((currentLang === 'en' ? '✅ ' : '✅ ') + (data.message || (currentLang === 'en' ? 'Test message sent' : 'تم إرسال رسالة الاختبار')));
+                } catch (err) {
+                    showToast((currentLang === 'en' ? '❌ Test failed: ' : '❌ فشل الاختبار: ') + (err.message || 'Network error'));
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml;
                 }
             }
 
