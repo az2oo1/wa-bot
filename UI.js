@@ -361,6 +361,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 <button class="nav-item" onclick="showPage('page-import-export', this)">
                     <span class="nav-icon"><i class="fas fa-exchange-alt"></i></span> ${t('استيراد/تصدير', 'Import/Export')}
                 </button>
+                <button class="nav-item" onclick="showPage('page-archive', this)">
+                    <span class="nav-icon"><i class="fas fa-box-archive"></i></span> ${t('الأرشيف', 'Archive')}
+                </button>
                 <button class="nav-item" onclick="showPage('page-users', this)">
                     <span class="nav-icon"><i class="fas fa-user-shield"></i></span> ${t('إدارة المستخدمين', 'User Management')}
                 </button>
@@ -767,30 +770,6 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             </div>
                         </div>
 
-                        <div class="sub-panel" style="margin-top:0; margin-bottom:12px; border-color:rgba(255,193,7,0.35);">
-                            <h4><i class="fas fa-user-clock"></i> ${t('طلبات التحقق المعلقة', 'Pending Verification Approvals')}</h4>
-                            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap;">
-                                <button type="button" class="btn btn-sm" onclick="refreshPendingSecondaryApprovals()"><i class="fas fa-sync"></i> ${t('تحديث', 'Refresh')}</button>
-                                <span id="pendingSecondaryMeta" style="font-size:11px;color:var(--text-muted);"></span>
-                            </div>
-                            <div id="pendingSecondaryList" style="max-height:220px;overflow:auto;border:1px solid var(--card-border);border-radius:8px;padding:10px;background:rgba(0,0,0,0.08);font-size:12px;color:var(--text-muted);"></div>
-                        </div>
-
-                        <div class="sub-panel" style="margin-top:0; margin-bottom:12px; border-color:rgba(255,82,82,0.35);">
-                            <h4><i class="fas fa-stop-circle"></i> ${t('إيقاف عملية تحقق يدوياً', 'Stop Verification Process Manually')}</h4>
-                            <div class="field-row">
-                                <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('رقم المستخدم', 'User Number')}</label>
-                                    <input type="text" id="stopVerificationNumber" class="form-control" placeholder="${t('مثال: 9665XXXXXXXX', 'Example: 15551234567')}">
-                                </div>
-                                <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('كود الإيقاف', 'Stop Code')}</label>
-                                    <input type="text" id="stopVerificationCodeInput" class="form-control" placeholder="${t('أدخل الكود', 'Enter code')}">
-                                </div>
-                            </div>
-                            <button type="button" class="btn btn-danger btn-sm" onclick="stopVerificationProcessByCode()"><i class="fas fa-ban"></i> ${t('إيقاف العملية', 'Stop Process')}</button>
-                        </div>
-                        
                         <div class="toggle-row" style="margin-bottom:10px; background: rgba(0,0,0,0.1); padding: 8px; border-radius: 6px;">
                             <div class="toggle-left">
                                 <label class="switch"><input type="checkbox" id="enableKeywordVerification" ${config.enableKeywordVerification ? 'checked' : ''}><span class="slider"></span></label>
@@ -1300,6 +1279,41 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         <button type="button" class="btn btn-primary btn-full" onclick="importData()" style="margin-top:14px;">
                             <i class="fas fa-upload"></i> ${t('استيراد الآن', 'Import Now')}
                         </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="page" id="page-archive">
+                <div class="page-header">
+                    <h2><i class="fas fa-box-archive"></i> ${t('الأرشيف', 'Archive')}</h2>
+                    <p>${t('الطلبات المعلقة وسجل إيقاف التحقق وإدارة عناصر الموافقة المحفوظة', 'Pending approvals, verification stop controls, and stored approval management')}</p>
+                </div>
+
+                <div class="card-grid">
+                    <div class="card warning" style="border-color:rgba(255,193,7,0.35);">
+                        <div class="card-header">
+                            <h3><i class="fas fa-user-clock"></i> ${t('طلبات التحقق المعلقة', 'Pending Verification Approvals')}</h3>
+                            <span style="font-size: 13px; color: var(--text-muted); background:var(--input-bg); padding:4px 10px; border-radius:20px;">${t('من هنا يتم المراجعة والحذف', 'Review and remove here')}</span>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap;">
+                            <button type="button" class="btn btn-sm" onclick="refreshPendingSecondaryApprovals()"><i class="fas fa-sync"></i> ${t('تحديث', 'Refresh')}</button>
+                            <span id="pendingSecondaryMeta" style="font-size:11px;color:var(--text-muted);"></span>
+                        </div>
+                        <div id="pendingSecondaryList" style="max-height:320px;overflow:auto;border:1px solid var(--card-border);border-radius:8px;padding:10px;background:rgba(0,0,0,0.08);font-size:12px;color:var(--text-muted);"></div>
+                    </div>
+
+                    <div class="card danger" style="border-color:rgba(255,82,82,0.35);">
+                        <div class="card-header">
+                            <h3><i class="fas fa-stop-circle"></i> ${t('إيقاف عملية تحقق يدوياً', 'Stop Verification Process Manually')}</h3>
+                        </div>
+                        <div class="field-row">
+                            <div class="field-group" style="margin-bottom:0;">
+                                <label class="field-label">${t('رقم المستخدم', 'User Number')}</label>
+                                <input type="text" id="stopVerificationNumber" class="form-control" placeholder="${t('مثال: 9665XXXXXXXX', 'Example: 15551234567')}">
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-danger btn-sm" onclick="stopVerificationProcessByCode()"><i class="fas fa-ban"></i> ${t('إيقاف العملية', 'Stop Process')}</button>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6;">${t('من لوحة التحكم: يكفي إدخال رقم المستخدم لإيقاف الجلسة ورفض الطلب فوراً.', 'From dashboard: only the user number is needed to stop the session and reject the request immediately.')}</div>
                     </div>
                 </div>
             </div>
@@ -2210,6 +2224,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 'page-global-qa': '${t("الأسئلة العامة", "Global Q&A")}',
                 'page-groups': '${t("المجموعات المخصصة", "Custom Groups")}',
                 'page-import-export': '${t("استيراد/تصدير", "Import/Export")}',
+                'page-archive': '${t("الأرشيف", "Archive")}',
                 'page-users': '${t("إدارة المستخدمين", "User Management")}',
                 'page-about': '${t("حول", "About")}'
             };
@@ -3449,7 +3464,10 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             });
 
             function formatPendingVerificationItem(item) {
-                const requester = (item.requesterId || '').replace('@c.us', '');
+                const requester = String(item.requesterId || '')
+                    .replace(/:[0-9]+/, '')
+                    .replace('@lid', '')
+                    .replace('@c.us', '');
                 const groupName = item.groupName || item.groupId || '-';
                 const state = item.state || '-';
                 const ageText = item.createdAt ? new Date(item.createdAt).toLocaleString() : '-';
@@ -3461,7 +3479,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     + '<div style="font-size:11px;color:var(--text-muted);">' + groupName + ' • ' + state + '</div>'
                     + '<div style="font-size:10px;color:var(--text-muted);">' + ageText + '</div>'
                     + '</div>'
-                    + '<button class="btn btn-danger btn-sm" style="padding:4px 8px;" onclick="removePendingSecondaryApproval(' + requesterArg + ',' + groupArg + ')">'
+                    + '<button class="btn btn-danger btn-sm" style="padding:4px 8px;" onclick=\'removePendingSecondaryApproval(' + requesterArg + ',' + groupArg + ')\'>'
                     + (currentLang === 'en' ? 'Reject' : 'رفض')
                     + '</button>'
                     + '</div>';
@@ -3516,18 +3534,16 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
 
             async function stopVerificationProcessByCode() {
                 const numberEl = document.getElementById('stopVerificationNumber');
-                const codeEl = document.getElementById('stopVerificationCodeInput');
                 const number = numberEl ? (numberEl.value || '').trim() : '';
-                const code = codeEl ? (codeEl.value || '').trim() : '';
-                if (!number || !code) {
-                    showToast(currentLang === 'en' ? '⚠️ Enter number and code' : '⚠️ أدخل الرقم والكود');
+                if (!number) {
+                    showToast(currentLang === 'en' ? '⚠️ Enter user number' : '⚠️ أدخل رقم المستخدم');
                     return;
                 }
                 try {
                     const res = await fetch('/api/secondary-verification/stop', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ number, code })
+                        body: JSON.stringify({ number })
                     });
                     const data = await res.json().catch(() => ({}));
                     if (!res.ok) {
@@ -3536,7 +3552,6 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     }
                     showToast(currentLang === 'en' ? '✅ Process stopped and request rejected' : '✅ تم إيقاف العملية ورفض الطلب');
                     if (numberEl) numberEl.value = '';
-                    if (codeEl) codeEl.value = '';
                     refreshPendingSecondaryApprovals();
                 } catch (e) {
                     showToast((currentLang === 'en' ? '❌ Stop failed: ' : '❌ فشل الإيقاف: ') + (e.message || 'Network error'));

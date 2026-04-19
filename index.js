@@ -1645,8 +1645,11 @@ app.post('/api/secondary-verification/stop', requireAuthApi, requirePermission('
     try {
         const providedCode = String((req.body && req.body.code) || '').trim().toLowerCase();
         const expectedCode = String(config.secondaryVerificationStopCode || '').trim().toLowerCase();
-        if (!expectedCode) return res.status(400).json({ error: 'Stop code is not configured.' });
-        if (!providedCode || providedCode !== expectedCode) return res.status(403).json({ error: 'Invalid stop code.' });
+        // Dashboard calls are already authenticated and permission-gated.
+        // Keep code validation optional for compatibility when code is provided.
+        if (providedCode && expectedCode && providedCode !== expectedCode) {
+            return res.status(403).json({ error: 'Invalid stop code.' });
+        }
 
         const inputRequesterId = String((req.body && req.body.requesterId) || '').trim();
         const inputNumber = String((req.body && req.body.number) || '').replace(/[^0-9]/g, '');
@@ -3650,6 +3653,14 @@ client.on('message', async msg => {
 });
 
 client.on('vote_update', async vote => {
+    try {
+        const verification = initVerification(client, db, config);
+        const handledByVerification = await verification.handleVoteUpdate(vote);
+        if (handledByVerification) return;
+    } catch (e) {
+        console.error('[Verification] vote_update handler error:', e && e.message ? e.message : e);
+    }
+
     const pollId = vote && vote.parentMessage && vote.parentMessage.id ? vote.parentMessage.id._serialized : null;
     if (!pollId || !pendingBans.has(pollId)) return;
 
