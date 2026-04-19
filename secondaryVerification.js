@@ -908,8 +908,9 @@ function initVerification(client, db, config, chat) {
                 const approvalKeywords = getApprovalKeywords(config);
                 const banKeywords = String(config.banKeyword || 'no').split(',').map(s => s.trim()).filter(Boolean);
                 const isTestFlow = record.flow_type === 'test';
-                const approvalKeywordMatch = isTextMessage && keywordMatchesText(rawText, approvalKeywords, useSmartMatch);
-                const banKeywordMatch = isTextMessage && keywordMatchesText(rawText, banKeywords.length > 0 ? banKeywords : ['no'], useSmartMatch);
+                const shouldNormalizeForMatch = useSmartMatch || isTestFlow;
+                const approvalKeywordMatch = isTextMessage && keywordMatchesText(rawText, approvalKeywords, shouldNormalizeForMatch);
+                const banKeywordMatch = isTextMessage && keywordMatchesText(rawText, banKeywords.length > 0 ? banKeywords : ['no'], shouldNormalizeForMatch);
 
                 if (record.state === 'EXPIRED_WAITING_REENTRY') {
                     if (!isTextMessage) return false;
@@ -1073,6 +1074,11 @@ function initVerification(client, db, config, chat) {
 
                         const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
                         if (refreshed) {
+                            await msg.reply(isAr
+                                ? 'تم التقاط كلمة الموافقة في الاختبار. لديك وسائل تحقق إضافية مفعلة، لذا اختر طريقة المتابعة من القائمة.'
+                                : 'Approval keyword detected in test mode. Additional verification methods are enabled, so please choose your next step from the menu.');
+                            db.prepare("UPDATE secondary_verification SET user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?")
+                                .run(record.requester_id, record.group_id);
                             await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
                         }
                         return true;
@@ -1109,6 +1115,13 @@ function initVerification(client, db, config, chat) {
                             await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
                         }
                     } else {
+                        if (isTestFlow && isTextMessage) {
+                            const expectedWords = approvalKeywords.filter(Boolean).join(', ');
+                            await msg.reply(isAr
+                                ? `الاختبار يعمل، لكن هذه الرسالة ليست من كلمات الموافقة الحالية. الكلمات المعتمدة: ${expectedWords || 'yes'}. لإعادة القائمة أرسل 1.`
+                                : `Test mode is active, but this message did not match approval keywords. Current accepted words: ${expectedWords || 'yes'}. Send 1 to resend the menu.`);
+                            return true;
+                        }
                         await msg.reply(isAr
                             ? 'يرجى اختيار إحدى خيارات الاستطلاع السابق. لإعادة إرسال القائمة أرسل 1.'
                             : 'Please choose one of the options in the previous poll. Send 1 to resend the menu.');
