@@ -39,6 +39,18 @@ function toRequesterKey(value) {
     return normalizeVerificationId(value).replace('@c.us', '').trim();
 }
 
+function toPhoneNumberKey(value) {
+    const raw = toRequesterKey(value);
+    const digits = raw.replace(/\D/g, '');
+    return digits || raw;
+}
+
+function addApprovedNumber(db, requesterId) {
+    const numberKey = toPhoneNumberKey(requesterId);
+    if (!numberKey) return;
+    db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(numberKey);
+}
+
 function toCanonicalRequesterId(value) {
     const normalized = normalizeVerificationId(value);
     return normalized || (typeof value === 'string' ? value.trim() : '');
@@ -434,7 +446,7 @@ function initVerification(client, db, config, chat) {
                     if (joinChat) {
                         try { await joinChat.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
                     }
-                    db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                    addApprovedNumber(db, record.requester_id);
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
                     pendingAdminContactPolls.delete(pollId);
                     await client.sendMessage(record.requester_id, isAr
@@ -490,7 +502,7 @@ function initVerification(client, db, config, chat) {
                     if (chatObj) {
                         try { await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
                     }
-                    db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                    addApprovedNumber(db, record.requester_id);
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
                     pendingAdminPhotoPolls.delete(pollId);
                     await client.sendMessage(record.requester_id, isAr
@@ -590,7 +602,7 @@ function initVerification(client, db, config, chat) {
                     if (joinChat) {
                         try { await joinChat.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(requesterId)] }); } catch (e) { }
                     }
-                    db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                    addApprovedNumber(db, requesterId);
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
                     await client.sendMessage(requesterId, isAr
                         ? 'تمت الموافقة على طلبك من قبل الإدارة. أهلاً وسهلاً بك.'
@@ -817,7 +829,7 @@ function initVerification(client, db, config, chat) {
                             if (chatObj) {
                                 try { await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(requesterId)] }); } catch (e) { }
                             }
-                            db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                            addApprovedNumber(db, requesterId);
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(requesterId, groupId);
                             const groupName = await resolveGroupName(client, groupId);
                             await client.sendMessage(requesterId, isAr
@@ -1024,7 +1036,7 @@ function initVerification(client, db, config, chat) {
                                     await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] });
                                 } catch (e) {}
                             }
-                            db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                            addApprovedNumber(db, record.requester_id);
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                             upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'approved_keyword_only');
                             await msg.reply(isAr
@@ -1084,7 +1096,7 @@ function initVerification(client, db, config, chat) {
                                     await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] });
                                 } catch (e) { }
                             }
-                            db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                            addApprovedNumber(db, record.requester_id);
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                             await msg.reply(isAr
                                 ? `تمت الموافقة على انضمامك إلى "${groupName}"، وتمت إضافتك إلى قائمة المتحقق منهم.`
@@ -1112,7 +1124,7 @@ function initVerification(client, db, config, chat) {
                                 await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] });
                             } catch (e) { }
                         }
-                        db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                        addApprovedNumber(db, record.requester_id);
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                         upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'auto_approved_no_methods');
                         await msg.reply(isAr
@@ -1320,7 +1332,7 @@ function initVerification(client, db, config, chat) {
                         }
                         
                         // Add to verified dataset (approved_numbers)
-                        db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
+                        addApprovedNumber(db, record.requester_id);
                         
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                         await msg.reply(isAr ? 'تم التحقق بنجاح. تمت الموافقة على طلبك وإضافتك إلى قائمة المتحقق منهم.' : 'Verification successful. Your request has been approved and you were added to the verified list.');

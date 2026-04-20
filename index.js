@@ -3238,14 +3238,16 @@ client.on('message', async msg => {
             if (cmdEnabled && cmdMatch && ['ban', 'kick', 'report'].includes(cmdMatch[1].toLowerCase())) {
                 const cmd = cmdMatch[1].toLowerCase();
 
-                // Only whitelisted senders may use commands
+                // /ban and /kick are whitelist-only; /report is allowed for all members
                 const senderGlobalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanAuthorId);
                 const senderUseGlobal = groupConfig ? (groupConfig.useGlobalWhitelist !== false) : true;
                 const senderInCustom = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanAuthorId) : false;
                 const isSenderWhitelisted = (senderUseGlobal && senderGlobalWl) || senderInCustom;
+                const cmdAdminLang = resolveAdminLang(groupConfig, config);
 
-                if (isSenderWhitelisted) {
-                    const cmdAdminLang = resolveAdminLang(groupConfig, config);
+                const canUseCommand = cmd === 'report' || isSenderWhitelisted;
+
+                if (canUseCommand) {
                     const cmdAdminGroup = (groupConfig && groupConfig.adminGroup && groupConfig.adminGroup.trim() !== '')
                         ? groupConfig.adminGroup.trim()
                         : config.defaultAdminGroup;
@@ -3407,6 +3409,12 @@ client.on('message', async msg => {
                             console.log(`[أمر] /report على ${targetCleanId} في ${chat.name} بواسطة ${cleanAuthorId}`);
                         } catch (e) { }
                     }
+                } else {
+                    try {
+                        await msg.reply(cmdAdminLang === 'en'
+                            ? '⚠️ Only whitelisted users can use this command.'
+                            : '⚠️ هذا الأمر متاح فقط للأرقام المضافة في القائمة البيضاء.');
+                    } catch (e) { }
                 }
                 return; // Always exit after a command (authorized or not)
             }
@@ -4119,7 +4127,12 @@ async function screenPendingMembershipRequests() {
                 // ─────────────────────────────────────────────────────────────
 
                 // ── Approved Numbers Check (after Blacklist) ───────────────────
-                const isApprovedNum = db.prepare('SELECT 1 FROM approved_numbers WHERE number = ?').get(finalCleanId);
+                const approvedLookupDigits = String(finalCleanId || '').replace(/\D/g, '');
+                const approvedLookupKey = approvedLookupDigits || String(finalCleanId || '').trim();
+                const isApprovedNum = db.prepare('SELECT 1 FROM approved_numbers WHERE number = ? OR number = ?').get(
+                    approvedLookupKey,
+                    `${approvedLookupKey}@c.us`
+                );
                 
                 if (isApprovedNum) {
                     try {
