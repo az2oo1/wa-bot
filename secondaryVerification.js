@@ -74,7 +74,7 @@ function upsertReplyLog(db, requesterId, groupId, mode, text='', state='') {
     if (!key) return;
     const now = Date.now();
     if (mode === 'sent') {
-        db.prepare(`INSERT INTO secondary_verification_reply_log (requester_key, requester_id, group_id, bait_sent_at, replied_text, reply_count, last_state, updated_at) VALUES (?, ?, ?, ?, '', 0, ?, ?) ON CONFLICT(requester_key) DO UPDATE SET requester_id=excluded.requester_id, group_id=excluded.group_id, bait_sent_at=excluded.bait_sent_at, last_state=excluded.last_state, updated_at=excluded.updated_at`).run(key, toCanonical(requesterId), groupId||'', now, state, now);
+        db.prepare(`INSERT INTO secondary_verification_reply_log (requester_key, requester_id, group_id, bait_sent_at, replied_text, reply_count, last_state, updated_at) VALUES (?, ?, ?, ?, '', 0, ?, ?) ON CONFLICT(requester_key) DO UPDATE SET requester_id=excluded.requester_id, group_id=excluded.group_id, bait_sent_at=excluded.bait_sent_at, replied_text='', reply_count=0, last_state=excluded.last_state, updated_at=excluded.updated_at`).run(key, toCanonical(requesterId), groupId||'', now, state, now);
     } else if (mode === 'reply') {
         db.prepare(`INSERT INTO secondary_verification_reply_log (requester_key, requester_id, group_id, bait_sent_at, replied_at, replied_text, reply_count, last_state, updated_at) VALUES (?, ?, ?, 0, ?, ?, 1, ?, ?) ON CONFLICT(requester_key) DO UPDATE SET requester_id=excluded.requester_id, group_id=excluded.group_id, replied_at=excluded.replied_at, replied_text=excluded.replied_text, reply_count=reply_count+1, last_state=excluded.last_state, updated_at=excluded.updated_at`).run(key, toCanonical(requesterId), groupId||'', now, text, state, now);
     } else if (mode === 'no_reply') {
