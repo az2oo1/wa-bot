@@ -1,1452 +1,527 @@
 const nodemailer = require('nodemailer');
 const { Poll } = require('whatsapp-web.js');
 
-const DEFAULT_SESSION_TTL_MS = 30 * 60 * 1000;
 const VERIFICATION_DEBUG = process.env.WA_VERIFICATION_DEBUG === 'true';
-const pendingUserMethodPolls = new Map();
-const pendingAdminPhotoPolls = new Map();
-const pendingAdminContactPolls = new Map();
-const ADMIN_WAIT_STATES = new Set(['WAITING_ADMIN_PHOTO_REVIEW', 'WAITING_ADMIN_CONTACT_DECISION']);
-const REENTRY_READY_STATES = new Set(['EXPIRED_WAITING_REENTRY']);
-const BAIT_REPEAT_COOLDOWN_MS = Math.max(
-    0,
-    parseInt(process.env.WA_BAIT_REPEAT_COOLDOWN_HOURS || '24', 10) * 60 * 60 * 1000
-);
+const BAIT_REPEAT_COOLDOWN_MS = Math.max(0, parseInt(process.env.WA_BAIT_REPEAT_COOLDOWN_HOURS || '24', 10) * 60 * 60 * 1000);
 
-function getSessionTimeoutMs(config) {
-    const rawDays = parseFloat(config && config.secondaryVerificationTimeoutDays);
-    const days = Number.isFinite(rawDays) && rawDays > 0 ? rawDays : 2;
-    return Math.round(days * 24 * 60 * 60 * 1000);
+function debugLog(msg, meta = {}) {
+    if (VERIFICATION_DEBUG) console.log(`[SecondaryVerif] ${msg} ${JSON.stringify(meta)}`);
 }
 
-function debugLog(message, meta = {}) {
-    if (!VERIFICATION_DEBUG) return;
-    try {
-        console.log(`[VerificationDebug] ${message} ${JSON.stringify(meta)}`);
-    } catch (e) {
-        console.log(`[VerificationDebug] ${message}`);
-    }
-}
-
-function normalizeVerificationId(value) {
+// Ensure clean numeric id
+function normalizeId(value) {
     if (typeof value !== 'string' || !value) return '';
     let normalized = value.trim();
-    // Remove device suffixes like ":12" before the domain.
     normalized = normalized.replace(/:[0-9]+(?=@)/g, '');
-    if (normalized.includes('@lid')) normalized = normalized.replace('@lid', '@c.us');
-    if (normalized.includes('@s.whatsapp.net')) normalized = normalized.replace('@s.whatsapp.net', '@c.us');
-    if (/^\d+$/.test(normalized)) normalized = `${normalized}@c.us`;
-    return normalized;
+    normalized = normalized.replace(/@lid/g, '');
+    normalized = normalized.replace(/@c\.us/g, '');
+    normalized = normalized.replace(/@s\.whatsapp\.net/g, '');
+    return normalized.trim();
 }
 
-function toRequesterKey(value) {
-    return normalizeVerificationId(value).replace('@c.us', '').trim();
-}
-
-function toPhoneNumberKey(value) {
-    const raw = toRequesterKey(value);
-    const digits = raw.replace(/\D/g, '');
-    return digits || raw;
+function toCanonical(value) {
+    const raw = normalizeId(value);
+    if (!raw) return '';
+    return `${raw}@c.us`;
 }
 
 function addApprovedNumber(db, requesterId) {
-    const numberKey = toPhoneNumberKey(requesterId);
+    const numberKey = normalizeId(requesterId).replace(/\D/g, '');
     if (!numberKey) return;
     db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(numberKey);
 }
 
-function toCanonicalRequesterId(value) {
-    const normalized = normalizeVerificationId(value);
-    return normalized || (typeof value === 'string' ? value.trim() : '');
-}
-
-function getVerificationReopenCode(config) {
-    return String((config && config.secondaryVerificationReopenCode) || process.env.WA_VERIFICATION_REOPEN_CODE || 'reopen')
-        .trim()
-        .toLowerCase() || 'reopen';
-}
-
-async function archiveRequesterChat(client, requesterId) {
-    const canonicalId = toCanonicalRequesterId(requesterId);
+async function archiveChat(client, requesterId) {
+    const canonicalId = toCanonical(requesterId);
     if (!canonicalId) return;
     try {
         const dmChat = await client.getChatById(canonicalId);
-        if (dmChat && typeof dmChat.archive === 'function') {
-            await dmChat.archive();
-        }
+        if (dmChat && typeof dmChat.archive === 'function') await dmChat.archive();
     } catch (e) { }
 }
 
-function hasRecentBait(db, requesterId) {
+function hasCooldown(db, requesterId) {
     if (!BAIT_REPEAT_COOLDOWN_MS) return false;
-    const requesterKey = toRequesterKey(requesterId);
-    if (!requesterKey) return false;
-    const row = db.prepare('SELECT last_sent_at FROM secondary_verification_bait_log WHERE requester_key = ?').get(requesterKey);
+    const key = normalizeId(requesterId);
+    const row = db.prepare('SELECT last_sent_at FROM secondary_verification_bait_log WHERE requester_key = ?').get(key);
     if (!row || !row.last_sent_at) return false;
     return Date.now() - Number(row.last_sent_at) < BAIT_REPEAT_COOLDOWN_MS;
 }
 
 function markBaitSent(db, requesterId) {
-    const requesterKey = toRequesterKey(requesterId);
-    if (!requesterKey) return;
+    const key = normalizeId(requesterId);
+    if (!key) return;
     db.prepare(`
         INSERT INTO secondary_verification_bait_log (requester_key, last_sent_at, sent_count)
         VALUES (?, ?, 1)
         ON CONFLICT(requester_key) DO UPDATE SET
-            last_sent_at = excluded.last_sent_at,
-            sent_count = COALESCE(secondary_verification_bait_log.sent_count, 0) + 1
-    `).run(requesterKey, Date.now());
+            last_sent_at = excluded.last_sent_at, sent_count = secondary_verification_bait_log.sent_count + 1
+    `).run(key, Date.now());
 }
 
-function getVerificationIdCandidates(value) {
-    const normalized = normalizeVerificationId(value);
-    const candidates = [];
-    for (const candidate of [value, normalized]) {
-        if (typeof candidate === 'string' && candidate && !candidates.includes(candidate)) {
-            candidates.push(candidate);
-        }
+function logEmail(db, requesterId, groupId, email, status, errorCode='', errorMessage='') {
+    const key = normalizeId(requesterId);
+    if (!key) return;
+    const now = Date.now();
+    db.prepare(`
+        INSERT INTO email_log (requester_key, requester_id, group_id, email, status, error_code, error_message, sent_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(key, toCanonical(requesterId), groupId||'', email||'', status, errorCode, errorMessage, status==='sent'?now:null, now);
+}
+
+function upsertReplyLog(db, requesterId, groupId, mode, text='', state='') {
+    const key = normalizeId(requesterId);
+    if (!key) return;
+    const now = Date.now();
+    if (mode === 'sent') {
+        db.prepare(`INSERT INTO secondary_verification_reply_log (requester_key, requester_id, group_id, bait_sent_at, replied_text, reply_count, last_state, updated_at) VALUES (?, ?, ?, ?, '', 0, ?, ?) ON CONFLICT(requester_key) DO UPDATE SET requester_id=excluded.requester_id, group_id=excluded.group_id, bait_sent_at=excluded.bait_sent_at, last_state=excluded.last_state, updated_at=excluded.updated_at`).run(key, toCanonical(requesterId), groupId||'', now, state, now);
+    } else if (mode === 'reply') {
+        db.prepare(`INSERT INTO secondary_verification_reply_log (requester_key, requester_id, group_id, bait_sent_at, replied_at, replied_text, reply_count, last_state, updated_at) VALUES (?, ?, ?, 0, ?, ?, 1, ?, ?) ON CONFLICT(requester_key) DO UPDATE SET requester_id=excluded.requester_id, group_id=excluded.group_id, replied_at=excluded.replied_at, replied_text=excluded.replied_text, reply_count=reply_count+1, last_state=excluded.last_state, updated_at=excluded.updated_at`).run(key, toCanonical(requesterId), groupId||'', now, text, state, now);
+    } else if (mode === 'no_reply') {
+        db.prepare(`INSERT INTO secondary_verification_reply_log (requester_key, requester_id, group_id, bait_sent_at, replied_text, reply_count, last_state, updated_at) VALUES (?, ?, ?, 0, '', 0, ?, ?) ON CONFLICT(requester_key) DO UPDATE SET requester_id=excluded.requester_id, group_id=excluded.group_id, last_state=excluded.last_state, updated_at=excluded.updated_at`).run(key, toCanonical(requesterId), groupId||'', state, now);
     }
-    return candidates;
-}
-
-function extractIncomingText(msg) {
-    if (!msg || typeof msg !== 'object') return '';
-    const directBody = typeof msg.body === 'string' ? msg.body : '';
-    const caption = typeof msg.caption === 'string' ? msg.caption : '';
-    const dataBody = msg._data && typeof msg._data.body === 'string' ? msg._data.body : '';
-    const dataCaption = msg._data && typeof msg._data.caption === 'string' ? msg._data.caption : '';
-    return [directBody, caption, dataBody, dataCaption].find(value => typeof value === 'string' && value.trim()) || '';
-}
-
-function isAdminWaitState(state) {
-    return ADMIN_WAIT_STATES.has(String(state || '').trim());
-}
-
-function isUserTimeoutState(state) {
-    return !isAdminWaitState(state) && !REENTRY_READY_STATES.has(String(state || '').trim());
-}
-
-function resolveAdminGroupForVerification(config, groupId) {
-    const groupConfig = config && config.groupsConfig ? config.groupsConfig[groupId] : null;
-    const scopedAdmin = groupConfig && typeof groupConfig.adminGroup === 'string' ? groupConfig.adminGroup.trim() : '';
-    const fallbackAdmin = typeof config.defaultAdminGroup === 'string' ? config.defaultAdminGroup.trim() : '';
-    return scopedAdmin || fallbackAdmin || '';
-}
-
-function getApprovalKeywords(config) {
-    const keywords = String(config && config.approvalKeyword ? config.approvalKeyword : 'yes')
-        .split(',')
-        .map(value => value.trim())
-        .filter(Boolean);
-    return keywords.length > 0 ? keywords : ['yes'];
-}
-
-function buildBaitMessage(config, isAr) {
-    const baits = config && config.customMessageText
-        ? config.customMessageText.split('||').map(s => s.trim()).filter(Boolean)
-        : [];
-    if (baits.length > 0) {
-        return baits[Math.floor(Math.random() * baits.length)];
-    }
-    return isAr
-        ? 'أهلاً بك. لإكمال الطلب، يرجى الرد بكلمة الموافقة المعتمدة.'
-        : 'Welcome. To continue your request, please reply with the approved keyword.';
-}
-
-function normalizeKeywordMatchText(value) {
-    if (typeof value !== 'string') return '';
-    let result = value.toLowerCase().trim();
-    result = result.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, '');
-    result = result.replace(/[!@#$%^&*()_+=\-\[\]{}:;"'<>.,.?\/\\|~`]/g, '');
-    result = result.replace(/[\u064B-\u0652\u0640\u0670]/g, '');
-    result = result.replace(/[أإآ]/g, 'ا');
-    return result.replace(/\s+/g, ' ').trim();
-}
-
-function keywordMatchesText(text, keywords, useSmartMatch) {
-    const haystack = useSmartMatch ? normalizeKeywordMatchText(text) : String(text || '').toLowerCase().trim();
-    if (!haystack) return false;
-
-    const words = Array.isArray(keywords) ? keywords : [];
-    for (const keyword of words) {
-        const needle = useSmartMatch ? normalizeKeywordMatchText(keyword) : String(keyword || '').toLowerCase().trim();
-        if (!needle) continue;
-        if (haystack === needle) return true;
-        if (haystack.includes(needle)) return true;
-    }
-
-    return false;
-}
-
-function normalizeReplyLogKey(value) {
-    return normalizeVerificationId(value).replace('@c.us', '').trim();
-}
-
-function upsertReplyLogSent(db, requesterId, groupId, state = '') {
-    const requesterKey = normalizeReplyLogKey(requesterId);
-    if (!requesterKey) return;
-    const now = Date.now();
-    db.prepare(`
-        INSERT INTO secondary_verification_reply_log (
-            requester_key, requester_id, group_id, bait_sent_at, replied_at, replied_text, reply_count, last_state, updated_at
-        ) VALUES (?, ?, ?, ?, NULL, '', 0, ?, ?)
-        ON CONFLICT(requester_key) DO UPDATE SET
-            requester_id = excluded.requester_id,
-            group_id = excluded.group_id,
-            bait_sent_at = excluded.bait_sent_at,
-            last_state = excluded.last_state,
-            updated_at = excluded.updated_at
-    `).run(requesterKey, normalizeVerificationId(requesterId), groupId || '', now, String(state || ''), now);
-}
-
-function upsertReplyLogReply(db, requesterId, groupId, text, state = '') {
-    const requesterKey = normalizeReplyLogKey(requesterId);
-    if (!requesterKey) return;
-    const now = Date.now();
-    db.prepare(`
-        INSERT INTO secondary_verification_reply_log (
-            requester_key, requester_id, group_id, bait_sent_at, replied_at, replied_text, reply_count, last_state, updated_at
-        ) VALUES (?, ?, ?, 0, ?, ?, 1, ?, ?)
-        ON CONFLICT(requester_key) DO UPDATE SET
-            requester_id = excluded.requester_id,
-            group_id = excluded.group_id,
-            replied_at = excluded.replied_at,
-            replied_text = excluded.replied_text,
-            reply_count = COALESCE(secondary_verification_reply_log.reply_count, 0) + 1,
-            last_state = excluded.last_state,
-            updated_at = excluded.updated_at
-    `).run(requesterKey, normalizeVerificationId(requesterId), groupId || '', now, text || '', String(state || ''), now);
-}
-
-function upsertReplyLogNoReply(db, requesterId, groupId, state = '') {
-    const requesterKey = normalizeReplyLogKey(requesterId);
-    if (!requesterKey) return;
-    const now = Date.now();
-    db.prepare(`
-        INSERT INTO secondary_verification_reply_log (
-            requester_key, requester_id, group_id, bait_sent_at, replied_at, replied_text, reply_count, last_state, updated_at
-        ) VALUES (?, ?, ?, 0, NULL, '', 0, ?, ?)
-        ON CONFLICT(requester_key) DO UPDATE SET
-            requester_id = excluded.requester_id,
-            group_id = excluded.group_id,
-            last_state = excluded.last_state,
-            updated_at = excluded.updated_at
-    `).run(requesterKey, normalizeVerificationId(requesterId), groupId || '', String(state || ''), now);
-}
-
-function logEmail(db, requesterId, groupId, email, status, errorCode = '', errorMessage = '') {
-    const requesterKey = normalizeReplyLogKey(requesterId);
-    if (!requesterKey) return;
-    const now = Date.now();
-    const sentAt = status === 'sent' ? now : null;
-    db.prepare(`
-        INSERT INTO email_log (
-            requester_key, requester_id, group_id, email, status, error_code, error_message, sent_at, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(requesterKey, normalizeVerificationId(requesterId), groupId || '', email || '', status, errorCode || '', errorMessage || '', sentAt, now);
 }
 
 async function resolveGroupName(client, groupId) {
-    try {
-        const chatObj = await client.getChatById(groupId);
-        if (chatObj && chatObj.name) return chatObj.name;
-    } catch (e) { }
+    try { const chat = await client.getChatById(groupId); if (chat && chat.name) return chat.name; } catch(e){}
     return groupId;
 }
 
-function getVoteSelectionNumber(vote) {
-    const options = Array.isArray(vote && vote.selectedOptions) ? vote.selectedOptions : [];
-    for (const option of options) {
-        const localId = option && typeof option === 'object' ? option.localId : '';
-        const name = option && typeof option === 'object'
-            ? (typeof option.name === 'string' ? option.name : '')
-            : (typeof option === 'string' ? option : '');
-        const joined = `${name} ${localId}`.trim();
-        const match = joined.match(/(^|\D)([1-4])(\D|$)/);
-        if (match) return match[2];
-        const normalized = joined.toLowerCase();
+function getAdminGroupFor(config, groupId) {
+    const groupConfig = config && config.groupsConfig && config.groupsConfig[groupId];
+    const scoped = groupConfig && groupConfig.adminGroup ? groupConfig.adminGroup.trim() : '';
+    const def = config.defaultAdminGroup ? config.defaultAdminGroup.trim() : '';
+    return scoped || def || '';
+}
 
-        // User method-selection poll options (Arabic/English)
-        if (/verification code|student email|بريد|رمز تحقق/.test(normalized)) return '1';
-        if (/screenshot|blackboard|صورة|بلاك بورد/.test(normalized)) return '2';
-        if (/direct contact|admin help|contact from an admin|تواصل مباشر|المشرف/.test(normalized)) return '3';
-        if (/cancel this request|cancel|إلغاء|الغاء/.test(normalized)) return '4';
-
-        // Admin decision poll/reply options
-        if (/approve|موافقة|قبول/.test(normalized)) return '1';
-        if (/deny|رفض/.test(normalized)) return '2';
-        if (/another|اخرى|أخرى|اعادة|إعادة/.test(normalized)) return '3';
-        if (/cancel|إلغاء|الغاء/.test(normalized)) return '4';
-        if (/ban|حظر/.test(normalized)) return '4';
+function extractText(msg) {
+    if (!msg) return '';
+    if (typeof msg.body === 'string' && msg.body.trim()) return msg.body;
+    if (typeof msg.caption === 'string' && msg.caption.trim()) return msg.caption;
+    if (msg._data) {
+        if (typeof msg._data.body === 'string' && msg._data.body.trim()) return msg._data.body;
+        if (typeof msg._data.caption === 'string' && msg._data.caption.trim()) return msg._data.caption;
     }
     return '';
 }
 
-function getMethodSelectionAction(vote) {
-    const optionNumber = getVoteSelectionNumber(vote);
-    if (optionNumber === '1') return 'email';
-    if (optionNumber === '2') return 'photo';
-    if (optionNumber === '3') return 'contact';
-    if (optionNumber === '4') return 'cancel';
-    return 'unknown';
+function keywordMatches(text, keywords, smartMatch) {
+    const needle = (str) => {
+        let s = String(str||'').toLowerCase().trim();
+        if (smartMatch) {
+            s = s.replace(/[!@#$%^&*()_+=\-\[\]{}:;"'<>,.?\/\\|~`]/g, '');
+            s = s.replace(/[\u064B-\u0652\u0640\u0670]/g, '');
+            s = s.replace(/[أإآ]/g, 'ا');
+        }
+        return s;
+    };
+    const t = needle(text);
+    if (!t) return false;
+    for (const kw of (Array.isArray(keywords)?keywords:[])) {
+        const k = needle(kw);
+        if (k && (t === k || t.includes(k))) return true;
+    }
+    return false;
 }
 
-async function sendMethodSelectionPoll(client, db, config, record, isAr) {
-    if (record && record.user_method_poll_id) {
-        return record.user_method_poll_id;
+async function resolveSessionAction(action, client, db, session) {
+    const canon = toCanonical(session.requester_id);
+    const key = normalizeId(session.requester_id);
+    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(session.requester_id);
+    
+    if (action === 'approve') {
+        const cg = await client.getChatById(session.group_id).catch(()=>null);
+        if (cg && cg.approveGroupMembershipRequests) try { await cg.approveGroupMembershipRequests({ requesterIds: [canon] }); } catch(e){}
+        addApprovedNumber(db, canon);
+        upsertReplyLog(db, canon, session.group_id, 'no_reply', '', 'approved');
+    } else if (action === 'reject') {
+        const cg = await client.getChatById(session.group_id).catch(()=>null);
+        if (cg && cg.rejectGroupMembershipRequests) try { await cg.rejectGroupMembershipRequests({ requesterIds: [canon] }); } catch(e){}
+        upsertReplyLog(db, canon, session.group_id, 'no_reply', '', 'rejected');
+    } else if (action === 'ban') {
+        const cg = await client.getChatById(session.group_id).catch(()=>null);
+        if (cg && cg.rejectGroupMembershipRequests) try { await cg.rejectGroupMembershipRequests({ requesterIds: [canon] }); } catch(e){}
+        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(key);
+        await archiveChat(client, canon);
+        upsertReplyLog(db, canon, session.group_id, 'no_reply', '', 'banned');
     }
-    const useEmail = record && record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
-    const usePhoto = record && record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
-    if (!useEmail && !usePhoto) {
-        return '';
-    }
-    const groupName = await resolveGroupName(client, record.group_id);
-    const title = isAr
-        ? `مرحباً بك. طلبت الانضمام إلى "${groupName}". اختر الطريقة الأنسب لإكمال التحقق:`
-        : `Welcome. You requested to join "${groupName}". Please choose how you want to continue verification:`;
-    const options = [];
-    if (useEmail) {
-        options.push(isAr
-            ? 'إرسال رمز تحقق إلى بريدك الجامعي'
-            : 'Send a verification code to your student email');
-    }
-    if (usePhoto) {
-        options.push(isAr
-            ? 'إرسال صورة مقرراتك من البلاك بورد'
-            : 'Send a screenshot of your Blackboard courses');
-    }
-    options.push(isAr
-        ? 'طلب تواصل مباشر من المشرف'
-        : 'Request direct contact from an admin');
-    options.push(isAr
-        ? 'إلغاء الطلب حالياً'
-        : 'Cancel this request for now');
-    const poll = new Poll(title, options);
-    const pollMsg = await client.sendMessage(record.requester_id, poll);
-    if (record && String(record.state || '') === 'PENDING_METHOD') {
-        db.prepare(`
-            UPDATE secondary_verification
-            SET wait_started_at = ?
-            WHERE requester_id = ? AND group_id = ?
-        `).run(Date.now(), record.requester_id, record.group_id);
-    }
-    db.prepare(`
-        UPDATE secondary_verification
-        SET user_method_poll_id = ?
-        WHERE requester_id = ? AND group_id = ?
-    `).run(pollMsg.id._serialized, record.requester_id, record.group_id);
-    pendingUserMethodPolls.set(pollMsg.id._serialized, {
-        requesterId: record.requester_id,
-        groupId: record.group_id
-    });
-    return pollMsg.id._serialized;
 }
 
-function findSessionByRequester(db, requesterId) {
-    const normalizedRequesterId = normalizeVerificationId(requesterId);
-    return db.prepare('SELECT * FROM secondary_verification').all()
-        .find(row => normalizeVerificationId(row.requester_id) === normalizedRequesterId) || null;
+async function sendMethodPoll(client, db, config, session) {
+    const isAr = config.secondaryVerificationLanguage === 'ar';
+    const hasEmail = Boolean(session.require_email);
+    const hasPhoto = Boolean(session.require_photo);
+    if (!hasEmail && !hasPhoto) return; // Wait, should we send contact option too if no email/photo? Yes, we always add contact.
+    
+    const gName = await resolveGroupName(client, session.group_id);
+    const title = isAr ? `مرحباً بك. طلبت الانضمام إلى "${gName}". اختر الطريقة الأنسب لإكمال التحقق:` : `Welcome. You requested to join "${gName}". Please choose how you want to continue verification:`;
+    const opts = [];
+    if (hasEmail) opts.push(isAr ? 'إرسال رمز تحقق إلى بريدك الجامعي' : 'Send a verification code to your student email');
+    if (hasPhoto) opts.push(isAr ? 'إرسال صورة مقرراتك من البلاك بورد' : 'Send a screenshot of your Blackboard courses');
+    opts.push(isAr ? 'طلب تواصل مباشر من المشرف' : 'Request direct contact from an admin');
+    opts.push(isAr ? 'إلغاء الطلب حالياً' : 'Cancel this request for now');
+    
+    const poll = new Poll(title, opts);
+    const pollMsg = await client.sendMessage(toCanonical(session.requester_id), poll);
+    
+    db.prepare("UPDATE secondary_verification SET user_method_poll_id = ?, wait_started_at = ? WHERE requester_id = ? AND group_id = ?")
+      .run(pollMsg.id._serialized, Date.now(), session.requester_id, session.group_id);
 }
 
-function initVerification(client, db, config, chat) {
+function parseMethodVote(voteArr) {
+    const v = Array.isArray(voteArr) ? voteArr[0] : null;
+    const name = (v && typeof v === 'object' ? (v.name||'') : String(v||'')).toLowerCase();
+    const id = v && typeof v === 'object' ? v.localId : '';
+    const txt = `${name} ${id}`;
+    if (/code|email|بريد|رمز تحقق|1/.test(txt)) return 'email';
+    if (/screenshot|photo|صورة|بلاك بورد|2/.test(txt)) return 'photo';
+    if (/contact|admin|مشرف|تواصل|3/.test(txt)) return 'contact';
+    if (/cancel|إلغاء|الغاء|4/.test(txt)) return 'cancel';
+    return null;
+}
+
+function parseAdminVote(voteArr) {
+    const v = Array.isArray(voteArr) ? voteArr[0] : null;
+    const name = (v && typeof v === 'object' ? (v.name||'') : String(v||'')).toLowerCase();
+    const id = v && typeof v === 'object' ? v.localId : '';
+    const txt = `${name} ${id}`;
+    if (/approve|موافقة|قبول|1/.test(txt)) return 'approve';
+    if (/deny|رفض|2/.test(txt)) return 'reject';
+    if (/another|اخرى|أخرى|3/.test(txt)) return 'retry';
+    if (/ban|حظر|cancel|إلغاء|4/.test(txt)) return 'ban';
+    return null;
+}
+
+function initVerification(client, db, config) {
     return {
-        handleVoteUpdate: async (vote) => {
-            const pollId = vote && vote.parentMessage && vote.parentMessage.id ? vote.parentMessage.id._serialized : '';
-            if (!pollId) return false;
-
-            const dbMethodRecord = db.prepare('SELECT * FROM secondary_verification WHERE user_method_poll_id = ? LIMIT 1').get(pollId);
-            const dbContactRecord = db.prepare("SELECT * FROM secondary_verification WHERE admin_poll_msg_id = ? AND state = 'WAITING_ADMIN_CONTACT_DECISION' LIMIT 1").get(pollId);
-            const dbPhotoRecord = db.prepare("SELECT * FROM secondary_verification WHERE admin_poll_msg_id = ? AND state = 'WAITING_ADMIN_PHOTO_REVIEW' LIMIT 1").get(pollId);
-
-            if (pendingUserMethodPolls.has(pollId) || dbMethodRecord) {
-                const ctx = pendingUserMethodPolls.get(pollId);
-                const record = ctx ? findSessionByRequester(db, ctx.requesterId) : dbMethodRecord;
-                pendingUserMethodPolls.delete(pollId);
-                    if (!record) return true;
-
-                const isAr = config.secondaryVerificationLanguage === 'ar';
-                const choice = getMethodSelectionAction(vote);
-                const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
-                const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
-                const domain = config.emailDomain || 'college.edu';
-                const groupName = await resolveGroupName(client, record.group_id);
-
-                if (choice === 'email') {
-                    if (!useEmail) {
-                        await client.sendMessage(record.requester_id, isAr ? 'خيار البريد غير متاح حالياً. اختر خياراً آخر من القائمة.' : 'Email verification is not available right now. Please choose another option from the menu.');
-                        await sendMethodSelectionPoll(client, db, config, record, isAr);
-                        return true;
-                    }
-                    db.prepare("UPDATE secondary_verification SET state = 'PENDING_EMAIL_INPUT', user_method_poll_id = '', wait_started_at = ? WHERE requester_id = ? AND group_id = ?").run(Date.now(), record.requester_id, record.group_id);
-                    await client.sendMessage(record.requester_id, isAr
-                        ? `أرسل بريدك الجامعي الذي ينتهي بـ @${domain}. وإذا رغبت بالرجوع للقائمة، أرسل الرقم 1.`
-                        : `Please send your student email ending with @${domain}. If you want to return to the menu, send 1.`);
-                    return true;
+        startVerification: async (rawRequesterId, cleanUserId, groupId, options = {}) => {
+            if (!config.enableSecondaryVerification) return false;
+            
+            const reqCanon = toCanonical(rawRequesterId);
+            const reqKey = normalizeId(rawRequesterId);
+            const isTest = options.flowType === 'test';
+            
+            const groupList = Array.isArray(config.secondaryVerificationGroups) ? config.secondaryVerificationGroups : [];
+            if (!groupList.includes(groupId)) return false;
+            
+            const isEmail = config.enableEmailVerification;
+            const isPhoto = config.enablePhotoVerification;
+            const isKw = config.enableKeywordVerification;
+            if (!isEmail && !isPhoto && !isKw) return false;
+            
+            if (!isTest && !options.forceRestart && hasCooldown(db, reqKey)) return false;
+            
+            const sessions = db.prepare('SELECT * FROM secondary_verification WHERE requester_id LIKE ?').all(`%${reqKey}%`);
+            const existing = sessions.length ? sessions[0] : null;
+            if (existing) {
+                if (isTest && existing.flow_type !== 'test') return false; // Dont overlap real session with test
+                db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(existing.requester_id);
+            }
+            
+            const state = isKw ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
+            db.prepare(`
+                INSERT INTO secondary_verification 
+                (requester_id, group_id, state, flow_type, require_email, require_photo, user_method_poll_id, created_at, wait_started_at)
+                VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)
+            `).run(reqCanon, groupId, state, isTest ? 'test' : 'join', isEmail?1:0, isPhoto?1:0, Date.now(), Date.now());
+            
+            const isAr = config.secondaryVerificationLanguage === 'ar';
+            if (isKw) {
+                const baits = (config.customMessageText||'').split('||').map(s=>s.trim()).filter(Boolean);
+                const bait = baits.length ? baits[Math.floor(Math.random()*baits.length)] : (isAr ? 'لإكمال الطلب يرجى الرد بكلمة الموافقة.' : 'To continue, reply with the approved keyword.');
+                await client.sendMessage(reqCanon, bait);
+                upsertReplyLog(db, reqCanon, groupId, 'sent', '', 'PENDING_CUSTOM');
+                if (!isTest) markBaitSent(db, reqCanon);
+            } else {
+                await client.sendMessage(reqCanon, isAr ? 'تم قبول طلبك مبدئياً. سأرسل لك الآن قائمة خيارات التحقق.' : 'Your request was accepted initially. I will now send you the verification options.');
+                upsertReplyLog(db, reqCanon, groupId, 'sent', '', 'PENDING_METHOD');
+                if (!isEmail && !isPhoto) {
+                    await resolveSessionAction('approve', client, db, {requester_id: reqCanon, group_id: groupId});
+                    await client.sendMessage(reqCanon, isAr ? 'تمت الموافقة عليك.' : 'You have been approved.');
+                } else {
+                    const sess = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(reqCanon);
+                    if (sess) await sendMethodPoll(client, db, config, sess);
                 }
+            }
+            return true;
+        },
 
-                if (choice === 'photo') {
-                    if (!usePhoto) {
-                        await client.sendMessage(record.requester_id, isAr ? 'خيار الصورة غير متاح حالياً. اختر خياراً آخر من القائمة.' : 'Photo verification is not available right now. Please choose another option from the menu.');
-                        await sendMethodSelectionPoll(client, db, config, record, isAr);
-                        return true;
-                    }
-                    db.prepare("UPDATE secondary_verification SET state = 'PENDING_PHOTO_UPLOAD', user_method_poll_id = '', wait_started_at = ? WHERE requester_id = ? AND group_id = ?").run(Date.now(), record.requester_id, record.group_id);
-                    await client.sendMessage(record.requester_id, isAr
-                        ? 'يرجى إرسال صورة واضحة لمقرراتك من البلاك بورد الآن. وللرجوع إلى القائمة، أرسل الرقم 1.'
-                        : 'Please send a clear screenshot of your Blackboard courses now. To go back to the menu, send 1.');
-                    return true;
-                }
+        handleIncomingMessage: async (msg) => {
+            if (!config.enableSecondaryVerification || msg.isGroupMsg) return false;
+            const fromData = String(msg._data && msg._data.from ? msg._data.from : (msg.from || ''));
+            if (fromData.endsWith('@g.us')) return false;
+            
+            const senderKey = normalizeId(fromData);
+            const sessionRows = db.prepare('SELECT * FROM secondary_verification').all();
+            const session = sessionRows.find(r => normalizeId(r.requester_id) === senderKey);
+            if (!session) return false;
 
-                if (choice === 'contact') {
-                    const adminGroup = resolveAdminGroupForVerification(config, record.group_id);
-                    if (adminGroup) {
-                        const requesterHandle = toRequesterKey(record.requester_id);
-                        const contactPoll = new Poll(
-                            isAr
-                                ? `طلب تواصل مباشر من @${requesterHandle} للانضمام إلى "${groupName}". اختر قرار الإدارة:`
-                                : `Direct-contact request from @${requesterHandle} to join "${groupName}". Choose admin decision:`,
-                            isAr
-                                ? ['1 - موافقة', '2 - رفض', '3 - حظر']
-                                : ['1 - Approve', '2 - Reject', '3 - Ban']
-                        );
-                        const pollMsg = await client.sendMessage(adminGroup, contactPoll, { mentions: [record.requester_id] });
-                        pendingAdminContactPolls.set(pollMsg.id._serialized, {
-                            requesterId: record.requester_id,
-                            groupId: record.group_id
-                        });
+            const text = extractText(msg);
+            const isText = text.trim().length > 0;
+            const isAr = config.secondaryVerificationLanguage === 'ar';
+            
+            // Timeout Check
+            const timeoutDays = Math.max(1, config.secondaryVerificationTimeoutDays || 2);
+            if (Date.now() - session.created_at > timeoutDays * 24 * 3600 * 1000) {
+                await resolveSessionAction('reject', client, db, session);
+                return false;
+            }
 
-                        db.prepare(`
-                            UPDATE secondary_verification
-                            SET state = 'WAITING_ADMIN_CONTACT_DECISION', user_method_poll_id = '', wait_started_at = ?, admin_group_id = ?, admin_decision_msg_id = ?, admin_poll_msg_id = ?, admin_last_reminder_at = 0
-                            WHERE requester_id = ? AND group_id = ?
-                        `).run(Date.now(), adminGroup, pollMsg.id._serialized, pollMsg.id._serialized, record.requester_id, record.group_id);
-
-                        await client.sendMessage(record.requester_id, isAr
-                            ? 'تم إرسال طلبك إلى المشرفين. سيبقى طلبك معلقاً حتى يراجع المشرفون حالتك.'
-                            : 'Your request has been sent to the admins. It will remain pending until an admin reviews your case.');
-                        return true;
-                    }
-                    await client.sendMessage(record.requester_id, isAr
-                        ? 'تعذر إرسال طلبك للإدارة لأن مجموعة المشرفين غير مهيأة. حاول لاحقاً.'
-                        : 'Could not send your request to admins because the admin group is not configured. Please try again later.');
-                    return true;
-                }
-
-                if (choice === 'cancel') {
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
-                    await client.sendMessage(record.requester_id, isAr
-                        ? 'شكراً لوقتك. تم إلغاء الطلب بنجاح.'
-                        : 'Thank you for your time. Your request has been cancelled successfully.');
-                    return true;
-                }
-
-                await client.sendMessage(record.requester_id, isAr ? 'لم أفهم الخيار. سأعيد إرسال القائمة مرة أخرى.' : 'I could not understand that option. I will resend the menu.');
-                db.prepare("UPDATE secondary_verification SET user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
-                await sendMethodSelectionPoll(client, db, config, record, isAr);
+            // Stop code Check
+            const stop = String(config.secondaryVerificationStopCode || '').trim();
+            if (stop && stop.toLowerCase() === text.trim().toLowerCase()) {
+                await resolveSessionAction('reject', client, db, session);
+                await msg.reply(isAr ? 'تم إيقاف التحقق وإلغاء الطلب.' : 'Verification stopped and request cancelled.');
                 return true;
             }
 
-            if (pendingAdminContactPolls.has(pollId) || dbContactRecord) {
-                const ctx = pendingAdminContactPolls.get(pollId);
-                const record = ctx ? findSessionByRequester(db, ctx.requesterId) : dbContactRecord;
-                const isAr = config.secondaryVerificationLanguage === 'ar';
-                const choice = getVoteSelectionNumber(vote);
+            const state = session.state;
+            const smart = Boolean(config.enableSecondarySmartMatch);
+            const isTest = session.flow_type === 'test';
 
-                if (!record) {
-                    pendingAdminContactPolls.delete(pollId);
-                    return true;
+            if (state === 'EXPIRED_WAITING_REENTRY') {
+                if (isText && text.trim().toLowerCase() === (config.secondaryVerificationReopenCode || 'reopen').toLowerCase()) {
+                    db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', wait_started_at = ? WHERE requester_id = ?").run(Date.now(), session.requester_id);
+                    await msg.reply(isAr ? 'تمت إعادة فتح التحقق.' : 'Verification reopened.');
+                    const s2 = db.prepare('SELECT * FROM secondary_verification WHERE requester_id=?').get(session.requester_id);
+                    if (s2 && (s2.require_email || s2.require_photo)) await sendMethodPoll(client, db, config, s2);
+                    else await msg.reply(isAr ? 'لا توجد خيارات للتحقق.' : 'No options available.');
                 }
-
-                const joinChat = await client.getChatById(record.group_id).catch(() => null);
-                const cleanId = toRequesterKey(record.requester_id);
-
-                if (choice === '1') {
-                    if (joinChat) {
-                        try { await joinChat.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
-                    }
-                    addApprovedNumber(db, record.requester_id);
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
-                    pendingAdminContactPolls.delete(pollId);
-                    await client.sendMessage(record.requester_id, isAr
-                        ? 'تمت الموافقة على طلبك من قبل الإدارة. أهلاً وسهلاً بك.'
-                        : 'Your request was approved by the admin team. Welcome.');
-                    return true;
-                }
-
-                if (choice === '2') {
-                    if (joinChat) {
-                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
-                    }
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
-                    pendingAdminContactPolls.delete(pollId);
-                    await client.sendMessage(record.requester_id, isAr
-                        ? 'تم رفض طلب الانضمام من قبل الإدارة.'
-                        : 'Your join request was rejected by the admin team.');
-                    return true;
-                }
-
-                if (choice === '3') {
-                    if (joinChat) {
-                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
-                    }
-                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
-                    pendingAdminContactPolls.delete(pollId);
-                    await archiveRequesterChat(client, record.requester_id);
-                    await client.sendMessage(toCanonicalRequesterId(record.requester_id), isAr
-                        ? 'تم رفض الطلب وإضافة الرقم إلى القائمة السوداء.'
-                        : 'Your request was rejected and your number was added to the blacklist.');
-                    return true;
-                }
-
                 return true;
             }
 
-            if (pendingAdminPhotoPolls.has(pollId) || dbPhotoRecord) {
-                const ctx = pendingAdminPhotoPolls.get(pollId);
-                const record = ctx ? findSessionByRequester(db, ctx.requesterId) : dbPhotoRecord;
-                const isAr = config.secondaryVerificationLanguage === 'ar';
-                const choice = getVoteSelectionNumber(vote);
-
-                if (!record) {
-                    pendingAdminPhotoPolls.delete(pollId);
-                    return true;
-                }
-
-                const chatObj = await client.getChatById(record.group_id).catch(() => null);
-                const cleanId = toRequesterKey(record.requester_id);
-
-                if (choice === '1') {
-                    if (chatObj) {
-                        try { await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
+            if (state === 'PENDING_CUSTOM') {
+                if (!isText) return false;
+                upsertReplyLog(db, senderKey, session.group_id, 'reply', text, state);
+                const bans = (config.banKeyword||'no').split(',').map(s=>s.trim()).filter(Boolean);
+                const ays = (config.approvalKeyword||'yes').split(',').map(s=>s.trim()).filter(Boolean);
+                
+                if (keywordMatches(text, bans.length ? bans : ['no'], smart)) {
+                    if (isTest) {
+                        db.prepare('DELETE FROM secondary_verification WHERE requester_id=?').run(session.requester_id);
+                        await msg.reply(isAr ? 'تم إلغاء الطلب (اختبار).' : 'Request cancelled (Test).');
+                    } else {
+                        await resolveSessionAction('ban', client, db, session);
                     }
-                    addApprovedNumber(db, record.requester_id);
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
-                    pendingAdminPhotoPolls.delete(pollId);
-                    await client.sendMessage(record.requester_id, isAr
-                        ? 'تمت الموافقة على طلبك بعد مراجعة الصورة. أهلاً وسهلاً بك.'
-                        : 'Your request has been approved after photo review. You are welcome to join.');
                     return true;
                 }
-
-                if (choice === '2') {
-                    const chatForReject = await client.getChatById(record.group_id).catch(() => null);
-                    if (chatForReject) {
-                        try { await chatForReject.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
+                if (keywordMatches(text, ays.length ? ays : ['yes'], smart)) {
+                    if (!session.require_email && !session.require_photo) {
+                        await resolveSessionAction('approve', client, db, session);
+                        await msg.reply(isAr ? 'تمت الموافقة على انضمامك.' : 'You have been approved to join.');
+                    } else {
+                        db.prepare("UPDATE secondary_verification SET state='PENDING_METHOD' WHERE requester_id=?").run(session.requester_id);
+                        const s2 = db.prepare('SELECT * FROM secondary_verification WHERE requester_id=?').get(session.requester_id);
+                        if (s2) await sendMethodPoll(client, db, config, s2);
                     }
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
-                    pendingAdminPhotoPolls.delete(pollId);
-                    await client.sendMessage(record.requester_id, isAr
-                        ? 'تم رفض طلبك بعد مراجعة الصورة. يمكنك التقديم مرة أخرى لاحقاً.'
-                        : 'Your request was rejected after reviewing the screenshot. You may apply again later.');
                     return true;
                 }
+                
+                if (isTest) await msg.reply(isAr ? 'رد غير صحيح.' : 'Incorrect reply.');
+                else {
+                    await resolveSessionAction('ban', client, db, session);
+                }
+                return true;
+            }
 
-                if (choice === '3') {
-                    db.prepare("UPDATE secondary_verification SET state = 'PENDING_PHOTO_UPLOAD', wait_started_at = ? WHERE requester_id = ? AND group_id = ?").run(Date.now(), record.requester_id, record.group_id);
-                    pendingAdminPhotoPolls.delete(pollId);
-                    await client.sendMessage(record.requester_id, isAr
-                        ? 'يرجى إرسال صورة أوضح، أو أرسل 1 للعودة إلى القائمة.'
-                        : 'Please send a clearer screenshot, or send 1 to return to the menu.');
+            if (state === 'PENDING_METHOD') {
+                if (isTest && isText && (keywordMatches(text, (config.banKeyword||'no').split(',').filter(Boolean), smart))) {
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id=?').run(session.requester_id);
+                    await msg.reply(isAr ? 'تم إلغاء الطلب (اختبار).' : 'Cancelled (Test).');
                     return true;
                 }
+                if (isText && (text.includes('1') || text.includes('menu') || text.includes('قائمة'))) {
+                    db.prepare("UPDATE secondary_verification SET user_method_poll_id='' WHERE requester_id=?").run(session.requester_id);
+                    await sendMethodPoll(client, db, config, session);
+                } else await msg.reply(isAr ? 'اختر من الاستطلاع السابق، أو أرسل 1 لإعادته.' : 'Choose from poll or send 1 to resend.');
+                return true;
+            }
 
-                if (choice === '4') {
-                    const chatForBan = await client.getChatById(record.group_id).catch(() => null);
-                    if (chatForBan) {
-                        try { await chatForBan.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
+            if (state === 'PENDING_EMAIL_INPUT') {
+                if (!isText) return false;
+                if (text.trim() === '1') {
+                    db.prepare("UPDATE secondary_verification SET state='PENDING_METHOD', wait_started_at=0 WHERE requester_id=?").run(session.requester_id);
+                    await sendMethodPoll(client, db, config, db.prepare('SELECT * FROM secondary_verification WHERE requester_id=?').get(session.requester_id));
+                    return true;
+                }
+                const dom = (config.emailDomain || 'college.edu').trim();
+                const em = text.trim();
+                if (!em.endsWith(`@${dom}`) || !em.includes('@')) {
+                    await msg.reply(isAr ? `يجب أن ينتهي البريد بـ @${dom}` : `Email must end with @${dom}`);
+                    return true;
+                }
+                const code = Math.floor(100000 + Math.random() * 900000).toString();
+                db.prepare("UPDATE secondary_verification SET state='PENDING_CODE', email=?, code=? WHERE requester_id=?").run(em, code, session.requester_id);
+
+                if (config.outlookEmail && config.outlookPassword) {
+                    const trans = nodemailer.createTransport({ host: 'smtp-mail.outlook.com', port: 587, secure: false, auth: { user: config.outlookEmail, pass: config.outlookPassword }, tls: { minVersion: 'TLSv1.2' } });
+                    try {
+                        await trans.sendMail({ from: config.outlookEmail, to: em, subject: isAr?'التحقق':'Verification', text: (isAr?'الرمز: ':'Code: ') + code });
+                        logEmail(db, senderKey, session.group_id, em, 'sent');
+                        await msg.reply(isAr ? 'تم إرسال الرمز للبريد. اكتب الرمز هنا، أو 1 للرجوع.' : 'Code sent. Type code here or 1 to return.');
+                    } catch (e) {
+                        logEmail(db, senderKey, session.group_id, em, 'failed', e.code||'', e.message||'');
+                        await msg.reply(isAr ? 'مشكلة في الإرسال. استعمل طريقة أخرى (أرسل 1 للرجوع).' : 'Send failed. Use another method (Send 1).');
+                        db.prepare("UPDATE secondary_verification SET state='PENDING_METHOD', email='', code='' WHERE requester_id=?").run(session.requester_id);
                     }
-                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
-                    pendingAdminPhotoPolls.delete(pollId);
-                    await archiveRequesterChat(client, record.requester_id);
-                    await client.sendMessage(toCanonicalRequesterId(record.requester_id), isAr
-                        ? 'تم رفض الطلب وإضافة الرقم إلى القائمة السوداء.'
-                        : 'Your request was rejected and your number was added to the blacklist.');
+                } else await msg.reply(isAr ? 'إعدادات البريد غير صحيحة.' : 'SMTP not configured.');
+                return true;
+            }
+
+            if (state === 'PENDING_CODE') {
+                if (!isText) return false;
+                if (text.trim() === '1') {
+                    db.prepare("UPDATE secondary_verification SET state='PENDING_METHOD', email='', code='' WHERE requester_id=?").run(session.requester_id);
+                    await sendMethodPoll(client, db, config, db.prepare('SELECT * FROM secondary_verification WHERE requester_id=?').get(session.requester_id));
                     return true;
                 }
+                if (text.trim() === session.code) {
+                    await resolveSessionAction('approve', client, db, session);
+                    await msg.reply(isAr ? 'رمز صحيح. تمت الموافقة.' : 'Correct code. Approved.');
+                } else await msg.reply(isAr ? 'رمز خاطئ.' : 'Wrong code.');
+                return true;
+            }
 
+            if (state === 'PENDING_PHOTO_UPLOAD') {
+                if (isText && text.trim() === '1') {
+                    db.prepare("UPDATE secondary_verification SET state='PENDING_METHOD' WHERE requester_id=?").run(session.requester_id);
+                    await sendMethodPoll(client, db, config, db.prepare('SELECT * FROM secondary_verification WHERE requester_id=?').get(session.requester_id));
+                    return true;
+                }
+                if (!msg.hasMedia) {
+                    await msg.reply(isAr ? 'أرسل صورة أو 1 للرجوع.' : 'Send image or 1 to return.');
+                    return true;
+                }
+                const m = await msg.downloadMedia();
+                if (!m) return true;
+                const admin = getAdminGroupFor(config, session.group_id);
+                if (!admin) {
+                    await msg.reply(isAr ? 'مجموعة مشرفين غير محددة.' : 'No admin group found.');
+                    return true;
+                }
+                const dm = await client.sendMessage(admin, m, { caption: `Photo from @${senderKey}` });
+                const poll = new Poll(isAr ? 'قرار الصورة' : 'Photo decision', ['1 Approve', '2 Reject', '3 Another Photo', '4 Ban']);
+                const pm = await client.sendMessage(admin, poll);
+                db.prepare("UPDATE secondary_verification SET state='WAITING_ADMIN_PHOTO_REVIEW', admin_group_id=?, admin_decision_msg_id=?, admin_poll_msg_id=? WHERE requester_id=?")
+                  .run(admin, dm.id._serialized, pm.id._serialized, session.requester_id);
+                await msg.reply(isAr ? 'حُولت للمشرفين.' : 'Forwarded to admins.');
+                return true;
+            }
+
+            if (state.startsWith('WAITING_')) {
+                if (isText && text.trim() === '1') {
+                    db.prepare("UPDATE secondary_verification SET state='PENDING_METHOD' WHERE requester_id=?").run(session.requester_id);
+                    await sendMethodPoll(client, db, config, db.prepare('SELECT * FROM secondary_verification WHERE requester_id=?').get(session.requester_id));
+                    return true;
+                }
+                await msg.reply(isAr ? 'قيد مراجعة المشرفين. للرجوع أرسل 1' : 'Waiting for admins. Send 1 to return.');
                 return true;
             }
 
             return false;
         },
 
-        handleAdminDecisionReply: async (msg) => {
-            try {
-                if (!msg || !msg.isGroupMsg || !msg.hasQuotedMsg) return false;
-
-                const body = extractIncomingText(msg).trim().toLowerCase();
-                if (!body) return false;
-
-                let action = '';
-                if (/approve|aprove|موافقة|قبول/.test(body)) action = 'approve';
-                else if (/reject|rejict|deny|رفض/.test(body)) action = 'reject';
-                else if (/ban|حظر/.test(body)) action = 'ban';
-                if (!action) return false;
-
-                const quoted = await msg.getQuotedMessage().catch(() => null);
-                const quotedId = quoted && quoted.id ? quoted.id._serialized : '';
-                if (!quotedId) return false;
-
-                const row = db.prepare(`
-                    SELECT * FROM secondary_verification
-                    WHERE admin_decision_msg_id = ?
-                      AND state IN ('WAITING_ADMIN_PHOTO_REVIEW', 'WAITING_ADMIN_CONTACT_DECISION')
-                    LIMIT 1
-                `).get(quotedId);
-                if (!row) return false;
-
-                const groupChat = await msg.getChat().catch(() => null);
-                const actorId = normalizeVerificationId(msg.author || msg.from || '');
-                if (!groupChat || !groupChat.isGroup || !actorId) return false;
-                const actor = Array.isArray(groupChat.participants)
-                    ? groupChat.participants.find(p => normalizeVerificationId(p.id && p.id._serialized) === actorId)
-                    : null;
-                const isActorAdmin = Boolean(actor && (actor.isAdmin || actor.isSuperAdmin));
-                if (!isActorAdmin) {
-                    await msg.reply(config.secondaryVerificationLanguage === 'ar'
-                        ? 'هذا القرار متاح للمشرفين فقط.'
-                        : 'This action is available to admins only.');
-                    return true;
-                }
-
+        handleVoteUpdate: async (vote) => {
+            const pollId = vote && vote.parentMessage && vote.parentMessage.id ? vote.parentMessage.id._serialized : '';
+            if (!pollId) return false;
+            
+            // User Method Poll
+            const uSess = db.prepare('SELECT * FROM secondary_verification WHERE user_method_poll_id = ?').get(pollId);
+            if (uSess) {
+                const choice = parseMethodVote(vote.selectedOptions);
                 const isAr = config.secondaryVerificationLanguage === 'ar';
-                const requesterId = row.requester_id;
-                const cleanId = toRequesterKey(requesterId);
-                const joinChat = await client.getChatById(row.group_id).catch(() => null);
-
-                if (action === 'approve') {
-                    if (joinChat) {
-                        try { await joinChat.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(requesterId)] }); } catch (e) { }
+                if (choice === 'email' && uSess.require_email) {
+                    db.prepare("UPDATE secondary_verification SET state='PENDING_EMAIL_INPUT' WHERE requester_id=?").run(uSess.requester_id);
+                    await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'أرسل بريدك الجامعي (@' + (config.emailDomain||'.edu') + ')' : 'Send your student email.');
+                } else if (choice === 'photo' && uSess.require_photo) {
+                    db.prepare("UPDATE secondary_verification SET state='PENDING_PHOTO_UPLOAD' WHERE requester_id=?").run(uSess.requester_id);
+                    await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'أرسل الصورة.' : 'Send screenshot.');
+                } else if (choice === 'contact') {
+                    const adm = getAdminGroupFor(config, uSess.group_id);
+                    if (adm) {
+                        const rp = await client.sendMessage(adm, new Poll(`Contact req from @${normalizeId(uSess.requester_id)}`, ['1 Approve','2 Reject','3 Ban']));
+                        db.prepare("UPDATE secondary_verification SET state='WAITING_ADMIN_CONTACT_DECISION', admin_group_id=?, admin_poll_msg_id=? WHERE requester_id=?").run(adm, rp.id._serialized, uSess.requester_id);
+                        await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'طلبك مع المشرف.' : 'Passed to admins.');
+                    } else {
+                        await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'لا يوجد مجموعة إدارة للاستقبال.' : 'No admin group available.');
                     }
-                    addApprovedNumber(db, requesterId);
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
-                    await client.sendMessage(requesterId, isAr
-                        ? 'تمت الموافقة على طلبك من قبل الإدارة. أهلاً وسهلاً بك.'
-                        : 'Your request has been approved by the admins. Welcome.');
-                    await msg.reply(isAr ? 'تم تنفيذ الموافقة بنجاح.' : 'Approval has been applied successfully.');
-                    return true;
+                } else if (choice === 'cancel') {
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id=?').run(uSess.requester_id);
+                    await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'تم الإلغاء.' : 'Cancelled.');
                 }
-
-                if (action === 'reject') {
-                    if (joinChat) {
-                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(requesterId)] }); } catch (e) { }
-                    }
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
-                    await client.sendMessage(requesterId, isAr
-                        ? 'تم رفض طلب الانضمام من قبل الإدارة.'
-                        : 'Your join request was rejected by the admins.');
-                    await msg.reply(isAr ? 'تم تنفيذ الرفض بنجاح.' : 'Rejection has been applied successfully.');
-                    return true;
-                }
-
-                if (action === 'ban') {
-                    if (joinChat) {
-                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(requesterId)] }); } catch (e) { }
-                    }
-                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
-                    await archiveRequesterChat(client, requesterId);
-                    await client.sendMessage(toCanonicalRequesterId(requesterId), isAr
-                        ? 'تم رفض الطلب وإضافة الرقم إلى القائمة السوداء.'
-                        : 'Your request was rejected and your number was added to the blacklist.');
-                    await msg.reply(isAr ? 'تم تنفيذ الحظر بنجاح.' : 'Ban has been applied successfully.');
-                    return true;
-                }
-
-                return false;
-            } catch (e) {
-                debugLog('admin decision reply error', { error: e && e.message ? e.message : String(e) });
-                return false;
+                return true;
             }
+
+            // Admin Decision Poll
+            const aSess = db.prepare('SELECT * FROM secondary_verification WHERE admin_poll_msg_id = ?').get(pollId);
+            if (aSess) {
+                const choice = parseAdminVote(vote.selectedOptions);
+                const isAr = config.secondaryVerificationLanguage === 'ar';
+                if (!choice) return true;
+                
+                if (choice === 'approve') {
+                    await resolveSessionAction('approve', client, db, aSess);
+                    await client.sendMessage(toCanonical(aSess.requester_id), isAr ? 'موُفِق عليك.' : 'Approved.');
+                } else if (choice === 'reject') {
+                    await resolveSessionAction('reject', client, db, aSess);
+                    await client.sendMessage(toCanonical(aSess.requester_id), isAr ? 'رُفضت.' : 'Rejected.');
+                } else if (choice === 'ban') {
+                    await resolveSessionAction('ban', client, db, aSess);
+                    await client.sendMessage(toCanonical(aSess.requester_id), isAr ? 'حُظرت.' : 'Banned.');
+                } else if (choice === 'retry' && aSess.state === 'WAITING_ADMIN_PHOTO_REVIEW') {
+                    db.prepare("UPDATE secondary_verification SET state='PENDING_PHOTO_UPLOAD' WHERE requester_id=?").run(aSess.requester_id);
+                    await client.sendMessage(toCanonical(aSess.requester_id), isAr ? 'أرسل صورة أخرى.' : 'Send another photo.');
+                }
+                return true;
+            }
+            return false;
+        },
+
+        handleAdminDecisionReply: async (msg) => {
+            if (!msg.isGroupMsg || !msg.hasQuotedMsg) return false;
+            const text = extractText(msg).toLowerCase();
+            let act = '';
+            if (/approve|موافقة|قبول/.test(text)) act = 'approve';
+            else if (/reject|deny|رفض/.test(text)) act = 'reject';
+            else if (/ban|حظر/.test(text)) act = 'ban';
+            if (!act) return false;
+
+            const q = await msg.getQuotedMessage().catch(()=>null);
+            if (!q) return false;
+            
+            const session = db.prepare("SELECT * FROM secondary_verification WHERE admin_decision_msg_id=? AND state LIKE 'WAITING_ADMIN_%'").get(q.id._serialized);
+            if (!session) return false;
+
+            const cg = await msg.getChat().catch(()=>null);
+            const user = cg && cg.participants ? cg.participants.find(p=>normalizeId(p.id._serialized)===normalizeId(msg.author||msg.from)) : null;
+            if (!(user && (user.isAdmin || user.isSuperAdmin))) {
+                await msg.reply('Admins only.'); return true;
+            }
+
+            await resolveSessionAction(act, client, db, session);
+            await msg.reply('Done.');
+            const isAr = config.secondaryVerificationLanguage === 'ar';
+            if (act==='approve') await client.sendMessage(toCanonical(session.requester_id), isAr ? 'موُفِق عليك.' : 'Approved.');
+            if (act==='reject') await client.sendMessage(toCanonical(session.requester_id), isAr ? 'رُفضت.' : 'Rejected.');
+            if (act==='ban') await client.sendMessage(toCanonical(session.requester_id), isAr ? 'حُظرت.' : 'Banned.');
+            return true;
         },
 
         sendAdminDecisionReminders: async () => {
             try {
-                const reminderIntervalMs = 6 * 60 * 60 * 1000;
                 const now = Date.now();
-                const rows = db.prepare(`
-                    SELECT requester_id, group_id, state, admin_group_id, admin_decision_msg_id, admin_last_reminder_at
-                    FROM secondary_verification
-                    WHERE state IN ('WAITING_ADMIN_PHOTO_REVIEW', 'WAITING_ADMIN_CONTACT_DECISION')
-                      AND admin_group_id IS NOT NULL
-                      AND admin_group_id != ''
-                      AND admin_decision_msg_id IS NOT NULL
-                      AND admin_decision_msg_id != ''
-                `).all();
-
-                for (const row of rows) {
-                    const lastReminderAt = Number(row.admin_last_reminder_at || 0);
-                    if (lastReminderAt > 0 && now - lastReminderAt < reminderIntervalMs) continue;
-
-                    const isAr = config.secondaryVerificationLanguage === 'ar';
-                    const reminderText = row.state === 'WAITING_ADMIN_CONTACT_DECISION'
-                        ? (isAr
-                            ? 'تذكير: يوجد طلب تواصل مباشر بانتظار قرار الإدارة. يرجى التصويت أو الرد: موافقة / رفض / حظر.'
-                            : 'Reminder: a direct-contact request is pending admin decision. Please vote or reply: approve / reject / ban.')
-                        : (isAr
-                            ? 'تذكير: توجد صورة تحقق بانتظار قرار الإدارة. يرجى التصويت أو الرد: موافقة / رفض / حظر.'
-                            : 'Reminder: a verification screenshot is pending admin decision. Please vote or reply: approve / reject / ban.');
-
+                const diffMs = 6 * 3600 * 1000;
+                const rows = db.prepare("SELECT * FROM secondary_verification WHERE state LIKE 'WAITING_ADMIN_%'").all();
+                for (const r of rows) {
+                    if (r.admin_last_reminder_at && (now - r.admin_last_reminder_at < diffMs)) continue;
                     try {
-                        await client.sendMessage(row.admin_group_id, reminderText, { quotedMessageId: row.admin_decision_msg_id });
-                    } catch (e) {
-                        await client.sendMessage(row.admin_group_id, reminderText).catch(() => { });
-                    }
-
-                    db.prepare(`
-                        UPDATE secondary_verification
-                        SET admin_last_reminder_at = ?
-                        WHERE requester_id = ? AND group_id = ?
-                    `).run(now, row.requester_id, row.group_id);
+                        const m = r.state === 'WAITING_ADMIN_PHOTO_REVIEW' ? 'Reminder: Pending Photo' : 'Reminder: Pending Contact';
+                        if (r.admin_decision_msg_id) await client.sendMessage(r.admin_group_id, m, {quotedMessageId: r.admin_decision_msg_id});
+                        else await client.sendMessage(r.admin_group_id, m);
+                    } catch(e) {}
+                    db.prepare("UPDATE secondary_verification SET admin_last_reminder_at=? WHERE requester_id=?").run(now, r.requester_id);
                 }
-            } catch (e) {
-                debugLog('admin reminders error', { error: e && e.message ? e.message : String(e) });
-            }
-        },
-
-        // Triggered after bio check is passed
-        startVerification: async (rawRequesterId, cleanUserId, groupId, options = {}) => {
-            const requesterId = toCanonicalRequesterId(rawRequesterId);
-            if (!config.enableSecondaryVerification) {
-                debugLog('start blocked: feature disabled', { requesterId: rawRequesterId, groupId });
-                return false;
-            }
-            
-            // Check if feature applies to this group
-            const normalizeGroupId = (value) => String(value || '').trim();
-            const normalizedGroupId = normalizeGroupId(groupId);
-            const enabledGroups = Array.isArray(config.secondaryVerificationGroups)
-                ? config.secondaryVerificationGroups.map(normalizeGroupId).filter(Boolean)
-                : [];
-            if (enabledGroups.length === 0) {
-                debugLog('start blocked: no selected groups', { requesterId: rawRequesterId, groupId });
-                return false;
-            }
-            if (!enabledGroups.includes(normalizedGroupId)) {
-                debugLog('start blocked: group not selected', { requesterId: rawRequesterId, groupId, selectedGroups: enabledGroups });
-                return false;
-            }
-
-            const useKeyword = config.enableKeywordVerification;
-            const useEmail = config.enableEmailVerification;
-            const usePhoto = config.enablePhotoVerification;
-            if (!useKeyword && !useEmail && !usePhoto) {
-                debugLog('start blocked: no methods enabled', { requesterId: rawRequesterId, groupId });
-                return false;
-            }
-
-            const flowType = options.flowType === 'test' ? 'test' : 'join';
-            const forceRestart = Boolean(options.forceRestart);
-            let skipKeywordForNewGroup = false;
-
-            if (!forceRestart && flowType !== 'test' && hasRecentBait(db, requesterId)) {
-                debugLog('start blocked: bait cooldown active', { requesterId: rawRequesterId, groupId, cooldownMs: BAIT_REPEAT_COOLDOWN_MS });
-                return false;
-            }
-
-            // Only one active verification session per requester across all groups.
-            // WhatsApp may alternate identifiers between @lid and @c.us for the same user.
-            const normalizedIncomingId = normalizeVerificationId(requesterId);
-            const existingCandidates = db.prepare('SELECT requester_id, group_id, created_at, state, flow_type FROM secondary_verification').all()
-                .filter(row => normalizeVerificationId(row.requester_id) === normalizedIncomingId)
-                .sort((a, b) => {
-                    const aFlow = String(a && a.flow_type || 'join');
-                    const bFlow = String(b && b.flow_type || 'join');
-                    const aScore = (aFlow === 'test' ? 0 : 100) + Number(a && a.created_at || 0);
-                    const bScore = (bFlow === 'test' ? 0 : 100) + Number(b && b.created_at || 0);
-                    return bScore - aScore;
-                });
-            const existingRecord = existingCandidates.length > 0 ? existingCandidates[0] : null;
-            if (existingRecord) {
-                const ttlMs = getSessionTimeoutMs(config);
-                const isSameGroup = String(existingRecord.group_id || '') === String(groupId || '');
-                const isExpired = !existingRecord.created_at || Date.now() - existingRecord.created_at > ttlMs;
-                const isStillInBait = String(existingRecord.state || '') === 'PENDING_CUSTOM';
-                const existingFlowType = String(existingRecord.flow_type || 'join');
-
-                // Never let ad-hoc test sessions replace active real join sessions.
-                if (flowType === 'test' && existingFlowType !== 'test' && !isExpired) {
-                    debugLog('test start blocked: active join session exists', {
-                        requesterId: rawRequesterId,
-                        groupId,
-                        existingGroupId: existingRecord.group_id,
-                        existingState: existingRecord.state,
-                        existingFlowType
-                    });
-                    return false;
-                }
-
-                if (!isSameGroup && isStillInBait && !forceRestart) {
-                    const isAr = config.secondaryVerificationLanguage === 'ar';
-                    await client.sendMessage(requesterId, isAr
-                        ? 'ما زلت في خطوة كلمة التحقق للسابق. هل يمكنك الرد على الرسالة السابقة أولاً؟'
-                        : 'You are still on the previous bait/keyword step. Can you reply to the previous verification message first?');
-                    await client.sendMessage(requesterId, buildBaitMessage(config, isAr));
-                    upsertReplyLogSent(db, existingRecord.requester_id, existingRecord.group_id, existingRecord.state || 'PENDING_CUSTOM');
-                    debugLog('start blocked: still in bait for another group', {
-                        requesterId: rawRequesterId,
-                        requestedGroupId: groupId,
-                        existingGroupId: existingRecord.group_id
-                    });
-                    return false;
-                }
-
-                if (!isSameGroup && !isStillInBait) {
-                    // User already passed bait in another group, so switch to new group and start from method poll.
-                    skipKeywordForNewGroup = true;
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?')
-                        .run(existingRecord.requester_id, existingRecord.group_id);
-                    debugLog('start switching group after bait passed', {
-                        requesterId: rawRequesterId,
-                        fromGroupId: existingRecord.group_id,
-                        toGroupId: groupId,
-                        previousState: existingRecord.state
-                    });
-                } else if (isSameGroup && (forceRestart || isExpired)) {
-                    debugLog('start replacing existing session', {
-                        requesterId: rawRequesterId,
-                        existingRequesterId: existingRecord.requester_id,
-                        groupId,
-                        forceRestart,
-                        isExpired
-                    });
-                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(existingRecord.requester_id, groupId);
-                } else {
-                    debugLog('start blocked: active session exists in another group', {
-                        requesterId: rawRequesterId,
-                        requestedGroupId: groupId,
-                        existingGroupId: existingRecord.group_id,
-                        existingState: existingRecord.state
-                    });
-                    return false; // Already sent them a message, waiting for their reply
-                }
-            }
-            
-            console.log(`[Verification] Starting for ${cleanUserId}`);
-            
-            const initialState = (useKeyword && !skipKeywordForNewGroup) ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
-            const initialWaitStartedAt = (flowType === 'test' && initialState === 'PENDING_CUSTOM') ? Date.now() : 0;
-            const insertStmt = db.prepare(`
-                INSERT OR REPLACE INTO secondary_verification 
-                (requester_id, group_id, state, flow_type, require_email, require_photo, user_method_poll_id, email, code, created_at, wait_started_at, admin_poll_msg_id)
-                VALUES (?, ?, ?, ?, ?, ?, '', '', '', ?, ?, '')
-            `);
-            insertStmt.run(requesterId, groupId, initialState, flowType, useEmail ? 1 : 0, usePhoto ? 1 : 0, Date.now(), initialWaitStartedAt);
-            debugLog('session started', {
-                requesterId: rawRequesterId,
-                groupId,
-                initialState,
-                flowType,
-                useKeyword,
-                useEmail,
-                usePhoto
-            });
-
-            const isAr = config.secondaryVerificationLanguage === 'ar';
-            // Send initial custom message or method prompt
-            let initMsg = '';
-            if (useKeyword && !skipKeywordForNewGroup) {
-                initMsg = buildBaitMessage(config, isAr);
-            } else {
-                initMsg = isAr
-                    ? 'تم قبول طلبك مبدئياً. سأرسل لك الآن قائمة خيارات التحقق.'
-                    : 'Your request was accepted initially. I will now send you the verification options.';
-            }
-            try {
-                await client.sendMessage(requesterId, initMsg);
-                // Record bait/message delivery in reply log for diagnostics and follow-up visibility.
-                upsertReplyLogSent(db, requesterId, groupId, initialState);
-                if (flowType !== 'test') {
-                    markBaitSent(db, requesterId);
-                }
-                if (initialState === 'PENDING_METHOD') {
-                    const seededRecord = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(requesterId, groupId);
-                    if (seededRecord) {
-                        const methodsEnabled = (seededRecord.require_email === 1) || (seededRecord.require_photo === 1);
-                        if (!methodsEnabled) {
-                            const chatObj = await client.getChatById(groupId).catch(() => null);
-                            const cleanId = toRequesterKey(requesterId);
-                            if (chatObj) {
-                                try { await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(requesterId)] }); } catch (e) { }
-                            }
-                            addApprovedNumber(db, requesterId);
-                            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(requesterId, groupId);
-                            const groupName = await resolveGroupName(client, groupId);
-                            await client.sendMessage(requesterId, isAr
-                                ? `تمت الموافقة على انضمامك إلى "${groupName}"، وتمت إضافتك إلى قائمة المتحقق منهم.`
-                                : `You have been approved to join "${groupName}" and added to the verified list.`);
-                        } else {
-                            await sendMethodSelectionPoll(client, db, config, seededRecord, isAr);
-                        }
-                    }
-                }
-                debugLog('initial message sent', { requesterId: rawRequesterId, groupId, initialState });
-            } catch (e) {
-                console.error(`[Verification] Failed to message ${rawRequesterId}`, e);
-                debugLog('initial message failed', { requesterId: rawRequesterId, groupId, error: e && e.message ? e.message : String(e) });
-            }
-            return true; // Indicates we intercepted it, do not approve/reject yet
-        },
-
-        // Triggered on every incoming message
-        handleIncomingMessage: async (msg) => {
-            if (!config.enableSecondaryVerification) return false;
-
-            // whatsapp-web.js can occasionally miss msg.isGroupMsg in some payload shapes.
-            // Guard group contexts defensively to prevent DM-only verification replies from leaking to groups.
-            const fromId = String(msg && msg.from ? msg.from : '');
-            const inferredGroupByFrom = fromId.endsWith('@g.us');
-            const inferredGroupByData = Boolean(msg && msg._data && msg._data.isGroupMsg);
-            if (msg.isGroupMsg || inferredGroupByFrom || inferredGroupByData) return false;
-
-            const ignoredMessageTypes = new Set(['revoked', 'ciphertext', 'e2e_notification', 'notification_template', 'gp2', 'protocol']);
-            if (ignoredMessageTypes.has(msg.type)) return false;
-
-            const incomingText = extractIncomingText(msg);
-            const isTextMessage = incomingText.trim().length > 0;
-            
-            const senderId = msg.from;
-            const normalizedSenderId = normalizeVerificationId(senderId);
-            const senderCandidates = new Set(getVerificationIdCandidates(senderId));
-            let record = null;
-            const sessionRows = db.prepare('SELECT * FROM secondary_verification').all();
-            const senderPhoneKey = toPhoneNumberKey(senderId);
-            const scoreMatch = (row) => {
-                const rowId = row && row.requester_id ? row.requester_id : '';
-                const normalizedRowId = normalizeVerificationId(rowId);
-                let score = 0;
-                if (normalizedRowId === normalizedSenderId) score += 100;
-                if (senderCandidates.has(rowId)) score += 80;
-                if (senderCandidates.has(normalizedRowId)) score += 60;
-                if (senderPhoneKey && toPhoneNumberKey(rowId) === senderPhoneKey) score += 40;
-
-                const flowType = String(row && row.flow_type || 'join');
-                if (flowType === 'test') score -= 25;
-                else score += 10;
-
-                // Prefer active user-facing states when duplicates exist.
-                const state = String(row && row.state || '');
-                if (state === 'PENDING_CUSTOM') score += 30;
-                else if (state === 'PENDING_METHOD') score += 20;
-                else if (state === 'EXPIRED_WAITING_REENTRY') score += 5;
-
-                // Prefer latest session if still tied.
-                score += Math.floor(Number(row && row.created_at || 0) / 1000000);
-                return score;
-            };
-
-            const matchingRows = sessionRows
-                .map(row => ({ row, score: scoreMatch(row) }))
-                .filter(item => item.score >= 40)
-                .sort((a, b) => b.score - a.score);
-
-            if (matchingRows.length > 0) {
-                record = matchingRows[0].row;
-                if (matchingRows.length > 1) {
-                    debugLog('multiple sessions matched sender; selected best score', {
-                        senderId,
-                        matches: matchingRows.slice(0, 5).map(item => ({
-                            requesterId: item.row && item.row.requester_id,
-                            groupId: item.row && item.row.group_id,
-                            state: item.row && item.row.state,
-                            score: item.score
-                        }))
-                    });
-                }
-            }
-            if (!record) {
-                debugLog('incoming ignored: no active session', { senderId, msgType: msg.type });
-                return false;
-            }
-
-            debugLog('incoming matched session', {
-                senderId,
-                requesterId: record.requester_id,
-                state: record.state,
-                flowType: record.flow_type || 'join',
-                msgType: msg.type,
-                hasMedia: Boolean(msg.hasMedia),
-                hasQuotedMsg: Boolean(msg.hasQuotedMsg),
-                textPreview: typeof incomingText === 'string' ? incomingText.slice(0, 120) : ''
-            });
-
-            const now = Date.now();
-            const ttlMs = getSessionTimeoutMs(config);
-            if (isUserTimeoutState(record.state) && (!record.created_at || now - record.created_at > ttlMs)) {
-                const chatObj = await client.getChatById(record.group_id).catch(() => null);
-                if (chatObj) {
-                    try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
-                }
-                db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
-                upsertReplyLogNoReply(db, record.requester_id, record.group_id, `expired:${record.state}`);
-                debugLog('session expired and deleted', { requesterId: record.requester_id, state: record.state, ttlMs });
-                return false;
-            }
-
-            // Helper for smart match
-            const applySmartMatch = (str) => {
-                if (typeof str !== 'string') return str;
-                let res = str.replace(/[!@#$%^&*()_+=\-\[\]{}:;"'<>,.?\/\\|~`]/g, '');
-                res = res.replace(/[\u064B-\u0652\u0640\u0670]/g, '');
-                res = res.replace(/[أإآ]/g, 'ا');
-                return res;
-            };
-
-            const rawText = incomingText.trim().toLowerCase();
-            const smartText = config.enableSecondarySmartMatch ? applySmartMatch(rawText) : rawText;
-            const stopCode = String(config.secondaryVerificationStopCode || '').trim().toLowerCase();
-            
-            const groupToJoin = record.group_id;
-            const requesterActionId = toCanonicalRequesterId(record.requester_id);
-            let wasHandled = false;
-
-            if (stopCode && rawText === stopCode) {
-                const chatObj = await client.getChatById(groupToJoin).catch(() => null);
-                if (chatObj) {
-                    try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [requesterActionId] }); } catch (e) { }
-                }
-                db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
-                upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'stopped');
-                await msg.reply(config.secondaryVerificationLanguage === 'ar'
-                    ? 'تم إيقاف جلسة التحقق وإلغاء طلب الانضمام.'
-                    : 'Your verification session has been stopped and the join request was cancelled.');
-                debugLog('session stopped by stop code from requester', { requesterId: record.requester_id });
-                return true;
-            }
-
-            try {
-                const isAr = config.secondaryVerificationLanguage === 'ar';
-                const useSmartMatch = Boolean(config.enableSecondarySmartMatch);
-                const approvalKeywords = getApprovalKeywords(config);
-                const banKeywords = String(config.banKeyword || 'no').split(',').map(s => s.trim()).filter(Boolean);
-                const isTestFlow = record.flow_type === 'test';
-                const shouldNormalizeForMatch = useSmartMatch || isTestFlow;
-                const approvalKeywordMatch = isTextMessage && keywordMatchesText(rawText, approvalKeywords, shouldNormalizeForMatch);
-                const banKeywordMatch = isTextMessage && keywordMatchesText(rawText, banKeywords.length > 0 ? banKeywords : ['no'], shouldNormalizeForMatch);
-                debugLog('keyword match evaluation', {
-                    requesterId: record.requester_id,
-                    state: record.state,
-                    isTextMessage,
-                    rawText,
-                    smartText,
-                    useSmartMatch,
-                    shouldNormalizeForMatch,
-                    approvalKeywords,
-                    banKeywords,
-                    approvalKeywordMatch,
-                    banKeywordMatch
-                });
-
-                if (record.state === 'EXPIRED_WAITING_REENTRY') {
-                    if (!isTextMessage) return false;
-
-                    const reopenCode = getVerificationReopenCode(config);
-
-                    if (rawText !== reopenCode) {
-                        const keywordHint = reopenCode;
-                        await msg.reply(isAr
-                            ? `تم إيقاف التحقق مؤقتاً. لإعادة فتح العملية، أرسل: ${keywordHint}`
-                            : `Verification has been stopped. To reopen the verification process, send: ${keywordHint}`);
-                        return true;
-                    }
-
-                    const useKeyword = config.enableKeywordVerification;
-                    const useEmail = config.enableEmailVerification;
-                    const usePhoto = config.enablePhotoVerification;
-                    const initialState = 'PENDING_METHOD';
-                    db.prepare(`
-                        UPDATE secondary_verification
-                        SET state = ?, flow_type = COALESCE(flow_type, 'join'), require_email = ?, require_photo = ?, email = '', code = '', created_at = ?, wait_started_at = 0
-                        WHERE requester_id = ? AND group_id = ?
-                    `).run(initialState, useEmail ? 1 : 0, usePhoto ? 1 : 0, Date.now(), record.requester_id, record.group_id);
-
-                    const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                    const initMsg = isAr
-                        ? 'تمت إعادة فتح التحقق. سأرسل لك الآن قائمة خيارات التحقق.'
-                        : 'Verification has been reopened. I will now send you the verification options.';
-
-                    try {
-                        await client.sendMessage(record.requester_id, initMsg);
-                        if ((useEmail || usePhoto) && refreshed) {
-                            await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
-                        }
-                    } catch (e) {
-                        debugLog('expired reentry message failed', { requesterId: record.requester_id, error: e && e.message ? e.message : String(e) });
-                    }
-                    return true;
-                }
-                
-                if (record.state === 'PENDING_CUSTOM') {
-                    if (!isTextMessage) {
-                        debugLog('pending custom ignored: non-text', { requesterId: record.requester_id, msgType: msg.type, hasMedia: Boolean(msg.hasMedia) });
-                        return false;
-                    }
-
-                    // If the user lost/deleted chat history, a question-mark ping resends the bait safely.
-                    const resendBaitRequest = ['?', '؟', '؟؟'].includes(rawText);
-                    if (resendBaitRequest) {
-                        await msg.reply(buildBaitMessage(config, isAr));
-                        upsertReplyLogSent(db, record.requester_id, record.group_id, record.state);
-                        debugLog('bait resent on user request', { requesterId: record.requester_id, triggerText: rawText });
-                        return true;
-                    }
-
-                    upsertReplyLogReply(db, record.requester_id, record.group_id, incomingText, record.state);
-
-                    if (banKeywordMatch) {
-                        wasHandled = true;
-                        debugLog('ban keyword matched', { requesterId: record.requester_id, flowType: record.flow_type || 'join' });
-                        if (isTestFlow) {
-                            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
-                            upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'test_ban');
-                            await archiveRequesterChat(client, requesterActionId);
-                            await msg.reply(isAr ? 'تم إلغاء الطلب.' : 'The request was cancelled.');
-                            debugLog('test flow ban handled and session deleted', { requesterId: record.requester_id });
-                            return true;
-                        }
-                        // Reject and ban
-                        const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
-                        const cleanId = toRequesterKey(record.requester_id);
-                        if (chatObj) await chatObj.rejectGroupMembershipRequests({ requesterIds: [requesterActionId] });
-                        
-                        // Add to blacklist (ban)
-                        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
-                        
-                        db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
-                        upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'wrong_bait');
-                        await archiveRequesterChat(client, requesterActionId);
-                        debugLog('ban applied and session deleted', { requesterId: record.requester_id });
-                        // Make it a silent trap: no rejection notification
-                        return true;
-                    } else if (approvalKeywordMatch) {
-                        wasHandled = true;
-                        const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
-                        const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
-                        debugLog('approval keyword matched', { requesterId: record.requester_id, useEmail, usePhoto });
-
-                        if (!useEmail && !usePhoto) {
-                            // Keyword was the only verification needed
-                            const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
-                            const cleanId = toRequesterKey(record.requester_id);
-                            const groupName = await resolveGroupName(client, groupToJoin);
-                            if (chatObj) {
-                                try {
-                                    await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] });
-                                } catch (e) {}
-                            }
-                            addApprovedNumber(db, record.requester_id);
-                            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
-                            upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'approved_keyword_only');
-                            await msg.reply(isAr
-                                ? `تمت الموافقة على انضمامك إلى "${groupName}"، وتمت إضافتك إلى قائمة المتحقق منهم.`
-                                : `You have been approved to join "${groupName}" and added to the verified list.`);
-                            debugLog('session completed after keyword only', { requesterId: record.requester_id });
-                            return true;
-                        }
-
-                        // Move to next step
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '' WHERE requester_id = ?").run(record.requester_id);
-                        debugLog('state transition', { requesterId: record.requester_id, from: 'PENDING_CUSTOM', to: 'PENDING_METHOD', useEmail, usePhoto });
-                        if (useEmail || usePhoto) {
-                            const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                            if (refreshed) {
-                                await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
-                            }
-                        }
-                    } else {
-                        if (record.flow_type === 'test') {
-                            await msg.reply(isAr
-                                ? 'لم يتم التعرف على الرد. حاول مرة أخرى بالكلمة الصحيحة.'
-                                : 'Reply not recognized. Please try again with the correct keyword.');
-                            return true;
-                        }
-                        // If the bait answer is wrong, reject and blacklist for join flow.
-                        const chatObj = await client.getChatById(groupToJoin).catch(() => null);
-                        const cleanId = toRequesterKey(record.requester_id);
-                        if (chatObj) {
-                            try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [requesterActionId] }); } catch (e) { }
-                        }
-                        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
-                        db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
-                        upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'wrong_bait');
-                        await archiveRequesterChat(client, requesterActionId);
-                        return true;
-                    }
-                } else if (record.state === 'PENDING_METHOD') {
-                    wasHandled = true;
-                    const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
-                    const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
-                    if (isTestFlow && isTextMessage && (approvalKeywordMatch || banKeywordMatch)) {
-                        if (banKeywordMatch) {
-                            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
-                            await archiveRequesterChat(client, requesterActionId);
-                            await msg.reply(isAr ? 'تم إلغاء الطلب.' : 'The request was cancelled.');
-                            return true;
-                        }
-
-                        if (!useEmail && !usePhoto) {
-                            const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
-                            const cleanId = toRequesterKey(record.requester_id);
-                            const groupName = await resolveGroupName(client, groupToJoin);
-                            if (chatObj) {
-                                try {
-                                    await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] });
-                                } catch (e) { }
-                            }
-                            addApprovedNumber(db, record.requester_id);
-                            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
-                            await msg.reply(isAr
-                                ? `تمت الموافقة على انضمامك إلى "${groupName}"، وتمت إضافتك إلى قائمة المتحقق منهم.`
-                                : `You have been approved to join "${groupName}" and added to the verified list.`);
-                            return true;
-                        }
-
-                        const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) {
-                            await msg.reply(isAr
-                                ? 'لديك وسائل تحقق إضافية مفعلة، اختر طريقة المتابعة من القائمة.'
-                                : 'Additional verification methods are enabled. Please choose your next step from the menu.');
-                            db.prepare("UPDATE secondary_verification SET user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?")
-                                .run(record.requester_id, record.group_id);
-                            await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
-                        }
-                        return true;
-                    }
-                    if (!useEmail && !usePhoto) {
-                        const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
-                        const cleanId = toRequesterKey(record.requester_id);
-                        const groupName = await resolveGroupName(client, groupToJoin);
-                        if (chatObj) {
-                            try {
-                                await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] });
-                            } catch (e) { }
-                        }
-                        addApprovedNumber(db, record.requester_id);
-                        db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
-                        upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'auto_approved_no_methods');
-                        await msg.reply(isAr
-                            ? `تمت الموافقة على انضمامك إلى "${groupName}"، وتمت إضافتك إلى قائمة المتحقق منهم.`
-                            : `You have been approved to join "${groupName}" and added to the verified list.`);
-                        return true;
-                    }
-                    const menuHints = isAr
-                        ? ['1', 'قائمة', 'القائمة', 'خيارات']
-                        : ['1', 'menu', 'options', 'help'];
-                    const wantsMenu = isTextMessage && menuHints.some(word => rawText === word || rawText.includes(word));
-                    if (wantsMenu || !record.user_method_poll_id) {
-                        upsertReplyLogReply(db, record.requester_id, record.group_id, incomingText, record.state);
-                        if (record.user_method_poll_id) {
-                            db.prepare("UPDATE secondary_verification SET user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?")
-                                .run(record.requester_id, record.group_id);
-                        }
-                        const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) {
-                            await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
-                        }
-                    } else {
-                        if (isTestFlow && isTextMessage) {
-                            await msg.reply(isAr
-                                ? 'لم يتم التعرف على الرسالة. لإعادة إرسال القائمة أرسل 1.'
-                                : 'Message not recognized. Send 1 to resend the menu.');
-                            return true;
-                        }
-                        await msg.reply(isAr
-                            ? 'يرجى اختيار إحدى خيارات الاستطلاع السابق. لإعادة إرسال القائمة أرسل 1.'
-                            : 'Please choose one of the options in the previous poll. Send 1 to resend the menu.');
-                    }
-                } else if (record.state === 'PENDING_EMAIL_INPUT') {
-                    if (!isTextMessage) return false;
-                    wasHandled = true;
-                    const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
-                    if (rawText === '1') {
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '', wait_started_at = 0 WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
-                        const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
-                        return true;
-                    }
-                    if (!useEmail) {
-                        await msg.reply(isAr ? 'خيار البريد غير متاح حالياً. سأعيدك إلى القائمة.' : 'Email verification is not available right now. I will return you to the menu.');
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '', wait_started_at = 0 WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
-                        const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
-                        return true;
-                    }
-                    const domain = config.emailDomain || 'college.edu';
-                    const emailMatch = rawText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-                    if (!emailMatch || !emailMatch[0].endsWith(`@${domain}`)) {
-                        await msg.reply(isAr
-                            ? `صيغة البريد غير صحيحة. يجب أن ينتهي البريد بـ @${domain}. حاول مرة أخرى أو أرسل 1 للرجوع.`
-                            : `That email is not valid for verification. It must end with @${domain}. Try again or send 1 to go back.`);
-                        return true;
-                    }
-
-                    const userEmail = emailMatch[0];
-                    const code = Math.floor(100000 + Math.random() * 900000).toString();
-                    db.prepare("UPDATE secondary_verification SET state = 'PENDING_CODE', email = ?, code = ?, wait_started_at = ? WHERE requester_id = ? AND group_id = ?")
-                        .run(userEmail, code, Date.now(), record.requester_id, record.group_id);
-
-                    if (config.outlookEmail && config.outlookPassword) {
-                        const transporter = nodemailer.createTransport({
-                            host: 'smtp-mail.outlook.com',
-                            port: 587,
-                            secure: false,
-                            auth: {
-                                user: config.outlookEmail,
-                                pass: config.outlookPassword
-                            },
-                            tls: {
-                                minVersion: 'TLSv1.2'
-                            }
-                        });
-
-                        try {
-                            await transporter.sendMail({
-                                from: config.outlookEmail,
-                                to: userEmail,
-                                subject: isAr ? 'رمز التحقق لمجموعة الجامعة' : 'College Group Verification Code',
-                                text: isAr ? `رمز التحقق الخاص بك هو: ${code}` : `Your verification code is: ${code}`
-                            });
-                            logEmail(db, record.requester_id, record.group_id, userEmail, 'sent');
-                            await msg.reply(isAr
-                                ? 'تم إرسال رمز التحقق إلى بريدك. إن لم تجده، افحص البريد غير الهام. وللرجوع للقائمة أرسل 1.'
-                                : 'A verification code has been sent to your email. If you cannot find it, please check junk mail. Send 1 to return to the menu.');
-                        } catch (e) {
-                            const isAuthError = e && (e.code === 'EAUTH' || e.responseCode === 535);
-                            const errorCode = e && e.code ? String(e.code) : (e && e.responseCode ? String(e.responseCode) : 'UNKNOWN_ERROR');
-                            const errorMessage = e && e.message ? String(e.message) : String(e);
-                            logEmail(db, record.requester_id, record.group_id, userEmail, 'failed', errorCode, errorMessage);
-                            await msg.reply(isAr
-                                ? (isAuthError
-                                    ? 'تعذر إرسال البريد بسبب إعدادات SMTP. سنعيدك للقائمة السابقة.'
-                                    : 'حدث خطأ أثناء إرسال البريد. سنعيدك إلى القائمة السابقة.')
-                                : (isAuthError
-                                    ? 'Could not send email due to SMTP settings. Returning you to the previous list.'
-                                    : 'An error occurred while sending the email. Returning you to the previous list.'));
-                            db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '', email = '', code = '' WHERE requester_id = ? AND group_id = ?")
-                                .run(record.requester_id, record.group_id);
-                            const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                            if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
-                        }
-                    } else {
-                        logEmail(db, record.requester_id, record.group_id, userEmail, 'failed', 'NO_SMTP_CONFIG', 'Email settings not configured');
-                        await msg.reply(isAr
-                            ? 'إعدادات البريد غير مكتملة لدى الإدارة. سنعيدك إلى القائمة السابقة.'
-                            : 'Email settings are not configured by the admin. Returning you to the previous menu.');
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '', email = '', code = '' WHERE requester_id = ? AND group_id = ?")
-                            .run(record.requester_id, record.group_id);
-                        const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
-                    }
-                } else if (record.state === 'PENDING_PHOTO_UPLOAD') {
-                    wasHandled = true;
-                    if (isTextMessage && rawText === '1') {
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '', wait_started_at = 0 WHERE requester_id = ? AND group_id = ?").run(record.requester_id, record.group_id);
-                        const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
-                        return true;
-                    }
-                    if (!msg.hasMedia) {
-                        await msg.reply(isAr ? 'يرجى إرسال صورة واضحة من البلاك بورد، أو أرسل 1 للرجوع إلى القائمة.' : 'Please send a clear Blackboard screenshot, or send 1 to return to the menu.');
-                        return true;
-                    }
-                    const media = await msg.downloadMedia();
-                    if (!media) {
-                        await msg.reply(isAr ? 'تعذر قراءة الصورة. يرجى إعادة الإرسال.' : 'Could not read the image. Please resend it.');
-                        return true;
-                    }
-
-                    const adminGroup = resolveAdminGroupForVerification(config, record.group_id);
-                    if (!adminGroup) {
-                        await msg.reply(isAr ? 'مجموعة الإدارة غير مهيأة حالياً. أرسل 1 للرجوع إلى القائمة.' : 'The admin group is not configured right now. Send 1 to return to the menu.');
-                        return true;
-                    }
-
-                    const groupName = await resolveGroupName(client, record.group_id);
-                    const caption = isAr
-                        ? `المستخدم @${toRequesterKey(record.requester_id)} طلب الانضمام إلى "${groupName}" وأرسل صورة من البلاك بورد.`
-                        : `User @${toRequesterKey(record.requester_id)} requested to join "${groupName}" and sent a Blackboard screenshot.`;
-                    const mediaMsg = await client.sendMessage(adminGroup, media, { caption, mentions: [record.requester_id] });
-
-                    const decisionMsg = await client.sendMessage(adminGroup, isAr
-                        ? 'يرجى الرد على هذه الرسالة بكلمة: موافقة أو رفض أو حظر. ويمكنك أيضاً التصويت من الاستطلاع أدناه.'
-                        : 'Please reply to this message with: approve, reject, or ban. You can also vote using the poll below.', {
-                        quotedMessageId: mediaMsg.id._serialized
-                    }).catch(async () => {
-                        return client.sendMessage(adminGroup, isAr
-                            ? 'تعليمات القرار: اكتب موافقة أو رفض أو حظر مع الرد على رسالة الصورة.'
-                            : 'Decision instruction: reply with approve, reject, or ban to the screenshot message.');
-                    });
-
-                    const adminPoll = new Poll(
-                        isAr ? 'قرار الإدارة على الصورة:' : 'Admin decision for this screenshot:',
-                        isAr
-                            ? ['1 - موافقة', '2 - رفض', '3 - طلب صورة أخرى', '4 - حظر']
-                            : ['1 - Approve', '2 - Deny', '3 - Ask for another photo', '4 - Ban']
-                    );
-                    const pollMsg = await client.sendMessage(adminGroup, adminPoll, { mentions: [record.requester_id] });
-                    pendingAdminPhotoPolls.set(pollMsg.id._serialized, {
-                        requesterId: record.requester_id,
-                        groupId: record.group_id
-                    });
-
-                    db.prepare(`
-                        UPDATE secondary_verification
-                        SET state = 'WAITING_ADMIN_PHOTO_REVIEW', admin_group_id = ?, admin_decision_msg_id = ?, admin_poll_msg_id = ?, admin_last_reminder_at = 0
-                        WHERE requester_id = ? AND group_id = ?
-                    `).run(adminGroup, decisionMsg && decisionMsg.id ? decisionMsg.id._serialized : '', pollMsg.id._serialized, record.requester_id, record.group_id);
-                    await msg.reply(isAr ? 'تم إرسال الصورة للإدارة للمراجعة.' : 'Your screenshot was sent to admins for review.');
-                    return true;
-                } else if (record.state === 'WAITING_ADMIN_PHOTO_REVIEW') {
-                    wasHandled = true;
-                    if (isTextMessage && rawText === '1') {
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '', wait_started_at = 0 WHERE requester_id = ? AND group_id = ?")
-                            .run(record.requester_id, record.group_id);
-                        const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
-                        return true;
-                    }
-                    await msg.reply(isAr
-                        ? 'طلبك قيد المراجعة لدى الإدارة حالياً. للعودة إلى القائمة أرسل 1.'
-                        : 'Your request is currently under admin review. Send 1 to return to the menu.');
-                    return true;
-                } else if (record.state === 'PENDING_CODE') {
-                    if (!isTextMessage) return false;
-
-                    wasHandled = true;
-                    if (rawText === '1') {
-                        db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', user_method_poll_id = '', email = '', code = '' WHERE requester_id = ? AND group_id = ?")
-                            .run(record.requester_id, record.group_id);
-                        const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
-                        if (refreshed) await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
-                        return true;
-                    }
-                    if (rawText === record.code) {
-                        const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
-                        const cleanId = toRequesterKey(record.requester_id);
-                        if (chatObj) {
-                            await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] });
-                        }
-                        
-                        // Add to verified dataset (approved_numbers)
-                        addApprovedNumber(db, record.requester_id);
-                        
-                        db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
-                        await msg.reply(isAr ? 'تم التحقق بنجاح. تمت الموافقة على طلبك وإضافتك إلى قائمة المتحقق منهم.' : 'Verification successful. Your request has been approved and you were added to the verified list.');
-                        debugLog('code accepted; session completed', { requesterId: record.requester_id });
-                        return true;
-                    } else {
-                        debugLog('code rejected', { requesterId: record.requester_id, provided: rawText });
-                        await msg.reply(isAr ? 'رمز التحقق غير صحيح. حاول مرة أخرى أو أرسل 1 للرجوع إلى القائمة.' : 'That verification code is incorrect. Please try again, or send 1 to return to the menu.');
-                    }
-                }
-            } catch (e) {
-                console.error('[Verification] Error handling msg:', e);
-                debugLog('handler exception', { requesterId: record && record.requester_id ? record.requester_id : senderId, error: e && e.message ? e.message : String(e) });
-            }
-
-            return wasHandled;
+            } catch(e) {}
         }
     };
 }
