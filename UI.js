@@ -3470,6 +3470,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 const phoneNumber = String(item.phoneNumber || '').replace(/\D/g, '');
                 const groupName = item.groupName || item.groupId || '-';
                 const state = item.state || '-';
+                const lifecycleStatus = String(item.lifecycleStatus || 'active');
+                const reopenCode = String(item.reopenCode || 'reopen');
                 const ageText = item.createdAt ? new Date(item.createdAt).toLocaleString() : '-';
                 const replyStatus = String(item.replyStatus || 'not_sent');
                 const replyCount = Number(item.replyCount || 0);
@@ -3479,6 +3481,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     : replyStatus === 'pending'
                         ? (currentLang === 'en' ? 'Waiting reply' : 'بانتظار الرد')
                         : (currentLang === 'en' ? 'No bait sent' : 'لم تُرسل البايْت بعد');
+                const stateBadge = lifecycleStatus === 'partially_approved'
+                    ? (currentLang === 'en' ? 'Partially approved' : 'متحقق جزئياً')
+                    : state;
                 const replyMeta = repliedAt ? new Date(repliedAt).toLocaleString() : '';
                 const requesterData = encodeURIComponent(String(item.requesterId || ''));
                 const groupData = encodeURIComponent(String(item.groupId || ''));
@@ -3486,7 +3491,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     + '<div style="min-width:0;">'
                     + '<div style="color:var(--text);font-weight:600;">' + (currentLang === 'en' ? 'Phone: ' : 'الرقم: ') + (phoneNumber || (currentLang === 'en' ? 'Not available' : 'غير متوفر')) + '</div>'
                     + '<div style="font-size:10px;color:var(--text-muted);">' + (currentLang === 'en' ? 'WhatsApp ID: ' : 'معرّف واتساب: ') + requesterId + '</div>'
-                    + '<div style="font-size:11px;color:var(--text-muted);">' + groupName + ' • ' + state + '</div>'
+                    + '<div style="font-size:11px;color:var(--text-muted);">' + groupName + ' • ' + stateBadge + (lifecycleStatus === 'partially_approved' ? ' • ' + (currentLang === 'en' ? 'Send ' : 'أرسل ') + reopenCode + (currentLang === 'en' ? ' to reopen' : ' لإعادة الفتح') : '') + '</div>'
                     + '<div style="font-size:11px;color:var(--text-muted);">' + (currentLang === 'en' ? 'Reply log: ' : 'سجل الرد: ') + replyBadge + (replyCount > 0 ? ' • ' + (currentLang === 'en' ? 'Replies: ' : 'عدد الردود: ') + replyCount : '') + (replyMeta ? ' • ' + replyMeta : '') + '</div>'
                     + '<div style="font-size:10px;color:var(--text-muted);">' + ageText + '</div>'
                     + '</div>'

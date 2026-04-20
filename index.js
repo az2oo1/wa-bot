@@ -240,6 +240,7 @@ db.exec(`
         email TEXT,
         code TEXT,
         created_at INTEGER,
+        wait_started_at INTEGER,
         admin_group_id TEXT,
         admin_decision_msg_id TEXT,
         admin_poll_msg_id TEXT,
@@ -294,6 +295,7 @@ try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_group_id TEXT
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_decision_msg_id TEXT'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_poll_msg_id TEXT'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification ADD COLUMN admin_last_reminder_at INTEGER'); } catch (e) { }
+try { db.exec('ALTER TABLE secondary_verification ADD COLUMN wait_started_at INTEGER'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN requester_id TEXT'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN group_id TEXT'); } catch (e) { }
 try { db.exec('ALTER TABLE secondary_verification_reply_log ADD COLUMN bait_sent_at INTEGER'); } catch (e) { }
@@ -1623,6 +1625,9 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
         `).all();
         const timeoutDays = Math.max(1, parseInt(config.secondaryVerificationTimeoutDays, 10) || 2);
         const timeoutMs = timeoutDays * 24 * 60 * 60 * 1000;
+        const partialTimeoutMinutes = Math.max(1, parseInt(config.secondaryVerificationPartialTimeoutMinutes, 10) || 30);
+        const partialTimeoutMs = partialTimeoutMinutes * 60 * 1000;
+        const reopenCode = String(config.secondaryVerificationReopenCode || process.env.WA_VERIFICATION_REOPEN_CODE || 'reopen').trim() || 'reopen';
         const now = Date.now();
 
         const normalizeRequesterId = (value) => String(value || '').replace(/:[0-9]+/, '').trim();
@@ -1656,6 +1661,8 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
         const mapped = await Promise.all(rows.map(async (row) => {
             const createdAt = Number(row.created_at || 0);
             const expiresAt = createdAt > 0 ? createdAt + timeoutMs : 0;
+            const waitStartedAt = Number(row.wait_started_at || 0);
+            const partialExpiresAt = waitStartedAt > 0 ? waitStartedAt + partialTimeoutMs : 0;
             const phoneNumber = await resolvePhoneNumber(row.requester_id);
             const replyRow = db.prepare(`
                 SELECT bait_sent_at, replied_at, replied_text, reply_count, last_state
@@ -1682,14 +1689,19 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
                 requireEmail: row.require_email === 1,
                 requirePhoto: row.require_photo === 1,
                 createdAt,
+                waitStartedAt,
                 expiresAt,
+                partialExpiresAt,
                 isExpired: expiresAt > 0 ? now > expiresAt : false,
+                isPartialExpired: partialExpiresAt > 0 ? now > partialExpiresAt : false,
                 baitSentAt,
                 repliedAt,
                 replyCount,
                 replyStatus,
                 repliedText: replyRow && replyRow.replied_text ? replyRow.replied_text : '',
-                replyLogState: replyRow && replyRow.last_state ? replyRow.last_state : ''
+                replyLogState: replyRow && replyRow.last_state ? replyRow.last_state : '',
+                lifecycleStatus: row.state === 'EXPIRED_WAITING_REENTRY' ? 'partially_approved' : 'active',
+                reopenCode
             };
         }));
         return res.json({ timeoutDays, pending: mapped });
@@ -4204,16 +4216,29 @@ async function rejectExpiredSecondaryVerificationSessions() {
     try {
         const timeoutDays = Math.max(1, parseInt(config.secondaryVerificationTimeoutDays, 10) || 2);
         const timeoutMs = timeoutDays * 24 * 60 * 60 * 1000;
+        const partialTimeoutMinutes = Math.max(1, parseInt(config.secondaryVerificationPartialTimeoutMinutes, 10) || 30);
+        const partialTimeoutMs = partialTimeoutMinutes * 60 * 1000;
+        const reopenCode = String(config.secondaryVerificationReopenCode || process.env.WA_VERIFICATION_REOPEN_CODE || 'reopen').trim().toLowerCase() || 'reopen';
         const cutoff = Date.now() - timeoutMs;
         const expiredRows = db.prepare(`
-            SELECT requester_id, group_id, created_at, state
+            SELECT requester_id, group_id, created_at, state, wait_started_at
             FROM secondary_verification
             WHERE (created_at IS NULL OR created_at <= ?)
-              AND state NOT IN ('WAITING_ADMIN_PHOTO_REVIEW', 'WAITING_ADMIN_CONTACT_DECISION', 'EXPIRED_WAITING_REENTRY')
+              AND state NOT IN ('WAITING_ADMIN_PHOTO_REVIEW', 'WAITING_ADMIN_CONTACT_DECISION', 'EXPIRED_WAITING_REENTRY', 'PENDING_EMAIL_INPUT', 'PENDING_PHOTO_UPLOAD', 'PENDING_CODE')
         `).all(cutoff);
-        if (!expiredRows || expiredRows.length === 0) return;
+        const partialCutoff = Date.now() - partialTimeoutMs;
+        const partialRows = db.prepare(`
+            SELECT requester_id, group_id, state, wait_started_at
+            FROM secondary_verification
+                        WHERE state IN ('PENDING_METHOD', 'PENDING_EMAIL_INPUT', 'PENDING_PHOTO_UPLOAD', 'PENDING_CODE')
+              AND wait_started_at IS NOT NULL
+              AND wait_started_at > 0
+              AND wait_started_at <= ?
+        `).all(partialCutoff);
+        if ((!expiredRows || expiredRows.length === 0) && (!partialRows || partialRows.length === 0)) return;
 
         let rejected = 0;
+        let paused = 0;
         for (const row of expiredRows) {
             const chatObj = await client.getChatById(row.group_id).catch(() => null);
             if (chatObj) {
@@ -4237,8 +4262,36 @@ async function rejectExpiredSecondaryVerificationSessions() {
             `).run(row.requester_id, row.group_id);
             rejected += 1;
         }
+
+        const partialMessage = String(config.secondaryVerificationPartialStoppedMessage || '').trim();
+        for (const row of partialRows) {
+            const chatObj = await client.getChatById(row.group_id).catch(() => null);
+            if (chatObj) {
+                try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [row.requester_id] }); } catch (e) { }
+            }
+
+            const isAr = config.secondaryVerificationLanguage === 'ar';
+            const defaultMessage = isAr
+                ? `تم إيقاف التحقق بسبب عدم الرد. أُدرج طلبك الآن في قائمة التحقق الجزئي. لإعادة فتح العملية، أرسل: ${reopenCode}`
+                : `Verification has been stopped because there was no response. Your request is now in the partial verification queue. To reopen the process, send: ${reopenCode}`;
+            const message = partialMessage
+                ? `${partialMessage} ${isAr ? 'لإعادة فتح العملية، أرسل: ' : 'To reopen the process, send: '}${reopenCode}`
+                : defaultMessage;
+
+            await client.sendMessage(row.requester_id, message).catch(() => { });
+
+            db.prepare(`
+                UPDATE secondary_verification
+                SET state = 'EXPIRED_WAITING_REENTRY', wait_started_at = ?
+                WHERE requester_id = ? AND group_id = ?
+            `).run(Date.now(), row.requester_id, row.group_id);
+            paused += 1;
+        }
         if (rejected > 0) {
             console.log(`[Verification] Auto-rejected ${rejected} expired approval session(s).`);
+        }
+        if (paused > 0) {
+            console.log(`[Verification] Moved ${paused} inactive session(s) to the partial verification queue.`);
         }
     } catch (e) {
         console.error('[Verification] Failed to auto-reject expired sessions:', e.message || e);
@@ -4251,7 +4304,7 @@ setInterval(() => {
 
 setInterval(() => {
     rejectExpiredSecondaryVerificationSessions().catch(() => { });
-}, 30 * 60 * 1000);
+}, 5 * 60 * 1000);
 
 setInterval(() => {
     const verification = initVerification(client, db, config);
