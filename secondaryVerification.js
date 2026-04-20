@@ -749,13 +749,34 @@ function initVerification(client, db, config, chat) {
             // Only one active verification session per requester across all groups.
             // WhatsApp may alternate identifiers between @lid and @c.us for the same user.
             const normalizedIncomingId = normalizeVerificationId(requesterId);
-            const existingRecord = db.prepare('SELECT requester_id, group_id, created_at, state FROM secondary_verification').all()
-                .find(row => normalizeVerificationId(row.requester_id) === normalizedIncomingId);
+            const existingCandidates = db.prepare('SELECT requester_id, group_id, created_at, state, flow_type FROM secondary_verification').all()
+                .filter(row => normalizeVerificationId(row.requester_id) === normalizedIncomingId)
+                .sort((a, b) => {
+                    const aFlow = String(a && a.flow_type || 'join');
+                    const bFlow = String(b && b.flow_type || 'join');
+                    const aScore = (aFlow === 'test' ? 0 : 100) + Number(a && a.created_at || 0);
+                    const bScore = (bFlow === 'test' ? 0 : 100) + Number(b && b.created_at || 0);
+                    return bScore - aScore;
+                });
+            const existingRecord = existingCandidates.length > 0 ? existingCandidates[0] : null;
             if (existingRecord) {
                 const ttlMs = getSessionTimeoutMs(config);
                 const isSameGroup = String(existingRecord.group_id || '') === String(groupId || '');
                 const isExpired = !existingRecord.created_at || Date.now() - existingRecord.created_at > ttlMs;
                 const isStillInBait = String(existingRecord.state || '') === 'PENDING_CUSTOM';
+                const existingFlowType = String(existingRecord.flow_type || 'join');
+
+                // Never let ad-hoc test sessions replace active real join sessions.
+                if (flowType === 'test' && existingFlowType !== 'test' && !isExpired) {
+                    debugLog('test start blocked: active join session exists', {
+                        requesterId: rawRequesterId,
+                        groupId,
+                        existingGroupId: existingRecord.group_id,
+                        existingState: existingRecord.state,
+                        existingFlowType
+                    });
+                    return false;
+                }
 
                 if (!isSameGroup && isStillInBait && !forceRestart) {
                     const isAr = config.secondaryVerificationLanguage === 'ar';
@@ -882,19 +903,49 @@ function initVerification(client, db, config, chat) {
             const normalizedSenderId = normalizeVerificationId(senderId);
             const senderCandidates = new Set(getVerificationIdCandidates(senderId));
             let record = null;
-            for (const row of db.prepare('SELECT * FROM secondary_verification').all()) {
+            const sessionRows = db.prepare('SELECT * FROM secondary_verification').all();
+            const senderPhoneKey = toPhoneNumberKey(senderId);
+            const scoreMatch = (row) => {
                 const rowId = row && row.requester_id ? row.requester_id : '';
                 const normalizedRowId = normalizeVerificationId(rowId);
-                if (senderCandidates.has(rowId) || senderCandidates.has(normalizedRowId) || normalizedRowId === normalizedSenderId) {
-                    record = row;
-                    break;
-                }
-            }
-            if (!record) {
-                const senderPhoneKey = toPhoneNumberKey(senderId);
-                if (senderPhoneKey) {
-                    record = db.prepare('SELECT * FROM secondary_verification').all()
-                        .find(row => toPhoneNumberKey(row && row.requester_id ? row.requester_id : '') === senderPhoneKey) || null;
+                let score = 0;
+                if (normalizedRowId === normalizedSenderId) score += 100;
+                if (senderCandidates.has(rowId)) score += 80;
+                if (senderCandidates.has(normalizedRowId)) score += 60;
+                if (senderPhoneKey && toPhoneNumberKey(rowId) === senderPhoneKey) score += 40;
+
+                const flowType = String(row && row.flow_type || 'join');
+                if (flowType === 'test') score -= 25;
+                else score += 10;
+
+                // Prefer active user-facing states when duplicates exist.
+                const state = String(row && row.state || '');
+                if (state === 'PENDING_CUSTOM') score += 30;
+                else if (state === 'PENDING_METHOD') score += 20;
+                else if (state === 'EXPIRED_WAITING_REENTRY') score += 5;
+
+                // Prefer latest session if still tied.
+                score += Math.floor(Number(row && row.created_at || 0) / 1000000);
+                return score;
+            };
+
+            const matchingRows = sessionRows
+                .map(row => ({ row, score: scoreMatch(row) }))
+                .filter(item => item.score >= 40)
+                .sort((a, b) => b.score - a.score);
+
+            if (matchingRows.length > 0) {
+                record = matchingRows[0].row;
+                if (matchingRows.length > 1) {
+                    debugLog('multiple sessions matched sender; selected best score', {
+                        senderId,
+                        matches: matchingRows.slice(0, 5).map(item => ({
+                            requesterId: item.row && item.row.requester_id,
+                            groupId: item.row && item.row.group_id,
+                            state: item.row && item.row.state,
+                            score: item.score
+                        }))
+                    });
                 }
             }
             if (!record) {

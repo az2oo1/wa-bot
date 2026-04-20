@@ -1576,6 +1576,35 @@ app.post('/api/secondary-verification/test', requireAuthApi, requirePermission('
         const cleanUserId = cleanedDigits;
         const requestedGroupId = String((req.body && req.body.groupId) || '').trim();
 
+        const normalizeVerificationId = (value) => {
+            let normalized = String(value || '').trim();
+            normalized = normalized.replace(/:[0-9]+(?=@)/g, '');
+            if (normalized.includes('@lid')) normalized = normalized.replace('@lid', '@c.us');
+            if (normalized.includes('@s.whatsapp.net')) normalized = normalized.replace('@s.whatsapp.net', '@c.us');
+            if (/^\d+$/.test(normalized)) normalized = `${normalized}@c.us`;
+            return normalized;
+        };
+        const normalizedRequesterId = normalizeVerificationId(requesterId);
+        const activeJoinSession = db.prepare(`
+            SELECT requester_id, group_id, state, flow_type, created_at
+            FROM secondary_verification
+        `).all().find(row => {
+            const sameRequester = normalizeVerificationId(row.requester_id) === normalizedRequesterId;
+            const flowType = String(row.flow_type || 'join');
+            return sameRequester && flowType !== 'test';
+        });
+        if (activeJoinSession) {
+            return res.status(409).json({
+                error: 'يوجد طلب تحقق حقيقي نشط لهذا الرقم. لن يتم تشغيل الاختبار حتى لا يتداخل معه. / An active real verification session exists for this number. Test run is blocked to avoid interference.',
+                activeSession: {
+                    requesterId: activeJoinSession.requester_id,
+                    groupId: activeJoinSession.group_id,
+                    state: activeJoinSession.state,
+                    flowType: activeJoinSession.flow_type || 'join'
+                }
+            });
+        }
+
         const selectedGroups = Array.isArray(config.secondaryVerificationGroups)
             ? config.secondaryVerificationGroups.filter(Boolean)
             : [];
@@ -1621,6 +1650,7 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
             SELECT sv.*, wg.name AS group_name
             FROM secondary_verification sv
             LEFT JOIN whatsapp_groups wg ON wg.id = sv.group_id
+            WHERE COALESCE(sv.flow_type, 'join') != 'test'
             ORDER BY sv.created_at DESC
         `).all();
         const timeoutDays = Math.max(1, parseInt(config.secondaryVerificationTimeoutDays, 10) || 2);
@@ -1630,8 +1660,15 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
         const reopenCode = String(config.secondaryVerificationReopenCode || process.env.WA_VERIFICATION_REOPEN_CODE || 'reopen').trim() || 'reopen';
         const now = Date.now();
 
-        const normalizeRequesterId = (value) => String(value || '').replace(/:[0-9]+/, '').trim();
-        const toReplyLogKey = (value) => normalizeRequesterId(value).replace('@lid', '@c.us').replace('@c.us', '').trim();
+        const normalizeRequesterId = (value) => {
+            let normalized = String(value || '').trim();
+            normalized = normalized.replace(/:[0-9]+(?=@)/g, '');
+            if (normalized.includes('@lid')) normalized = normalized.replace('@lid', '@c.us');
+            if (normalized.includes('@s.whatsapp.net')) normalized = normalized.replace('@s.whatsapp.net', '@c.us');
+            if (/^\d+$/.test(normalized)) normalized = `${normalized}@c.us`;
+            return normalized;
+        };
+        const toReplyLogKey = (value) => normalizeRequesterId(value).replace('@c.us', '').trim();
         const toDigits = (value) => String(value || '').replace(/\D/g, '');
         const resolvePhoneNumber = async (rawRequesterId) => {
             const normalized = normalizeRequesterId(rawRequesterId);
