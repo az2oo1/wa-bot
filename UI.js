@@ -1329,6 +1329,18 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         <button type="button" class="btn btn-danger btn-sm" onclick="stopVerificationProcessByCode()"><i class="fas fa-ban"></i> ${t('إيقاف العملية', 'Stop Process')}</button>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:8px;line-height:1.6;">${t('من لوحة التحكم: يكفي إدخال رقم المستخدم لإيقاف الجلسة ورفض الطلب فوراً.', 'From dashboard: only the user number is needed to stop the session and reject the request immediately.')}</div>
                     </div>
+
+                    <div class="card info" style="border-color:rgba(64,196,255,0.35);">
+                        <div class="card-header">
+                            <h3><i class="fas fa-envelope"></i> ${t('سجل البريد الإلكتروني', 'Email Delivery Log')}</h3>
+                            <span style="font-size: 13px; color: var(--text-muted); background:var(--input-bg); padding:4px 10px; border-radius:20px;">${t('نتيجة إرسال رمز التحقق', 'Verification email send results')}</span>
+                        </div>
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap;">
+                            <button type="button" class="btn btn-sm" onclick="refreshEmailLogs()"><i class="fas fa-sync"></i> ${t('تحديث', 'Refresh')}</button>
+                            <span id="emailLogMeta" style="font-size:11px;color:var(--text-muted);"></span>
+                        </div>
+                        <div id="emailLogList" style="max-height:320px;overflow:auto;border:1px solid var(--card-border);border-radius:8px;padding:10px;background:rgba(0,0,0,0.08);font-size:12px;color:var(--text-muted);"></div>
+                    </div>
                 </div>
             </div>
 
@@ -2255,6 +2267,10 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 }
                 if (pageId === 'page-users') {
                     umLoadData();
+                }
+                if (pageId === 'page-archive') {
+                    if (typeof refreshPendingSecondaryApprovals === 'function') refreshPendingSecondaryApprovals();
+                    if (typeof refreshEmailLogs === 'function') refreshEmailLogs();
                 }
             }
             function toggleSidebar() {
@@ -3475,6 +3491,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 if(typeof renderApprovalWords === 'function') renderApprovalWords();
                 if(typeof renderBanWords === 'function') renderBanWords();
                 if(typeof refreshPendingSecondaryApprovals === 'function') refreshPendingSecondaryApprovals();
+                if(typeof refreshEmailLogs === 'function') refreshEmailLogs();
             });
 
             function formatPendingVerificationItem(item) {
@@ -3576,6 +3593,73 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     if (partialListEl) {
                         partialListEl.innerHTML = '<div style="color:#ffb3b3;">' + (e.message || 'Error') + '</div>';
                     }
+                }
+            }
+
+            function formatEmailLogItem(item) {
+                const requesterId = String(item.requesterId || '').replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                const phoneNumber = requesterId.replace('@c.us', '').replace(/\D/g, '') || (currentLang === 'en' ? 'Not available' : 'غير متوفر');
+                const email = String(item.email || '');
+                const status = String(item.status || '').toLowerCase();
+                const statusText = status === 'sent'
+                    ? (currentLang === 'en' ? 'Sent' : 'تم الإرسال')
+                    : status === 'failed'
+                        ? (currentLang === 'en' ? 'Failed' : 'فشل')
+                        : (currentLang === 'en' ? 'Pending' : 'معلق');
+                const statusColor = status === 'sent' ? '#6ee7a2' : status === 'failed' ? '#ff8f8f' : 'var(--text-muted)';
+                const createdAt = Number(item.createdAt || 0);
+                const sentAt = Number(item.sentAt || 0);
+                const timeText = (sentAt > 0 ? sentAt : createdAt) > 0
+                    ? new Date(sentAt > 0 ? sentAt : createdAt).toLocaleString()
+                    : '-';
+                const errorCode = String(item.errorCode || '').trim();
+                const errorMessage = String(item.errorMessage || '').trim();
+                const errorLine = errorCode || errorMessage
+                    ? '<div style="font-size:10px;color:#ffb3b3;word-break:break-word;">'
+                        + (currentLang === 'en' ? 'Error: ' : 'الخطأ: ')
+                        + [errorCode, errorMessage].filter(Boolean).join(' • ')
+                      + '</div>'
+                    : '';
+
+                return '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;border-bottom:1px dashed var(--card-border);padding:8px 0;">'
+                    + '<div style="min-width:0;">'
+                    + '<div style="color:var(--text);font-weight:600;">' + (currentLang === 'en' ? 'Email: ' : 'البريد: ') + (email || '-') + '</div>'
+                    + '<div style="font-size:10px;color:var(--text-muted);">' + (currentLang === 'en' ? 'Phone: ' : 'الرقم: ') + phoneNumber + ' • ' + requesterId + '</div>'
+                    + '<div style="font-size:11px;color:' + statusColor + ';">' + (currentLang === 'en' ? 'Status: ' : 'الحالة: ') + statusText + '</div>'
+                    + errorLine
+                    + '<div style="font-size:10px;color:var(--text-muted);">' + timeText + '</div>'
+                    + '</div>'
+                    + '</div>';
+            }
+
+            async function refreshEmailLogs() {
+                const listEl = document.getElementById('emailLogList');
+                const metaEl = document.getElementById('emailLogMeta');
+                if (!listEl) return;
+                try {
+                    listEl.innerHTML = (currentLang === 'en' ? 'Loading...' : 'جاري التحميل...');
+                    const res = await fetch('/api/email-log?limit=100');
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        if (res.status === 403) {
+                            listEl.innerHTML = '<div style="color:var(--text-muted);">' + (currentLang === 'en' ? 'You do not have permission to view email logs.' : 'ليس لديك صلاحية لعرض سجل البريد.') + '</div>';
+                        } else {
+                            listEl.innerHTML = '<div style="color:#ffb3b3;">' + (data.error || 'Failed') + '</div>';
+                        }
+                        return;
+                    }
+                    const logs = Array.isArray(data.logs) ? data.logs : [];
+                    if (metaEl) {
+                        const total = Number(data.total || logs.length || 0);
+                        metaEl.textContent = (currentLang === 'en' ? 'Total: ' : 'الإجمالي: ') + total;
+                    }
+                    if (logs.length === 0) {
+                        listEl.innerHTML = '<div>' + (currentLang === 'en' ? 'No email logs yet.' : 'لا توجد سجلات بريد حتى الآن.') + '</div>';
+                        return;
+                    }
+                    listEl.innerHTML = logs.map(formatEmailLogItem).join('');
+                } catch (e) {
+                    listEl.innerHTML = '<div style="color:#ffb3b3;">' + (e.message || 'Error') + '</div>';
                 }
             }
 

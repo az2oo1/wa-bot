@@ -891,7 +891,14 @@ function initVerification(client, db, config, chat) {
 
         // Triggered on every incoming message
         handleIncomingMessage: async (msg) => {
-            if (!config.enableSecondaryVerification || msg.isGroupMsg) return false;
+            if (!config.enableSecondaryVerification) return false;
+
+            // whatsapp-web.js can occasionally miss msg.isGroupMsg in some payload shapes.
+            // Guard group contexts defensively to prevent DM-only verification replies from leaking to groups.
+            const fromId = String(msg && msg.from ? msg.from : '');
+            const inferredGroupByFrom = fromId.endsWith('@g.us');
+            const inferredGroupByData = Boolean(msg && msg._data && msg._data.isGroupMsg);
+            if (msg.isGroupMsg || inferredGroupByFrom || inferredGroupByData) return false;
 
             const ignoredMessageTypes = new Set(['revoked', 'ciphertext', 'e2e_notification', 'notification_template', 'gp2', 'protocol']);
             if (ignoredMessageTypes.has(msg.type)) return false;
@@ -1094,7 +1101,7 @@ function initVerification(client, db, config, chat) {
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                             upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'test_ban');
                             await archiveRequesterChat(client, requesterActionId);
-                            await msg.reply(isAr ? 'تم التقاط كلمة الرفض في وضع الاختبار. لن يتم تنفيذ الحظر أثناء الاختبار.' : 'Ban keyword detected in test mode. No blacklist action is applied during tests.');
+                            await msg.reply(isAr ? 'تم إلغاء الطلب.' : 'The request was cancelled.');
                             debugLog('test flow ban handled and session deleted', { requesterId: record.requester_id });
                             return true;
                         }
@@ -1149,10 +1156,9 @@ function initVerification(client, db, config, chat) {
                         }
                     } else {
                         if (record.flow_type === 'test') {
-                            const expectedWords = approvalKeywords.filter(Boolean).join(', ');
                             await msg.reply(isAr
-                                ? `الاختبار يعمل، لكن رسالتك لم تطابق كلمات الموافقة الحالية. الكلمات المعتمدة الآن: ${expectedWords || 'yes'}.`
-                                : `The test is working, but your reply did not match the current approval keywords. Current accepted words: ${expectedWords || 'yes'}.`);
+                                ? 'لم يتم التعرف على الرد. حاول مرة أخرى بالكلمة الصحيحة.'
+                                : 'Reply not recognized. Please try again with the correct keyword.');
                             return true;
                         }
                         // If the bait answer is wrong, reject and blacklist for join flow.
@@ -1175,7 +1181,7 @@ function initVerification(client, db, config, chat) {
                         if (banKeywordMatch) {
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
                             await archiveRequesterChat(client, requesterActionId);
-                            await msg.reply(isAr ? 'تم التقاط كلمة الرفض في وضع الاختبار. لم يتم تنفيذ أي إجراء حظر.' : 'Ban keyword detected in test mode. No blacklist action was applied.');
+                            await msg.reply(isAr ? 'تم إلغاء الطلب.' : 'The request was cancelled.');
                             return true;
                         }
 
@@ -1199,8 +1205,8 @@ function initVerification(client, db, config, chat) {
                         const refreshed = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(record.requester_id, record.group_id);
                         if (refreshed) {
                             await msg.reply(isAr
-                                ? 'تم التقاط كلمة الموافقة في الاختبار. لديك وسائل تحقق إضافية مفعلة، لذا اختر طريقة المتابعة من القائمة.'
-                                : 'Approval keyword detected in test mode. Additional verification methods are enabled, so please choose your next step from the menu.');
+                                ? 'لديك وسائل تحقق إضافية مفعلة، اختر طريقة المتابعة من القائمة.'
+                                : 'Additional verification methods are enabled. Please choose your next step from the menu.');
                             db.prepare("UPDATE secondary_verification SET user_method_poll_id = '' WHERE requester_id = ? AND group_id = ?")
                                 .run(record.requester_id, record.group_id);
                             await sendMethodSelectionPoll(client, db, config, refreshed, isAr);
@@ -1240,10 +1246,9 @@ function initVerification(client, db, config, chat) {
                         }
                     } else {
                         if (isTestFlow && isTextMessage) {
-                            const expectedWords = approvalKeywords.filter(Boolean).join(', ');
                             await msg.reply(isAr
-                                ? `الاختبار يعمل، لكن هذه الرسالة ليست من كلمات الموافقة الحالية. الكلمات المعتمدة: ${expectedWords || 'yes'}. لإعادة القائمة أرسل 1.`
-                                : `Test mode is active, but this message did not match approval keywords. Current accepted words: ${expectedWords || 'yes'}. Send 1 to resend the menu.`);
+                                ? 'لم يتم التعرف على الرسالة. لإعادة إرسال القائمة أرسل 1.'
+                                : 'Message not recognized. Send 1 to resend the menu.');
                             return true;
                         }
                         await msg.reply(isAr
