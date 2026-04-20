@@ -1809,6 +1809,30 @@ app.post('/api/secondary-verification/pending/remove', requireAuthApi, requirePe
     }
 });
 
+app.post('/api/secondary-verification/pending/reject-all', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    try {
+        const rows = db.prepare('SELECT requester_id, group_id FROM secondary_verification').all();
+        if (!rows || rows.length === 0) {
+            return res.json({ success: true, removed: 0 });
+        }
+
+        let removed = 0;
+        for (const row of rows) {
+            const chatObj = await client.getChatById(row.group_id).catch(() => null);
+            if (chatObj) {
+                try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [row.requester_id] }); } catch (e) { }
+            }
+            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
+            removed += 1;
+        }
+
+        return res.json({ success: true, removed });
+    } catch (e) {
+        console.error('[Secondary Verification] Reject all pending error:', e);
+        return res.status(500).json({ error: 'Failed to reject all pending approvals.' });
+    }
+});
+
 app.post('/api/secondary-verification/stop', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
     try {
         const providedCode = String((req.body && req.body.code) || '').trim().toLowerCase();

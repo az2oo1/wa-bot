@@ -1292,14 +1292,28 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 <div class="card-grid">
                     <div class="card warning" style="border-color:rgba(255,193,7,0.35);">
                         <div class="card-header">
-                            <h3><i class="fas fa-user-clock"></i> ${t('طلبات التحقق المعلقة', 'Pending Verification Approvals')}</h3>
+                            <h3><i class="fas fa-user-clock"></i> ${t('طلبات التحقق النشطة', 'Active Pending Verification')}</h3>
                             <span style="font-size: 13px; color: var(--text-muted); background:var(--input-bg); padding:4px 10px; border-radius:20px;">${t('من هنا يتم المراجعة والحذف', 'Review and remove here')}</span>
                         </div>
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap;">
-                            <button type="button" class="btn btn-sm" onclick="refreshPendingSecondaryApprovals()"><i class="fas fa-sync"></i> ${t('تحديث', 'Refresh')}</button>
+                            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                                <button type="button" class="btn btn-sm" onclick="refreshPendingSecondaryApprovals()"><i class="fas fa-sync"></i> ${t('تحديث', 'Refresh')}</button>
+                                <button type="button" class="btn btn-danger btn-sm" onclick="rejectAllPendingSecondaryApprovals()"><i class="fas fa-user-slash"></i> ${t('رفض الكل', 'Reject All')}</button>
+                            </div>
                             <span id="pendingSecondaryMeta" style="font-size:11px;color:var(--text-muted);"></span>
                         </div>
                         <div id="pendingSecondaryList" style="max-height:320px;overflow:auto;border:1px solid var(--card-border);border-radius:8px;padding:10px;background:rgba(0,0,0,0.08);font-size:12px;color:var(--text-muted);"></div>
+                    </div>
+
+                    <div class="card info" style="border-color:rgba(64,196,255,0.35);">
+                        <div class="card-header">
+                            <h3><i class="fas fa-hourglass-half"></i> ${t('قائمة المتحقق جزئياً', 'Partially Approved List')}</h3>
+                            <span style="font-size: 13px; color: var(--text-muted); background:var(--input-bg); padding:4px 10px; border-radius:20px;">${t('تحتاج إرسال كلمة إعادة الفتح', 'Needs reopen keyword from user')}</span>
+                        </div>
+                        <div style="display:flex;justify-content:flex-end;align-items:center;margin-bottom:8px;gap:8px;flex-wrap:wrap;">
+                            <span id="partialSecondaryMeta" style="font-size:11px;color:var(--text-muted);"></span>
+                        </div>
+                        <div id="partialSecondaryList" style="max-height:320px;overflow:auto;border:1px solid var(--card-border);border-radius:8px;padding:10px;background:rgba(0,0,0,0.08);font-size:12px;color:var(--text-muted);"></div>
                     </div>
 
                     <div class="card danger" style="border-color:rgba(255,82,82,0.35);">
@@ -3515,29 +3529,53 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             async function refreshPendingSecondaryApprovals() {
                 const listEl = document.getElementById('pendingSecondaryList');
                 const metaEl = document.getElementById('pendingSecondaryMeta');
+                const partialListEl = document.getElementById('partialSecondaryList');
+                const partialMetaEl = document.getElementById('partialSecondaryMeta');
                 if (!listEl) return;
                 try {
                     listEl.innerHTML = (currentLang === 'en' ? 'Loading...' : 'جاري التحميل...');
+                    if (partialListEl) partialListEl.innerHTML = (currentLang === 'en' ? 'Loading...' : 'جاري التحميل...');
                     const res = await fetch('/api/secondary-verification/pending');
                     const data = await res.json().catch(() => ({}));
                     if (!res.ok) {
                         if (res.status === 403) {
                             listEl.innerHTML = '<div style="color:var(--text-muted);">' + (currentLang === 'en' ? 'You do not have permission to view pending approvals.' : 'ليس لديك صلاحية لعرض الطلبات المعلقة.') + '</div>';
+                            if (partialListEl) {
+                                partialListEl.innerHTML = '<div style="color:var(--text-muted);">' + (currentLang === 'en' ? 'You do not have permission to view this list.' : 'ليس لديك صلاحية لعرض هذه القائمة.') + '</div>';
+                            }
                         } else {
                             listEl.innerHTML = '<div style="color:#ffb3b3;">' + (data.error || 'Failed') + '</div>';
+                            if (partialListEl) {
+                                partialListEl.innerHTML = '<div style="color:#ffb3b3;">' + (data.error || 'Failed') + '</div>';
+                            }
                         }
                         return;
                     }
                     const items = Array.isArray(data.pending) ? data.pending : [];
+                    const partialItems = items.filter(item => String(item && item.lifecycleStatus || '') === 'partially_approved');
+                    const activeItems = items.filter(item => String(item && item.lifecycleStatus || '') !== 'partially_approved');
                     if (metaEl) metaEl.textContent = (currentLang === 'en' ? 'Timeout: ' : 'المهلة: ') + (data.timeoutDays || 2) + (currentLang === 'en' ? ' day(s)' : ' يوم');
-                    if (items.length === 0) {
-                        listEl.innerHTML = '<div>' + (currentLang === 'en' ? 'No pending approvals.' : 'لا توجد طلبات معلقة.') + '</div>';
-                        return;
+                    if (partialMetaEl) {
+                        partialMetaEl.textContent = (currentLang === 'en' ? 'Count: ' : 'العدد: ') + partialItems.length;
                     }
-                    listEl.innerHTML = items.map(formatPendingVerificationItem).join('');
+                    if (activeItems.length === 0) {
+                        listEl.innerHTML = '<div>' + (currentLang === 'en' ? 'No pending approvals.' : 'لا توجد طلبات معلقة.') + '</div>';
+                    } else {
+                        listEl.innerHTML = activeItems.map(formatPendingVerificationItem).join('');
+                    }
+                    if (partialListEl) {
+                        if (partialItems.length === 0) {
+                            partialListEl.innerHTML = '<div>' + (currentLang === 'en' ? 'No partially approved users.' : 'لا يوجد متحققون جزئياً.') + '</div>';
+                        } else {
+                            partialListEl.innerHTML = partialItems.map(formatPendingVerificationItem).join('');
+                        }
+                    }
                     bindPendingSecondaryActionButtons();
                 } catch (e) {
                     listEl.innerHTML = '<div style="color:#ffb3b3;">' + (e.message || 'Error') + '</div>';
+                    if (partialListEl) {
+                        partialListEl.innerHTML = '<div style="color:#ffb3b3;">' + (e.message || 'Error') + '</div>';
+                    }
                 }
             }
 
@@ -3557,6 +3595,35 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     refreshPendingSecondaryApprovals();
                 } catch (e) {
                     showToast((currentLang === 'en' ? '❌ Remove failed: ' : '❌ فشل الحذف: ') + (e.message || 'Network error'));
+                }
+            }
+
+            async function rejectAllPendingSecondaryApprovals() {
+                const confirmText = currentLang === 'en'
+                    ? 'Reject all pending verification requests now?'
+                    : 'هل تريد رفض جميع طلبات التحقق المعلقة الآن؟';
+                if (!await showConfirmModal(confirmText)) return;
+
+                try {
+                    const res = await fetch('/api/secondary-verification/pending/reject-all', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                        showToast((currentLang === 'en' ? '❌ Reject all failed: ' : '❌ فشل رفض الكل: ') + (data.error || 'Unknown error'));
+                        return;
+                    }
+
+                    const removed = Number(data.removed || 0);
+                    if (removed > 0) {
+                        showToast((currentLang === 'en' ? '✅ Rejected pending requests: ' : '✅ تم رفض الطلبات المعلقة: ') + removed);
+                    } else {
+                        showToast(currentLang === 'en' ? 'ℹ️ No pending approvals to reject' : 'ℹ️ لا توجد طلبات معلقة لرفضها');
+                    }
+                    refreshPendingSecondaryApprovals();
+                } catch (e) {
+                    showToast((currentLang === 'en' ? '❌ Reject all failed: ' : '❌ فشل رفض الكل: ') + (e.message || 'Network error'));
                 }
             }
 

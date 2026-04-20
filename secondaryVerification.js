@@ -156,6 +156,7 @@ function buildBaitMessage(config, isAr) {
 function normalizeKeywordMatchText(value) {
     if (typeof value !== 'string') return '';
     let result = value.toLowerCase().trim();
+    result = result.replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g, '');
     result = result.replace(/[!@#$%^&*()_+=\-\[\]{}:;"'<>.,.?\/\\|~`]/g, '');
     result = result.replace(/[\u064B-\u0652\u0640\u0670]/g, '');
     result = result.replace(/[أإآ]/g, 'ا');
@@ -874,12 +875,12 @@ function initVerification(client, db, config, chat) {
             const ignoredMessageTypes = new Set(['revoked', 'ciphertext', 'e2e_notification', 'notification_template', 'gp2', 'protocol']);
             if (ignoredMessageTypes.has(msg.type)) return false;
 
-            const isTextMessage = msg.type === 'chat' || msg.type === 'text';
+            const incomingText = extractIncomingText(msg);
+            const isTextMessage = incomingText.trim().length > 0;
             
             const senderId = msg.from;
             const normalizedSenderId = normalizeVerificationId(senderId);
             const senderCandidates = new Set(getVerificationIdCandidates(senderId));
-            const incomingText = extractIncomingText(msg);
             let record = null;
             for (const row of db.prepare('SELECT * FROM secondary_verification').all()) {
                 const rowId = row && row.requester_id ? row.requester_id : '';
@@ -1033,9 +1034,10 @@ function initVerification(client, db, config, chat) {
                         return true;
                     }
 
+                    upsertReplyLogReply(db, record.requester_id, record.group_id, incomingText, record.state);
+
                     if (banKeywordMatch) {
                         wasHandled = true;
-                        upsertReplyLogReply(db, record.requester_id, record.group_id, incomingText, record.state);
                         debugLog('ban keyword matched', { requesterId: record.requester_id, flowType: record.flow_type || 'join' });
                         if (isTestFlow) {
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
@@ -1061,7 +1063,6 @@ function initVerification(client, db, config, chat) {
                         return true;
                     } else if (approvalKeywordMatch) {
                         wasHandled = true;
-                                                upsertReplyLogReply(db, record.requester_id, record.group_id, incomingText, record.state);
                         const useEmail = record.require_email == null ? config.enableEmailVerification : record.require_email === 1;
                         const usePhoto = record.require_photo == null ? config.enablePhotoVerification : record.require_photo === 1;
                         debugLog('approval keyword matched', { requesterId: record.requester_id, useEmail, usePhoto });
