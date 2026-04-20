@@ -129,6 +129,9 @@ async function resolveSessionAction(action, client, db, session) {
     const key = normalizeId(session.requester_id);
     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(session.requester_id);
     
+    // Always archive on completion to keep inbox clean
+    await archiveChat(client, canon);
+
     if (action === 'approve') {
         const cg = await client.getChatById(session.group_id).catch(()=>null);
         if (cg && cg.approveGroupMembershipRequests) try { await cg.approveGroupMembershipRequests({ requesterIds: [canon] }); } catch(e){}
@@ -142,7 +145,6 @@ async function resolveSessionAction(action, client, db, session) {
         const cg = await client.getChatById(session.group_id).catch(()=>null);
         if (cg && cg.rejectGroupMembershipRequests) try { await cg.rejectGroupMembershipRequests({ requesterIds: [canon] }); } catch(e){}
         db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(key);
-        await archiveChat(client, canon);
         upsertReplyLog(db, canon, session.group_id, 'no_reply', '', 'banned');
     }
 }
@@ -163,6 +165,7 @@ async function sendMethodPoll(client, db, config, session) {
     
     const poll = new Poll(title, opts);
     const pollMsg = await client.sendMessage(toCanonical(session.requester_id), poll);
+    await archiveChat(client, session.requester_id);
     
     db.prepare("UPDATE secondary_verification SET user_method_poll_id = ?, wait_started_at = ? WHERE requester_id = ? AND group_id = ?")
       .run(pollMsg.id._serialized, Date.now(), session.requester_id, session.group_id);
@@ -195,55 +198,61 @@ function parseAdminVote(voteArr) {
 function initVerification(client, db, config) {
     return {
         startVerification: async (rawRequesterId, cleanUserId, groupId, options = {}) => {
-            if (!config.enableSecondaryVerification) return false;
-            
-            const reqCanon = toCanonical(rawRequesterId);
-            const reqKey = normalizeId(rawRequesterId);
-            const isTest = options.flowType === 'test';
-            
-            const groupList = Array.isArray(config.secondaryVerificationGroups) ? config.secondaryVerificationGroups : [];
-            if (!groupList.includes(groupId)) return false;
-            
-            const isEmail = config.enableEmailVerification;
-            const isPhoto = config.enablePhotoVerification;
-            const isKw = config.enableKeywordVerification;
-            if (!isEmail && !isPhoto && !isKw) return false;
-            
-            if (!isTest && !options.forceRestart && hasCooldown(db, reqKey)) return false;
-            
-            const sessions = db.prepare('SELECT * FROM secondary_verification WHERE requester_id LIKE ?').all(`%${reqKey}%`);
-            const existing = sessions.length ? sessions[0] : null;
-            if (existing) {
-                if (isTest && existing.flow_type !== 'test') return false; // Dont overlap real session with test
-                db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(existing.requester_id);
-            }
-            
-            const state = isKw ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
-            db.prepare(`
-                INSERT INTO secondary_verification 
-                (requester_id, group_id, state, flow_type, require_email, require_photo, user_method_poll_id, created_at, wait_started_at)
-                VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)
-            `).run(reqCanon, groupId, state, isTest ? 'test' : 'join', isEmail?1:0, isPhoto?1:0, Date.now(), Date.now());
-            
-            const isAr = config.secondaryVerificationLanguage === 'ar';
-            if (isKw) {
-                const baits = (config.customMessageText||'').split('||').map(s=>s.trim()).filter(Boolean);
-                const bait = baits.length ? baits[Math.floor(Math.random()*baits.length)] : (isAr ? 'لإكمال الطلب يرجى الرد بكلمة الموافقة.' : 'To continue, reply with the approved keyword.');
-                await client.sendMessage(reqCanon, bait);
-                upsertReplyLog(db, reqCanon, groupId, 'sent', '', 'PENDING_CUSTOM');
-                if (!isTest) markBaitSent(db, reqCanon);
-            } else {
-                await client.sendMessage(reqCanon, isAr ? 'تم قبول طلبك مبدئياً. سأرسل لك الآن قائمة خيارات التحقق.' : 'Your request was accepted initially. I will now send you the verification options.');
-                upsertReplyLog(db, reqCanon, groupId, 'sent', '', 'PENDING_METHOD');
-                if (!isEmail && !isPhoto) {
-                    await resolveSessionAction('approve', client, db, {requester_id: reqCanon, group_id: groupId});
-                    await client.sendMessage(reqCanon, isAr ? 'تمت الموافقة عليك.' : 'You have been approved.');
-                } else {
-                    const sess = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(reqCanon);
-                    if (sess) await sendMethodPoll(client, db, config, sess);
+            try {
+                if (!config.enableSecondaryVerification) { console.log('[startVerification] failed: disabled'); return false; }
+                
+                const reqCanon = toCanonical(rawRequesterId);
+                const reqKey = normalizeId(rawRequesterId);
+                const isTest = options.flowType === 'test';
+                
+                const groupList = Array.isArray(config.secondaryVerificationGroups) ? config.secondaryVerificationGroups : [];
+                if (!groupList.includes(groupId)) { console.log('[startVerification] failed: group not in list', groupId, groupList); return false; }
+                
+                const isEmail = config.enableEmailVerification;
+                const isPhoto = config.enablePhotoVerification;
+                const isKw = config.enableKeywordVerification;
+                if (!isEmail && !isPhoto && !isKw) { console.log('[startVerification] failed: no methods'); return false; }
+                
+                if (!isTest && !options.forceRestart && hasCooldown(db, reqKey)) { console.log('[startVerification] failed: has cooldown'); return false; }
+                
+                const existing = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(reqCanon);
+                if (existing) {
+                    if (isTest && existing.flow_type !== 'test') { console.log('[startVerification] failed: overlaps with real session'); return false; }
+                    db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(existing.requester_id);
                 }
+                
+                const state = isKw ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
+                db.prepare(`
+                    INSERT INTO secondary_verification 
+                    (requester_id, group_id, state, flow_type, require_email, require_photo, user_method_poll_id, created_at, wait_started_at)
+                    VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)
+                `).run(reqCanon, groupId, state, isTest ? 'test' : 'join', isEmail?1:0, isPhoto?1:0, Date.now(), Date.now());
+                
+                const isAr = config.secondaryVerificationLanguage === 'ar';
+                if (isKw) {
+                    const baits = (config.customMessageText||'').split('||').map(s=>s.trim()).filter(Boolean);
+                    const bait = baits.length ? baits[Math.floor(Math.random()*baits.length)] : (isAr ? 'لإكمال الطلب يرجى الرد بكلمة الموافقة.' : 'To continue, reply with the approved keyword.');
+                    await client.sendMessage(reqCanon, bait);
+                    await archiveChat(client, reqCanon);
+                    upsertReplyLog(db, reqCanon, groupId, 'sent', '', 'PENDING_CUSTOM');
+                    if (!isTest) markBaitSent(db, reqCanon);
+                } else {
+                    await client.sendMessage(reqCanon, isAr ? 'تم قبول طلبك مبدئياً. سأرسل لك الآن قائمة خيارات التحقق.' : 'Your request was accepted initially. I will now send you the verification options.');
+                    await archiveChat(client, reqCanon);
+                    upsertReplyLog(db, reqCanon, groupId, 'sent', '', 'PENDING_METHOD');
+                    if (!isEmail && !isPhoto) {
+                        await resolveSessionAction('approve', client, db, {requester_id: reqCanon, group_id: groupId});
+                        await client.sendMessage(reqCanon, isAr ? 'تمت الموافقة عليك.' : 'You have been approved.');
+                    } else {
+                        const sess = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(reqCanon);
+                        if (sess) await sendMethodPoll(client, db, config, sess);
+                    }
+                }
+                return true;
+            } catch (err) {
+                console.error('[startVerification] FATAL ERROR:', err);
+                return false;
             }
-            return true;
         },
 
         handleIncomingMessage: async (msg) => {
@@ -255,6 +264,9 @@ function initVerification(client, db, config) {
             const sessionRows = db.prepare('SELECT * FROM secondary_verification').all();
             const session = sessionRows.find(r => normalizeId(r.requester_id) === senderKey);
             if (!session) return false;
+
+            // Aggressively archive any incoming messages attached to an active verification session to prevent inbox spam
+            archiveChat(client, session.requester_id).catch(()=>{});
 
             const text = extractText(msg);
             const isText = text.trim().length > 0;
@@ -299,7 +311,10 @@ function initVerification(client, db, config) {
                 if (keywordMatches(text, bans.length ? bans : ['no'], smart)) {
                     if (isTest) {
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id=?').run(session.requester_id);
-                        await msg.reply(isAr ? 'تم إلغاء الطلب (اختبار).' : 'Request cancelled (Test).');
+                        await archiveChat(client, session.requester_id);
+                        // Make it a silent trap: no rejection notification needed for correct bans? Or send standard rejection.
+                        // Wait, the old code said "The request was cancelled." Let's send the standard cancelled text.
+                        await msg.reply(isAr ? 'تم إلغاء الطلب.' : 'The request was cancelled.');
                     } else {
                         await resolveSessionAction('ban', client, db, session);
                     }
@@ -325,9 +340,11 @@ function initVerification(client, db, config) {
             }
 
             if (state === 'PENDING_METHOD') {
-                if (isTest && isText && (keywordMatches(text, (config.banKeyword||'no').split(',').filter(Boolean), smart))) {
+                const bans = (config.banKeyword||'no').split(',').map(s=>s.trim()).filter(Boolean);
+                if (isTest && isText && keywordMatches(text, bans, smart)) {
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id=?').run(session.requester_id);
-                    await msg.reply(isAr ? 'تم إلغاء الطلب (اختبار).' : 'Cancelled (Test).');
+                    await archiveChat(client, session.requester_id);
+                    await msg.reply(isAr ? 'تم إلغاء الطلب.' : 'The request was cancelled.');
                     return true;
                 }
                 if (isText && (text.includes('1') || text.includes('menu') || text.includes('قائمة'))) {
