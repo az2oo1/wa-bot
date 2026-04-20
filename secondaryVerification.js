@@ -30,8 +30,12 @@ function debugLog(message, meta = {}) {
 
 function normalizeVerificationId(value) {
     if (typeof value !== 'string' || !value) return '';
-    let normalized = value.replace(/:[0-9]+/, '');
+    let normalized = value.trim();
+    // Remove device suffixes like ":12" before the domain.
+    normalized = normalized.replace(/:[0-9]+(?=@)/g, '');
     if (normalized.includes('@lid')) normalized = normalized.replace('@lid', '@c.us');
+    if (normalized.includes('@s.whatsapp.net')) normalized = normalized.replace('@s.whatsapp.net', '@c.us');
+    if (/^\d+$/.test(normalized)) normalized = `${normalized}@c.us`;
     return normalized;
 }
 
@@ -758,6 +762,7 @@ function initVerification(client, db, config, chat) {
                         ? 'ما زلت في خطوة كلمة التحقق للسابق. هل يمكنك الرد على الرسالة السابقة أولاً؟'
                         : 'You are still on the previous bait/keyword step. Can you reply to the previous verification message first?');
                     await client.sendMessage(requesterId, buildBaitMessage(config, isAr));
+                    upsertReplyLogSent(db, existingRecord.requester_id, existingRecord.group_id, existingRecord.state || 'PENDING_CUSTOM');
                     debugLog('start blocked: still in bait for another group', {
                         requesterId: rawRequesterId,
                         requestedGroupId: groupId,
@@ -828,9 +833,10 @@ function initVerification(client, db, config, chat) {
             }
             try {
                 await client.sendMessage(requesterId, initMsg);
+                // Record bait/message delivery in reply log for diagnostics and follow-up visibility.
+                upsertReplyLogSent(db, requesterId, groupId, initialState);
                 if (flowType !== 'test') {
                     markBaitSent(db, requesterId);
-                    upsertReplyLogSent(db, requesterId, groupId, initialState);
                 }
                 if (initialState === 'PENDING_METHOD') {
                     const seededRecord = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(requesterId, groupId);
@@ -881,6 +887,13 @@ function initVerification(client, db, config, chat) {
                 if (senderCandidates.has(rowId) || senderCandidates.has(normalizedRowId) || normalizedRowId === normalizedSenderId) {
                     record = row;
                     break;
+                }
+            }
+            if (!record) {
+                const senderPhoneKey = toPhoneNumberKey(senderId);
+                if (senderPhoneKey) {
+                    record = db.prepare('SELECT * FROM secondary_verification').all()
+                        .find(row => toPhoneNumberKey(row && row.requester_id ? row.requester_id : '') === senderPhoneKey) || null;
                 }
             }
             if (!record) {
@@ -952,6 +965,19 @@ function initVerification(client, db, config, chat) {
                 const shouldNormalizeForMatch = useSmartMatch || isTestFlow;
                 const approvalKeywordMatch = isTextMessage && keywordMatchesText(rawText, approvalKeywords, shouldNormalizeForMatch);
                 const banKeywordMatch = isTextMessage && keywordMatchesText(rawText, banKeywords.length > 0 ? banKeywords : ['no'], shouldNormalizeForMatch);
+                debugLog('keyword match evaluation', {
+                    requesterId: record.requester_id,
+                    state: record.state,
+                    isTextMessage,
+                    rawText,
+                    smartText,
+                    useSmartMatch,
+                    shouldNormalizeForMatch,
+                    approvalKeywords,
+                    banKeywords,
+                    approvalKeywordMatch,
+                    banKeywordMatch
+                });
 
                 if (record.state === 'EXPIRED_WAITING_REENTRY') {
                     if (!isTextMessage) return false;
@@ -1002,6 +1028,7 @@ function initVerification(client, db, config, chat) {
                     const resendBaitRequest = ['?', '؟', '؟؟'].includes(rawText);
                     if (resendBaitRequest) {
                         await msg.reply(buildBaitMessage(config, isAr));
+                        upsertReplyLogSent(db, record.requester_id, record.group_id, record.state);
                         debugLog('bait resent on user request', { requesterId: record.requester_id, triggerText: rawText });
                         return true;
                     }
