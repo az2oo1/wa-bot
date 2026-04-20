@@ -3498,7 +3498,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 const requesterId = String(item.requesterId || '')
                     .replace(/:[0-9]+/, '')
                     .replace('@lid', '@c.us');
-                const phoneNumber = String(item.phoneNumber || '').replace(/\D/g, '');
+                const phoneFromApi = String(item.phoneNumber || '').replace(/\D/g, '');
+                const phoneFromRequesterId = requesterId.replace(/@[^\s]+$/, '').replace(/\D/g, '');
+                const phoneNumber = phoneFromApi || phoneFromRequesterId;
                 const groupName = item.groupName || item.groupId || '-';
                 const state = item.state || '-';
                 const lifecycleStatus = String(item.lifecycleStatus || 'active');
