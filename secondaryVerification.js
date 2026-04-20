@@ -39,6 +39,22 @@ function toRequesterKey(value) {
     return normalizeVerificationId(value).replace('@c.us', '').trim();
 }
 
+function toCanonicalRequesterId(value) {
+    const normalized = normalizeVerificationId(value);
+    return normalized || (typeof value === 'string' ? value.trim() : '');
+}
+
+async function archiveRequesterChat(client, requesterId) {
+    const canonicalId = toCanonicalRequesterId(requesterId);
+    if (!canonicalId) return;
+    try {
+        const dmChat = await client.getChatById(canonicalId);
+        if (dmChat && typeof dmChat.archive === 'function') {
+            await dmChat.archive();
+        }
+    } catch (e) { }
+}
+
 function hasRecentBait(db, requesterId) {
     if (!BAIT_REPEAT_COOLDOWN_MS) return false;
     const requesterKey = toRequesterKey(requesterId);
@@ -67,11 +83,6 @@ function getVerificationIdCandidates(value) {
         if (typeof candidate === 'string' && candidate && !candidates.includes(candidate)) {
             candidates.push(candidate);
         }
-    }
-    if (normalized.endsWith('@c.us')) {
-        const bareNumber = normalized.slice(0, -5);
-        const lidCandidate = `${bareNumber}@lid`;
-        if (!candidates.includes(lidCandidate)) candidates.push(lidCandidate);
     }
     return candidates;
 }
@@ -421,7 +432,7 @@ function initVerification(client, db, config, chat) {
 
                 if (choice === '1') {
                     if (joinChat) {
-                        try { await joinChat.approveGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                        try { await joinChat.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
                     }
                     db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
@@ -434,7 +445,7 @@ function initVerification(client, db, config, chat) {
 
                 if (choice === '2') {
                     if (joinChat) {
-                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
                     }
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
                     pendingAdminContactPolls.delete(pollId);
@@ -446,12 +457,13 @@ function initVerification(client, db, config, chat) {
 
                 if (choice === '3') {
                     if (joinChat) {
-                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
                     }
                     db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
                     pendingAdminContactPolls.delete(pollId);
-                    await client.sendMessage(record.requester_id, isAr
+                    await archiveRequesterChat(client, record.requester_id);
+                    await client.sendMessage(toCanonicalRequesterId(record.requester_id), isAr
                         ? 'تم رفض الطلب وإضافة الرقم إلى القائمة السوداء.'
                         : 'Your request was rejected and your number was added to the blacklist.');
                     return true;
@@ -476,7 +488,7 @@ function initVerification(client, db, config, chat) {
 
                 if (choice === '1') {
                     if (chatObj) {
-                        try { await chatObj.approveGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                        try { await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
                     }
                     db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
@@ -490,7 +502,7 @@ function initVerification(client, db, config, chat) {
                 if (choice === '2') {
                     const chatForReject = await client.getChatById(record.group_id).catch(() => null);
                     if (chatForReject) {
-                        try { await chatForReject.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                        try { await chatForReject.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
                     }
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
                     pendingAdminPhotoPolls.delete(pollId);
@@ -512,12 +524,13 @@ function initVerification(client, db, config, chat) {
                 if (choice === '4') {
                     const chatForBan = await client.getChatById(record.group_id).catch(() => null);
                     if (chatForBan) {
-                        try { await chatForBan.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                        try { await chatForBan.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
                     }
                     db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
                     pendingAdminPhotoPolls.delete(pollId);
-                    await client.sendMessage(record.requester_id, isAr
+                    await archiveRequesterChat(client, record.requester_id);
+                    await client.sendMessage(toCanonicalRequesterId(record.requester_id), isAr
                         ? 'تم رفض الطلب وإضافة الرقم إلى القائمة السوداء.'
                         : 'Your request was rejected and your number was added to the blacklist.');
                     return true;
@@ -575,7 +588,7 @@ function initVerification(client, db, config, chat) {
 
                 if (action === 'approve') {
                     if (joinChat) {
-                        try { await joinChat.approveGroupMembershipRequests({ requesterIds: [requesterId] }); } catch (e) { }
+                        try { await joinChat.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(requesterId)] }); } catch (e) { }
                     }
                     db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
@@ -588,7 +601,7 @@ function initVerification(client, db, config, chat) {
 
                 if (action === 'reject') {
                     if (joinChat) {
-                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [requesterId] }); } catch (e) { }
+                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(requesterId)] }); } catch (e) { }
                     }
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
                     await client.sendMessage(requesterId, isAr
@@ -600,11 +613,12 @@ function initVerification(client, db, config, chat) {
 
                 if (action === 'ban') {
                     if (joinChat) {
-                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [requesterId] }); } catch (e) { }
+                        try { await joinChat.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(requesterId)] }); } catch (e) { }
                     }
                     db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
-                    await client.sendMessage(requesterId, isAr
+                    await archiveRequesterChat(client, requesterId);
+                    await client.sendMessage(toCanonicalRequesterId(requesterId), isAr
                         ? 'تم رفض الطلب وإضافة الرقم إلى القائمة السوداء.'
                         : 'Your request was rejected and your number was added to the blacklist.');
                     await msg.reply(isAr ? 'تم تنفيذ الحظر بنجاح.' : 'Ban has been applied successfully.');
@@ -664,6 +678,7 @@ function initVerification(client, db, config, chat) {
 
         // Triggered after bio check is passed
         startVerification: async (rawRequesterId, cleanUserId, groupId, options = {}) => {
+            const requesterId = toCanonicalRequesterId(rawRequesterId);
             if (!config.enableSecondaryVerification) {
                 debugLog('start blocked: feature disabled', { requesterId: rawRequesterId, groupId });
                 return false;
@@ -696,14 +711,14 @@ function initVerification(client, db, config, chat) {
             const forceRestart = Boolean(options.forceRestart);
             let skipKeywordForNewGroup = false;
 
-            if (!forceRestart && flowType !== 'test' && hasRecentBait(db, rawRequesterId)) {
+            if (!forceRestart && flowType !== 'test' && hasRecentBait(db, requesterId)) {
                 debugLog('start blocked: bait cooldown active', { requesterId: rawRequesterId, groupId, cooldownMs: BAIT_REPEAT_COOLDOWN_MS });
                 return false;
             }
 
             // Only one active verification session per requester across all groups.
             // WhatsApp may alternate identifiers between @lid and @c.us for the same user.
-            const normalizedIncomingId = normalizeVerificationId(rawRequesterId);
+            const normalizedIncomingId = normalizeVerificationId(requesterId);
             const existingRecord = db.prepare('SELECT requester_id, group_id, created_at, state FROM secondary_verification').all()
                 .find(row => normalizeVerificationId(row.requester_id) === normalizedIncomingId);
             if (existingRecord) {
@@ -714,10 +729,10 @@ function initVerification(client, db, config, chat) {
 
                 if (!isSameGroup && isStillInBait && !forceRestart) {
                     const isAr = config.secondaryVerificationLanguage === 'ar';
-                    await client.sendMessage(rawRequesterId, isAr
+                    await client.sendMessage(requesterId, isAr
                         ? 'ما زلت في خطوة كلمة التحقق للسابق. هل يمكنك الرد على الرسالة السابقة أولاً؟'
                         : 'You are still on the previous bait/keyword step. Can you reply to the previous verification message first?');
-                    await client.sendMessage(rawRequesterId, buildBaitMessage(config, isAr));
+                    await client.sendMessage(requesterId, buildBaitMessage(config, isAr));
                     debugLog('start blocked: still in bait for another group', {
                         requesterId: rawRequesterId,
                         requestedGroupId: groupId,
@@ -765,7 +780,7 @@ function initVerification(client, db, config, chat) {
                 (requester_id, group_id, state, flow_type, require_email, require_photo, user_method_poll_id, email, code, created_at, admin_poll_msg_id)
                 VALUES (?, ?, ?, ?, ?, ?, '', '', '', ?, '')
             `);
-            insertStmt.run(rawRequesterId, groupId, initialState, flowType, useEmail ? 1 : 0, usePhoto ? 1 : 0, Date.now());
+            insertStmt.run(requesterId, groupId, initialState, flowType, useEmail ? 1 : 0, usePhoto ? 1 : 0, Date.now());
             debugLog('session started', {
                 requesterId: rawRequesterId,
                 groupId,
@@ -787,25 +802,25 @@ function initVerification(client, db, config, chat) {
                     : 'Your request was accepted initially. I will now send you the verification options.';
             }
             try {
-                await client.sendMessage(rawRequesterId, initMsg);
+                await client.sendMessage(requesterId, initMsg);
                 if (flowType !== 'test') {
-                    markBaitSent(db, rawRequesterId);
-                    upsertReplyLogSent(db, rawRequesterId, groupId, initialState);
+                    markBaitSent(db, requesterId);
+                    upsertReplyLogSent(db, requesterId, groupId, initialState);
                 }
                 if (initialState === 'PENDING_METHOD') {
-                    const seededRecord = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(rawRequesterId, groupId);
+                    const seededRecord = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ? AND group_id = ?').get(requesterId, groupId);
                     if (seededRecord) {
                         const methodsEnabled = (seededRecord.require_email === 1) || (seededRecord.require_photo === 1);
                         if (!methodsEnabled) {
                             const chatObj = await client.getChatById(groupId).catch(() => null);
-                            const cleanId = toRequesterKey(rawRequesterId);
+                            const cleanId = toRequesterKey(requesterId);
                             if (chatObj) {
-                                try { await chatObj.approveGroupMembershipRequests({ requesterIds: [rawRequesterId] }); } catch (e) { }
+                                try { await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(requesterId)] }); } catch (e) { }
                             }
                             db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
-                            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(rawRequesterId, groupId);
+                            db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(requesterId, groupId);
                             const groupName = await resolveGroupName(client, groupId);
-                            await client.sendMessage(rawRequesterId, isAr
+                            await client.sendMessage(requesterId, isAr
                                 ? `تمت الموافقة على انضمامك إلى "${groupName}"، وتمت إضافتك إلى قائمة المتحقق منهم.`
                                 : `You have been approved to join "${groupName}" and added to the verified list.`);
                         } else {
@@ -864,7 +879,7 @@ function initVerification(client, db, config, chat) {
             if (isUserTimeoutState(record.state) && (!record.created_at || now - record.created_at > ttlMs)) {
                 const chatObj = await client.getChatById(record.group_id).catch(() => null);
                 if (chatObj) {
-                    try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                    try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] }); } catch (e) { }
                 }
                 db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                 upsertReplyLogNoReply(db, record.requester_id, record.group_id, `expired:${record.state}`);
@@ -886,12 +901,13 @@ function initVerification(client, db, config, chat) {
             const stopCode = String(config.secondaryVerificationStopCode || '').trim().toLowerCase();
             
             const groupToJoin = record.group_id;
+            const requesterActionId = toCanonicalRequesterId(record.requester_id);
             let wasHandled = false;
 
             if (stopCode && rawText === stopCode) {
                 const chatObj = await client.getChatById(groupToJoin).catch(() => null);
                 if (chatObj) {
-                    try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                    try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [requesterActionId] }); } catch (e) { }
                 }
                 db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                 upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'stopped');
@@ -972,6 +988,7 @@ function initVerification(client, db, config, chat) {
                         if (isTestFlow) {
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
                             upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'test_ban');
+                            await archiveRequesterChat(client, requesterActionId);
                             await msg.reply(isAr ? 'تم التقاط كلمة الرفض في وضع الاختبار. لن يتم تنفيذ الحظر أثناء الاختبار.' : 'Ban keyword detected in test mode. No blacklist action is applied during tests.');
                             debugLog('test flow ban handled and session deleted', { requesterId: record.requester_id });
                             return true;
@@ -979,13 +996,14 @@ function initVerification(client, db, config, chat) {
                         // Reject and ban
                         const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
                         const cleanId = toRequesterKey(record.requester_id);
-                        if (chatObj) await chatObj.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] });
+                        if (chatObj) await chatObj.rejectGroupMembershipRequests({ requesterIds: [requesterActionId] });
                         
                         // Add to blacklist (ban)
                         db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
                         
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(record.requester_id);
-                                                upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'wrong_bait');
+                        upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'wrong_bait');
+                        await archiveRequesterChat(client, requesterActionId);
                         debugLog('ban applied and session deleted', { requesterId: record.requester_id });
                         // Make it a silent trap: no rejection notification
                         return true;
@@ -1003,7 +1021,7 @@ function initVerification(client, db, config, chat) {
                             const groupName = await resolveGroupName(client, groupToJoin);
                             if (chatObj) {
                                 try {
-                                    await chatObj.approveGroupMembershipRequests({ requesterIds: [record.requester_id] });
+                                    await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] });
                                 } catch (e) {}
                             }
                             db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
@@ -1037,11 +1055,12 @@ function initVerification(client, db, config, chat) {
                         const chatObj = await client.getChatById(groupToJoin).catch(() => null);
                         const cleanId = toRequesterKey(record.requester_id);
                         if (chatObj) {
-                            try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [record.requester_id] }); } catch (e) { }
+                            try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [requesterActionId] }); } catch (e) { }
                         }
                         db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId);
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
                         upsertReplyLogNoReply(db, record.requester_id, record.group_id, 'wrong_bait');
+                        await archiveRequesterChat(client, requesterActionId);
                         return true;
                     }
                 } else if (record.state === 'PENDING_METHOD') {
@@ -1051,6 +1070,7 @@ function initVerification(client, db, config, chat) {
                     if (isTestFlow && isTextMessage && (approvalKeywordMatch || banKeywordMatch)) {
                         if (banKeywordMatch) {
                             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(record.requester_id, record.group_id);
+                            await archiveRequesterChat(client, requesterActionId);
                             await msg.reply(isAr ? 'تم التقاط كلمة الرفض في وضع الاختبار. لم يتم تنفيذ أي إجراء حظر.' : 'Ban keyword detected in test mode. No blacklist action was applied.');
                             return true;
                         }
@@ -1061,7 +1081,7 @@ function initVerification(client, db, config, chat) {
                             const groupName = await resolveGroupName(client, groupToJoin);
                             if (chatObj) {
                                 try {
-                                    await chatObj.approveGroupMembershipRequests({ requesterIds: [record.requester_id] });
+                                    await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] });
                                 } catch (e) { }
                             }
                             db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
@@ -1089,7 +1109,7 @@ function initVerification(client, db, config, chat) {
                         const groupName = await resolveGroupName(client, groupToJoin);
                         if (chatObj) {
                             try {
-                                await chatObj.approveGroupMembershipRequests({ requesterIds: [record.requester_id] });
+                                await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] });
                             } catch (e) { }
                         }
                         db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(cleanId);
@@ -1296,7 +1316,7 @@ function initVerification(client, db, config, chat) {
                         const chatObj = await client.getChatById(groupToJoin).catch(()=>null);
                         const cleanId = toRequesterKey(record.requester_id);
                         if (chatObj) {
-                            await chatObj.approveGroupMembershipRequests({ requesterIds: [record.requester_id] });
+                            await chatObj.approveGroupMembershipRequests({ requesterIds: [toCanonicalRequesterId(record.requester_id)] });
                         }
                         
                         // Add to verified dataset (approved_numbers)
