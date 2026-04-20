@@ -246,6 +246,10 @@ db.exec(`
         admin_poll_msg_id TEXT,
         admin_last_reminder_at INTEGER
     );
+    CREATE TABLE IF NOT EXISTS bait_bypassed_users (
+        number TEXT PRIMARY KEY,
+        bypassed_at INTEGER
+    );
     CREATE TABLE IF NOT EXISTS secondary_verification_bait_log (
         requester_key TEXT PRIMARY KEY,
         last_sent_at INTEGER NOT NULL,
@@ -363,7 +367,7 @@ const colsToAdd = [
     'enable_admin_sync INTEGER DEFAULT 0', 'enable_commands INTEGER DEFAULT 1'
 ];
 colsToAdd.forEach(col => {
-    try { db.exec(`ALTER TABLE custom_groups ADD COLUMN ${col}`); } catch (e) { }
+    try { db.prepare(`ALTER TABLE custom_groups ADD COLUMN ${col}`).run(); } catch (e) { }
 });
 
 function loadConfigFromDB() {
@@ -485,18 +489,6 @@ function saveConfigToDB(conf) {
         setGlobal.run('secondaryVerificationGroups', JSON.stringify(conf.secondaryVerificationGroups || []));
         setGlobal.run('secondaryVerificationLanguage', conf.secondaryVerificationLanguage || 'en');
         setGlobal.run('secondaryVerificationTimeoutDays', String(Math.max(1, parseInt(conf.secondaryVerificationTimeoutDays, 10) || 2)));
-        setGlobal.run('enableKeywordVerification', conf.enableKeywordVerification ? '1' : '0');
-        setGlobal.run('enableEmailVerification', conf.enableEmailVerification ? '1' : '0');
-        setGlobal.run('enablePhotoVerification', conf.enablePhotoVerification ? '1' : '0');
-        setGlobal.run('enableSecondarySmartMatch', conf.enableSecondarySmartMatch ? '1' : '0');
-        setGlobal.run('enableKeywordVerification', conf.enableKeywordVerification ? '1' : '0');
-        setGlobal.run('enableEmailVerification', conf.enableEmailVerification ? '1' : '0');
-        setGlobal.run('enablePhotoVerification', conf.enablePhotoVerification ? '1' : '0');
-        setGlobal.run('enableSecondarySmartMatch', conf.enableSecondarySmartMatch ? '1' : '0');
-        setGlobal.run('enableKeywordVerification', conf.enableKeywordVerification ? '1' : '0');
-        setGlobal.run('enableEmailVerification', conf.enableEmailVerification ? '1' : '0');
-        setGlobal.run('enablePhotoVerification', conf.enablePhotoVerification ? '1' : '0');
-        setGlobal.run('enableSecondarySmartMatch', conf.enableSecondarySmartMatch ? '1' : '0');
         setGlobal.run('enableKeywordVerification', conf.enableKeywordVerification ? '1' : '0');
         setGlobal.run('enableEmailVerification', conf.enableEmailVerification ? '1' : '0');
         setGlobal.run('enablePhotoVerification', conf.enablePhotoVerification ? '1' : '0');
@@ -4334,11 +4326,13 @@ async function rejectExpiredSecondaryVerificationSessions() {
             }
 
             const isAr = config.secondaryVerificationLanguage === 'ar';
+            const safeGroupName = chatObj && chatObj.name ? chatObj.name : (isAr ? 'المجموعة' : 'the group');
+            const hintWord = isAr ? 'متابعة' : 'continue';
             const defaultMessage = isAr
-                ? `تم إيقاف التحقق بسبب عدم الرد. أُدرج طلبك الآن في قائمة التحقق الجزئي. لإعادة فتح العملية، أرسل: ${reopenCode}`
-                : `Verification has been stopped because there was no response. Your request is now in the partial verification queue. To reopen the process, send: ${reopenCode}`;
+                ? `عذراً، يبدو أنك لم تكمل عملية التحقق. إذا كنت لا تزال ترغب في الانضمام إلى "${safeGroupName}"، يرجى الرد بكلمة: *${hintWord}* لإعادة تفعيل طلبك.`
+                : `It looks like you haven't completed the verification process. If you still wish to join "${safeGroupName}", please reply with: *${hintWord}* to reactivate your request.`;
             const message = partialMessage
-                ? `${partialMessage} ${isAr ? 'لإعادة فتح العملية، أرسل: ' : 'To reopen the process, send: '}${reopenCode}`
+                ? `${partialMessage} ${isAr ? `لإعادة فتح العملية، أرسل: ` : `To reopen the process, send: `}*${hintWord}*`
                 : defaultMessage;
 
             await client.sendMessage(row.requester_id, message).catch(() => { });

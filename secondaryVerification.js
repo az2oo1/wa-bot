@@ -31,6 +31,12 @@ function addApprovedNumber(db, requesterId) {
     db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(numberKey);
 }
 
+function markBaitBypassed(db, requesterId) {
+    const numberKey = normalizeId(requesterId).replace(/\D/g, '');
+    if (!numberKey) return;
+    db.prepare('INSERT OR IGNORE INTO bait_bypassed_users (number, bypassed_at) VALUES (?, ?)').run(numberKey, Date.now());
+}
+
 async function archiveChat(client, requesterId) {
     const canonicalId = toCanonical(requesterId);
     if (!canonicalId) return;
@@ -155,6 +161,9 @@ async function sendMethodPoll(client, db, config, session) {
     const hasPhoto = Boolean(session.require_photo);
     if (!hasEmail && !hasPhoto) return; // Wait, should we send contact option too if no email/photo? Yes, we always add contact.
     
+    // Automatically flag this user so they bypass Keyword Bait in all future timeout/group-join loops
+    markBaitBypassed(db, session.requester_id);
+
     const gName = await resolveGroupName(client, session.group_id);
     const title = isAr ? `مرحباً بك. طلبت الانضمام إلى "${gName}". اختر الطريقة الأنسب لإكمال التحقق:` : `Welcome. You requested to join "${gName}". Please choose how you want to continue verification:`;
     const opts = [];
@@ -210,7 +219,12 @@ function initVerification(client, db, config) {
                 
                 const isEmail = config.enableEmailVerification;
                 const isPhoto = config.enablePhotoVerification;
-                const isKw = config.enableKeywordVerification;
+                let isKw = config.enableKeywordVerification;
+                
+                const cleanKey = normalizeId(cleanUserId).replace(/\D/g, '');
+                const hasBypassedRecord = isKw ? db.prepare('SELECT 1 FROM bait_bypassed_users WHERE number = ?').get(cleanKey) : null;
+                const hasBypassed = !!hasBypassedRecord;
+                if (hasBypassed) isKw = false;
                 if (!isEmail && !isPhoto && !isKw) { console.log('[startVerification] failed: no methods'); return false; }
                 
                 if (!isTest && !options.forceRestart && hasCooldown(db, reqKey)) { console.log('[startVerification] failed: has cooldown'); return false; }
@@ -237,7 +251,12 @@ function initVerification(client, db, config) {
                     upsertReplyLog(db, reqCanon, groupId, 'sent', '', 'PENDING_CUSTOM');
                     if (!isTest) markBaitSent(db, reqCanon);
                 } else {
-                    await client.sendMessage(reqCanon, isAr ? 'تم قبول طلبك مبدئياً. سأرسل لك الآن قائمة خيارات التحقق.' : 'Your request was accepted initially. I will now send you the verification options.');
+                    let msgText = isAr ? 'تم قبول طلبك مبدئياً. سأرسل لك الآن قائمة خيارات التحقق.' : 'Your request was accepted initially. I will now send you the verification options.';
+                    if (hasBypassed) {
+                         const gName = await resolveGroupName(client, groupId);
+                         msgText = isAr ? `مرحباً مجدداً. لقد لاحظنا طلبك للانضمام إلى "${gName}" وسنتابع من حيث توقفت. يرجى إكمال عملية التحقق الخاصة بك:` : `Welcome back. We noticed your request to join "${gName}" and will continue from where you left off. Please complete your verification:`;
+                    }
+                    await client.sendMessage(reqCanon, msgText);
                     await archiveChat(client, reqCanon);
                     upsertReplyLog(db, reqCanon, groupId, 'sent', '', 'PENDING_METHOD');
                     if (!isEmail && !isPhoto) {
@@ -292,7 +311,9 @@ function initVerification(client, db, config) {
             const isTest = session.flow_type === 'test';
 
             if (state === 'EXPIRED_WAITING_REENTRY') {
-                if (isText && text.trim().toLowerCase() === (config.secondaryVerificationReopenCode || 'reopen').toLowerCase()) {
+                const rt = text.trim().toLowerCase();
+                const reopenCode = (config.secondaryVerificationReopenCode || '').trim().toLowerCase();
+                if (isText && (rt === reopenCode || rt === 'reopen' || rt === 'متابعة' || rt === 'متابعه' || rt === 'continue' || rt === '1')) {
                     db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', wait_started_at = ? WHERE requester_id = ?").run(Date.now(), session.requester_id);
                     await msg.reply(isAr ? 'تمت إعادة فتح التحقق.' : 'Verification reopened.');
                     const s2 = db.prepare('SELECT * FROM secondary_verification WHERE requester_id=?').get(session.requester_id);
