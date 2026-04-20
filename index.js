@@ -1650,7 +1650,6 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
             SELECT sv.*, wg.name AS group_name
             FROM secondary_verification sv
             LEFT JOIN whatsapp_groups wg ON wg.id = sv.group_id
-            WHERE COALESCE(sv.flow_type, 'join') != 'test'
             ORDER BY sv.created_at DESC
         `).all();
         const timeoutDays = Math.max(1, parseInt(config.secondaryVerificationTimeoutDays, 10) || 2);
@@ -4289,9 +4288,12 @@ async function rejectExpiredSecondaryVerificationSessions() {
         `).all(cutoff);
         const partialCutoff = Date.now() - partialTimeoutMs;
         const partialRows = db.prepare(`
-            SELECT requester_id, group_id, state, wait_started_at
+            SELECT requester_id, group_id, state, wait_started_at, flow_type
             FROM secondary_verification
-                        WHERE state IN ('PENDING_METHOD', 'PENDING_EMAIL_INPUT', 'PENDING_PHOTO_UPLOAD', 'PENDING_CODE')
+                        WHERE (
+                            state IN ('PENDING_METHOD', 'PENDING_EMAIL_INPUT', 'PENDING_PHOTO_UPLOAD', 'PENDING_CODE')
+                            OR (state = 'PENDING_CUSTOM' AND COALESCE(flow_type, 'join') = 'test')
+                        )
               AND wait_started_at IS NOT NULL
               AND wait_started_at > 0
               AND wait_started_at <= ?

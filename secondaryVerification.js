@@ -827,12 +827,13 @@ function initVerification(client, db, config, chat) {
             console.log(`[Verification] Starting for ${cleanUserId}`);
             
             const initialState = (useKeyword && !skipKeywordForNewGroup) ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
+            const initialWaitStartedAt = (flowType === 'test' && initialState === 'PENDING_CUSTOM') ? Date.now() : 0;
             const insertStmt = db.prepare(`
                 INSERT OR REPLACE INTO secondary_verification 
                 (requester_id, group_id, state, flow_type, require_email, require_photo, user_method_poll_id, email, code, created_at, wait_started_at, admin_poll_msg_id)
-                VALUES (?, ?, ?, ?, ?, ?, '', '', '', ?, 0, '')
+                VALUES (?, ?, ?, ?, ?, ?, '', '', '', ?, ?, '')
             `);
-            insertStmt.run(requesterId, groupId, initialState, flowType, useEmail ? 1 : 0, usePhoto ? 1 : 0, Date.now());
+            insertStmt.run(requesterId, groupId, initialState, flowType, useEmail ? 1 : 0, usePhoto ? 1 : 0, Date.now(), initialWaitStartedAt);
             debugLog('session started', {
                 requesterId: rawRequesterId,
                 groupId,
