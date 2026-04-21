@@ -212,11 +212,11 @@ function parseAdminVote(voteArr) {
 function initVerification(client, db, config) {
     return {
         startVerification: async (rawRequesterId, cleanUserId, groupId, options = {}) => {
+            const reqCanon = toCanonical(rawRequesterId);
+            const reqKey = normalizeId(rawRequesterId);
             try {
                 if (!config.enableSecondaryVerification) { console.log('[startVerification] failed: disabled'); return false; }
                 
-                const reqCanon = toCanonical(rawRequesterId);
-                const reqKey = normalizeId(rawRequesterId);
                 const isTest = options.flowType === 'test';
                 
                 const groupList = Array.isArray(config.secondaryVerificationGroups) ? config.secondaryVerificationGroups : [];

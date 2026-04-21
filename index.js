@@ -4157,12 +4157,22 @@ async function screenPendingMembershipRequests() {
                 joinProfileReviewCache.set(cacheKey, Date.now());
 
                 let cleanRequesterId = rawRequesterId.replace(/:[0-9]+/, '');
-                if (cleanRequesterId.includes('@lid')) {
-                    try {
-                        const contact = await client.getContactById(rawRequesterId);
-                        if (contact && contact.number) cleanRequesterId = `${contact.number}@c.us`;
-                        else cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us');
-                    } catch (e) { cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us'); }
+                
+                // Always eagerly attempt to unmask Ghost IDs (15-digit @c.us or @lid) using local WhatsApp native contacts!
+                try {
+                    const contact = await client.getContactById(rawRequesterId);
+                    if (contact && contact.number) {
+                        cleanRequesterId = `${contact.number}@c.us`;
+                        rawRequesterId = `${contact.number}@c.us`;
+                    } else if (cleanRequesterId.includes('@lid')) {
+                        cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us');
+                        rawRequesterId = rawRequesterId.replace('@lid', '@c.us');
+                    }
+                } catch (e) {
+                    if (cleanRequesterId.includes('@lid')) {
+                        cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us');
+                        rawRequesterId = rawRequesterId.replace('@lid', '@c.us');
+                    }
                 }
 
                 const finalCleanId = cleanRequesterId.replace('@c.us', '');
