@@ -347,8 +347,8 @@ function initVerification(client, db, config) {
                 
                 const defaultBans = ['no', 'لا', 'رفض', '2', 'deny', 'cancel', 'إلغاء'];
                 const defaultAys = ['yes', 'نعم', 'موافقة', 'موافق', '1', 'approve'];
-                const bans = config.banKeyword ? config.banKeyword.split(',').map(s=>s.trim()).filter(Boolean) : defaultBans;
-                const ays = config.approvalKeyword ? config.approvalKeyword.split(',').map(s=>s.trim()).filter(Boolean) : defaultAys;
+                let bans = config.banKeyword ? config.banKeyword.split(/[,،]+/).map(s=>s.trim()).filter(Boolean) : defaultBans;
+                let ays = config.approvalKeyword ? config.approvalKeyword.split(/[,،]+/).map(s=>s.trim()).filter(Boolean) : defaultAys;
                 
                 if (keywordMatches(text, bans, smart)) {
                     if (isTest) {
