@@ -489,6 +489,9 @@ function saveConfigToDB(conf) {
         setGlobal.run('secondaryVerificationGroups', JSON.stringify(conf.secondaryVerificationGroups || []));
         setGlobal.run('secondaryVerificationLanguage', conf.secondaryVerificationLanguage || 'en');
         setGlobal.run('secondaryVerificationTimeoutDays', String(Math.max(1, parseInt(conf.secondaryVerificationTimeoutDays, 10) || 2)));
+        setGlobal.run('secondaryVerificationPartialTimeoutMinutes', String(Math.max(1, parseInt(conf.secondaryVerificationPartialTimeoutMinutes, 10) || 30)));
+        setGlobal.run('secondaryVerificationDelay', String(Math.max(1, parseInt(conf.secondaryVerificationDelay, 10) || 3600)));
+        setGlobal.run('secondaryVerificationReopenCode', conf.secondaryVerificationReopenCode || '');
         setGlobal.run('enableKeywordVerification', conf.enableKeywordVerification ? '1' : '0');
         setGlobal.run('enableEmailVerification', conf.enableEmailVerification ? '1' : '0');
         setGlobal.run('enablePhotoVerification', conf.enablePhotoVerification ? '1' : '0');
