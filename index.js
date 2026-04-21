@@ -1795,6 +1795,25 @@ app.get('/api/email-log', requireAuthApi, requirePermission('security:manage'), 
     }
 });
 
+app.post('/api/secondary-verification/pending/trigger', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    try {
+        const { requesterId, groupId } = req.body;
+        if (!requesterId || !groupId) return res.status(400).json({ error: 'Missing parameters' });
+        
+        const { initVerification } = require('./secondaryVerification');
+        const verification = initVerification(client, db, config);
+        
+        const normalizeId = (val) => String(val || '').replace(/:[0-9]+/, '').replace('@lid', '@c.us').trim();
+        const reqCanon = normalizeId(requesterId);
+
+        await verification.startVerification(requesterId, reqCanon, groupId, { forceRestart: true });
+        return res.json({ success: true });
+    } catch (e) {
+        console.error('[Verification Trigger]', e);
+        return res.status(500).json({ error: 'Trigger failed' });
+    }
+});
+
 app.post('/api/secondary-verification/pending/remove', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
     try {
         const inputRequesterId = String((req.body && req.body.requesterId) || '').trim();

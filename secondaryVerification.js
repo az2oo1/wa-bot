@@ -34,7 +34,12 @@ function addApprovedNumber(db, requesterId) {
 function markBaitBypassed(db, requesterId) {
     const numberKey = normalizeId(requesterId).replace(/\D/g, '');
     if (!numberKey) return;
-    db.prepare('INSERT OR IGNORE INTO bait_bypassed_users (number, bypassed_at) VALUES (?, ?)').run(numberKey, Date.now());
+    try {
+        db.prepare('CREATE TABLE IF NOT EXISTS bait_bypassed_users (number TEXT PRIMARY KEY, bypassed_at INTEGER)').run();
+        db.prepare('INSERT OR IGNORE INTO bait_bypassed_users (number, bypassed_at) VALUES (?, ?)').run(numberKey, Date.now());
+    } catch (e) {
+        console.error('[markBaitBypassed] Error:', e.message);
+    }
 }
 
 async function archiveChat(client, requesterId) {
@@ -269,7 +274,18 @@ function initVerification(client, db, config) {
                 }
                 return true;
             } catch (err) {
-                console.error('[startVerification] FATAL ERROR:', err);
+                console.error('[startVerification] Dispatch Failed. Number invalid/unreachable:', reqCanon, err.message);
+                
+                // If we couldn't message them because the number is fake/broken, immediately purge them
+                db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(reqCanon);
+                
+                // Reject their WhatsApp request entirely to clean them out of the system
+                if (!isTest) {
+                    const chatObj = await client.getChatById(groupId).catch(() => null);
+                    if (chatObj && chatObj.rejectGroupMembershipRequests) {
+                        try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [rawRequesterId] }); } catch (e) { }
+                    }
+                }
                 return false;
             }
         },

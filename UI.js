@@ -3532,6 +3532,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     + '<div style="font-size:11px;color:var(--text-muted);">' + (currentLang === 'en' ? 'Reply log: ' : 'سجل الرد: ') + replyBadge + (replyCount > 0 ? ' • ' + (currentLang === 'en' ? 'Replies: ' : 'عدد الردود: ') + replyCount : '') + (replyMeta ? ' • ' + replyMeta : '') + '</div>'
                     + '<div style="font-size:10px;color:var(--text-muted);">' + ageText + '</div>'
                     + '</div>'
+                    + '<button class="btn btn-primary btn-sm pending-secondary-trigger-btn" style="padding:4px 8px; margin-right:4px;" data-requester-id="' + requesterData + '" data-group-id="' + groupData + '">'
+                    + (currentLang === 'en' ? 'Resend Verification' : 'إعادة إرسال التحقق')
+                    + '</button>'
                     + '<button class="btn btn-danger btn-sm pending-secondary-reject-btn" style="padding:4px 8px;" data-requester-id="' + requesterData + '" data-group-id="' + groupData + '">'
                     + (currentLang === 'en' ? 'Reject' : 'رفض')
                     + '</button>'
@@ -3539,11 +3542,24 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             }
 
             function bindPendingSecondaryActionButtons() {
+                const triggerBtns = document.querySelectorAll('.pending-secondary-trigger-btn');
+                triggerBtns.forEach(btn => {
+                    btn.onclick = () => {
+                        const requesterId = decodeURIComponent(btn.getAttribute('data-requester-id') || '');
+                        const groupId = decodeURIComponent(btn.getAttribute('data-group-id') || '');
+                        btn.disabled = true;
+                        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                        triggerPendingSecondaryApproval(requesterId, groupId);
+                    };
+                });
+                
                 const buttons = document.querySelectorAll('.pending-secondary-reject-btn');
                 buttons.forEach(btn => {
                     btn.onclick = () => {
                         const requesterId = decodeURIComponent(btn.getAttribute('data-requester-id') || '');
                         const groupId = decodeURIComponent(btn.getAttribute('data-group-id') || '');
+                        btn.disabled = true;
+                        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
                         removePendingSecondaryApproval(requesterId, groupId);
                     };
                 });
@@ -3666,6 +3682,27 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     listEl.innerHTML = logs.map(formatEmailLogItem).join('');
                 } catch (e) {
                     listEl.innerHTML = '<div style="color:#ffb3b3;">' + (e.message || 'Error') + '</div>';
+                }
+            }
+
+            async function triggerPendingSecondaryApproval(requesterId, groupId) {
+                try {
+                    const res = await fetch('/api/secondary-verification/pending/trigger', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ requesterId, groupId })
+                    });
+                    const data = await res.json().catch(() => ({}));
+                    if (data.success) {
+                        showToast(currentLang === 'en' ? 'Triggered successfully!' : 'تم الإرسال بنجاح!', 'success');
+                        loadPendingSecondaryApprovals();
+                    } else {
+                        showToast(data.error || (currentLang === 'en' ? 'Failed to trigger verification' : 'فشل في إرسال التحقق'), 'error');
+                        loadPendingSecondaryApprovals();
+                    }
+                } catch (e) {
+                    showToast(currentLang === 'en' ? 'Failed to trigger verification' : 'فشل في إرسال التحقق', 'error');
+                    loadPendingSecondaryApprovals();
                 }
             }
 
