@@ -238,6 +238,8 @@ function initVerification(client, db, config) {
                 if (existing) {
                     if (isTest && existing.flow_type !== 'test') { console.log('[startVerification] failed: overlaps with real session'); return false; }
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(existing.requester_id);
+                    // Also wipe trailing reply logs so the dashboard doesn't show ghost interaction timestamps!
+                    db.prepare('DELETE FROM secondary_verification_reply_log WHERE requester_id = ?').run(existing.requester_id);
                 }
                 
                 const state = isKw ? 'PENDING_CUSTOM' : 'PENDING_METHOD';
@@ -342,22 +344,24 @@ function initVerification(client, db, config) {
             if (state === 'PENDING_CUSTOM') {
                 if (!isText) return false;
                 upsertReplyLog(db, senderKey, session.group_id, 'reply', text, state);
-                const bans = (config.banKeyword||'no').split(',').map(s=>s.trim()).filter(Boolean);
-                const ays = (config.approvalKeyword||'yes').split(',').map(s=>s.trim()).filter(Boolean);
                 
-                if (keywordMatches(text, bans.length ? bans : ['no'], smart)) {
+                const defaultBans = ['no', 'لا', 'رفض', '2', 'deny', 'cancel', 'إلغاء'];
+                const defaultAys = ['yes', 'نعم', 'موافقة', 'موافق', '1', 'approve'];
+                const bans = config.banKeyword ? config.banKeyword.split(',').map(s=>s.trim()).filter(Boolean) : defaultBans;
+                const ays = config.approvalKeyword ? config.approvalKeyword.split(',').map(s=>s.trim()).filter(Boolean) : defaultAys;
+                
+                if (keywordMatches(text, bans, smart)) {
                     if (isTest) {
                         db.prepare('DELETE FROM secondary_verification WHERE requester_id=?').run(session.requester_id);
                         await archiveChat(client, session.requester_id);
-                        // Make it a silent trap: no rejection notification needed for correct bans? Or send standard rejection.
-                        // Wait, the old code said "The request was cancelled." Let's send the standard cancelled text.
                         await msg.reply(isAr ? 'تم إلغاء الطلب.' : 'The request was cancelled.');
                     } else {
                         await resolveSessionAction('ban', client, db, session);
                     }
                     return true;
                 }
-                if (keywordMatches(text, ays.length ? ays : ['yes'], smart)) {
+                if (keywordMatches(text, ays, smart)) {
+                    if (!isTest) markBaitBypassed(db, session.requester_id);
                     if (!session.require_email && !session.require_photo) {
                         await resolveSessionAction('approve', client, db, session);
                         await msg.reply(isAr ? 'تمت الموافقة على انضمامك.' : 'You have been approved to join.');
