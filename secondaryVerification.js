@@ -296,8 +296,23 @@ function initVerification(client, db, config) {
             if (!config.enableSecondaryVerification || msg.isGroupMsg) return false;
             if (msg.fromMe) return false; // Never process outgoing messages as incoming verification replies
             
-            const fromData = String(msg._data && msg._data.from ? msg._data.from : (msg.from || ''));
+            let fromData = String(msg._data && msg._data.from ? msg._data.from : (msg.from || ''));
             if (fromData.endsWith('@g.us')) return false;
+
+            // Resolve @lid Ghost IDs to real phone numbers
+            if (fromData.includes('@lid')) {
+                try {
+                    const contact = await client.getContactById(fromData);
+                    if (contact && contact.number) {
+                        fromData = `${contact.number}@c.us`;
+                        console.log('[VRF-LOOKUP] Resolved @lid to real number:', fromData);
+                    } else {
+                        fromData = fromData.replace('@lid', '@c.us');
+                    }
+                } catch (e) {
+                    fromData = fromData.replace('@lid', '@c.us');
+                }
+            }
             
             const senderKey = normalizeId(fromData);
             const sessionRows = db.prepare('SELECT * FROM secondary_verification').all();
