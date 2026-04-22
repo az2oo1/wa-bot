@@ -187,25 +187,23 @@ async function sendMethodPoll(client, db, config, session) {
 
 function parseMethodVote(voteArr) {
     const v = Array.isArray(voteArr) ? voteArr[0] : null;
-    const name = (v && typeof v === 'object' ? (v.name||'') : String(v||'')).toLowerCase();
-    const id = v && typeof v === 'object' ? v.localId : '';
-    const txt = `${name} ${id}`;
-    if (/code|email|بريد|رمز تحقق|1/.test(txt)) return 'email';
-    if (/screenshot|photo|صورة|بلاك بورد|2/.test(txt)) return 'photo';
-    if (/contact|admin|مشرف|تواصل|3/.test(txt)) return 'contact';
-    if (/cancel|إلغاء|الغاء|4/.test(txt)) return 'cancel';
+    const name = ((v && typeof v === 'object' ? (v.name||'') : String(v||''))).toLowerCase();
+    // Match purely by text content - never by position ID, since options shift based on enabled methods
+    if (/code|email|بريد|رمز تحقق/.test(name)) return 'email';
+    if (/screenshot|photo|صورة|بلاك بورد/.test(name)) return 'photo';
+    if (/contact|admin|مشرف|تواصل|تواصل مباشر/.test(name)) return 'contact';
+    if (/cancel|إلغاء|الغاء/.test(name)) return 'cancel';
     return null;
 }
 
 function parseAdminVote(voteArr) {
     const v = Array.isArray(voteArr) ? voteArr[0] : null;
-    const name = (v && typeof v === 'object' ? (v.name||'') : String(v||'')).toLowerCase();
-    const id = v && typeof v === 'object' ? v.localId : '';
-    const txt = `${name} ${id}`;
-    if (/approve|موافقة|قبول|1/.test(txt)) return 'approve';
-    if (/deny|رفض|2/.test(txt)) return 'reject';
-    if (/another|اخرى|أخرى|3/.test(txt)) return 'retry';
-    if (/ban|حظر|cancel|إلغاء|4/.test(txt)) return 'ban';
+    const name = ((v && typeof v === 'object' ? (v.name||'') : String(v||''))).toLowerCase();
+    // Match by text only - supports both Arabic and English poll options
+    if (/approve|موافقة|قبول|موافق/.test(name)) return 'approve';
+    if (/deny|reject|رفض/.test(name)) return 'reject';
+    if (/another|أخرى|اخرى|صورة أخرى|طلب صورة/.test(name)) return 'retry';
+    if (/ban|حظر|cancel|إلغاء/.test(name)) return 'ban';
     return null;
 }
 
@@ -478,8 +476,11 @@ function initVerification(client, db, config) {
                     await msg.reply(isAr ? 'مجموعة مشرفين غير محددة.' : 'No admin group found.');
                     return true;
                 }
-                const dm = await client.sendMessage(admin, m, { caption: `Photo from @${senderKey}` });
-                const poll = new Poll(isAr ? 'قرار الصورة' : 'Photo decision', ['1 Approve', '2 Reject', '3 Another Photo', '4 Ban']);
+                const dm = await client.sendMessage(admin, m, { caption: isAr ? `صورة من @${senderKey}` : `Photo from @${senderKey}` });
+                const photoOpts = isAr
+                    ? ['1 موافقة', '2 رفض', '3 طلب صورة أخرى', '4 حظر']
+                    : ['1 Approve', '2 Reject', '3 Another Photo', '4 Ban'];
+                const poll = new Poll(isAr ? 'قرار الصورة' : 'Photo decision', photoOpts);
                 const pm = await client.sendMessage(admin, poll);
                 db.prepare("UPDATE secondary_verification SET state='WAITING_ADMIN_PHOTO_REVIEW', admin_group_id=?, admin_decision_msg_id=?, admin_poll_msg_id=? WHERE requester_id=?")
                   .run(admin, dm.id._serialized, pm.id._serialized, session.requester_id);
@@ -518,9 +519,15 @@ function initVerification(client, db, config) {
                 } else if (choice === 'contact') {
                     const adm = getAdminGroupFor(config, uSess.group_id);
                     if (adm) {
-                        const rp = await client.sendMessage(adm, new Poll(`Contact req from @${normalizeId(uSess.requester_id)}`, ['1 Approve','2 Reject','3 Ban']));
+                        const pollTitle = isAr
+                            ? `طلب تواصل مباشر من @${normalizeId(uSess.requester_id)}`
+                            : `Contact request from @${normalizeId(uSess.requester_id)}`;
+                        const pollOpts = isAr
+                            ? ['1 موافقة', '2 رفض', '3 حظر']
+                            : ['1 Approve', '2 Reject', '3 Ban'];
+                        const rp = await client.sendMessage(adm, new Poll(pollTitle, pollOpts));
                         db.prepare("UPDATE secondary_verification SET state='WAITING_ADMIN_CONTACT_DECISION', admin_group_id=?, admin_poll_msg_id=? WHERE requester_id=?").run(adm, rp.id._serialized, uSess.requester_id);
-                        await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'طلبك مع المشرف.' : 'Passed to admins.');
+                        await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'تم إرسال طلبك إلى المشرفين. يرجى الانتظار.' : 'Your request has been forwarded to admins. Please wait.');
                     } else {
                         await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'لا يوجد مجموعة إدارة للاستقبال.' : 'No admin group available.');
                     }

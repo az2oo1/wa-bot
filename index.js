@@ -1731,7 +1731,7 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
                 replyStatus,
                 repliedText: replyRow && replyRow.replied_text ? replyRow.replied_text : '',
                 replyLogState: replyRow && replyRow.last_state ? replyRow.last_state : '',
-                lifecycleStatus: row.state === 'EXPIRED_WAITING_REENTRY' ? 'partially_approved' : 'active',
+                lifecycleStatus: ['EXPIRED_WAITING_REENTRY', 'WAITING_ADMIN_CONTACT_DECISION', 'WAITING_ADMIN_PHOTO_REVIEW'].includes(row.state) ? 'partially_approved' : 'active',
                 reopenCode
             };
         }));
@@ -3112,7 +3112,7 @@ client.on('message', async msg => {
         if (ignoredMessageTypes.has(msg.type)) return;
 
         // ── [VERIFICATION DEBUG] ──────────────────────────────────────────────
-        if (config.enableSecondaryVerification && !msg.isGroupMsg) {
+        if (config.enableSecondaryVerification && !msg.isGroupMsg && !String(msg.from||'').endsWith('@g.us')) {
             console.log('[VRF-MSG] Incoming DM │ from:', msg.from, '│ fromMe:', msg.fromMe, '│ type:', msg.type, '│ body:', (msg.body||'').substring(0, 50));
         }
         // ─────────────────────────────────────────────────────────────────────
