@@ -476,7 +476,12 @@ function initVerification(client, db, config) {
                     await msg.reply(isAr ? 'مجموعة مشرفين غير محددة.' : 'No admin group found.');
                     return true;
                 }
-                const dm = await client.sendMessage(admin, m, { caption: isAr ? `صورة من @${senderKey}` : `Photo from @${senderKey}` });
+                const phoneDisplay = `+${senderKey}`;
+                const gNamePhoto = await resolveGroupName(client, session.group_id);
+                const photoCaption = isAr
+                    ? `📋 *طلب انضمام جديد — مراجعة الصورة*\nالمجموعة: ${gNamePhoto}\nالرقم: ${phoneDisplay}\n\nيرجى مراجعة الصورة والتصويت في الاستطلاع التالي.`
+                    : `📋 *New join request — photo review*\nGroup: ${gNamePhoto}\nNumber: ${phoneDisplay}\n\nPlease review the screenshot and vote in the poll below.`;
+                const dm = await client.sendMessage(admin, m, { caption: photoCaption });
                 const photoOpts = isAr
                     ? ['1 موافقة', '2 رفض', '3 طلب صورة أخرى', '4 حظر']
                     : ['1 Approve', '2 Reject', '3 Another Photo', '4 Ban'];
@@ -484,7 +489,7 @@ function initVerification(client, db, config) {
                 const pm = await client.sendMessage(admin, poll);
                 db.prepare("UPDATE secondary_verification SET state='WAITING_ADMIN_PHOTO_REVIEW', admin_group_id=?, admin_decision_msg_id=?, admin_poll_msg_id=? WHERE requester_id=?")
                   .run(admin, dm.id._serialized, pm.id._serialized, session.requester_id);
-                await msg.reply(isAr ? 'حُولت للمشرفين.' : 'Forwarded to admins.');
+                await msg.reply(isAr ? 'تم إرسال صورتك للمشرفين، سيتم إشعارك بالقرار قريباً.' : 'Your photo has been sent to admins. You will be notified of the decision soon.');
                 return true;
             }
 
@@ -515,13 +520,15 @@ function initVerification(client, db, config) {
                     await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'أرسل بريدك الجامعي (@' + (config.emailDomain||'.edu') + ')' : 'Send your student email.');
                 } else if (choice === 'photo' && uSess.require_photo) {
                     db.prepare("UPDATE secondary_verification SET state='PENDING_PHOTO_UPLOAD' WHERE requester_id=?").run(uSess.requester_id);
-                    await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'أرسل الصورة.' : 'Send screenshot.');
+                    await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'أرسل صورة من البلاك بورد تُظهر مقرراتك.' : 'Send a screenshot of your Blackboard courses.');
                 } else if (choice === 'contact') {
                     const adm = getAdminGroupFor(config, uSess.group_id);
                     if (adm) {
+                        const phoneDisplay = `+${normalizeId(uSess.requester_id)}`;
+                        const gName = await resolveGroupName(client, uSess.group_id);
                         const pollTitle = isAr
-                            ? `طلب تواصل مباشر من @${normalizeId(uSess.requester_id)}`
-                            : `Contact request from @${normalizeId(uSess.requester_id)}`;
+                            ? `📞 طلب انضمام — ${phoneDisplay} — ${gName}`
+                            : `📞 Join request — ${phoneDisplay} — ${gName}`;
                         const pollOpts = isAr
                             ? ['1 موافقة', '2 رفض', '3 حظر']
                             : ['1 Approve', '2 Reject', '3 Ban'];
@@ -547,7 +554,7 @@ function initVerification(client, db, config) {
                 
                 if (choice === 'approve') {
                     await resolveSessionAction('approve', client, db, aSess);
-                    await client.sendMessage(toCanonical(aSess.requester_id), isAr ? 'موُفِق عليك.' : 'Approved.');
+                    await client.sendMessage(toCanonical(aSess.requester_id), isAr ? '✅ تمت الموافقة على طلبك. مرحباً بك في المجموعة!' : '✅ Your request has been approved. Welcome!');
                 } else if (choice === 'reject') {
                     await resolveSessionAction('reject', client, db, aSess);
                     await client.sendMessage(toCanonical(aSess.requester_id), isAr ? 'رُفضت.' : 'Rejected.');
@@ -587,7 +594,7 @@ function initVerification(client, db, config) {
             await resolveSessionAction(act, client, db, session);
             await msg.reply('Done.');
             const isAr = config.secondaryVerificationLanguage === 'ar';
-            if (act==='approve') await client.sendMessage(toCanonical(session.requester_id), isAr ? 'موُفِق عليك.' : 'Approved.');
+            if (act==='approve') await client.sendMessage(toCanonical(session.requester_id), isAr ? '✅ تمت الموافقة على طلبك. مرحباً بك في المجموعة!' : '✅ Your request has been approved. Welcome!');
             if (act==='reject') await client.sendMessage(toCanonical(session.requester_id), isAr ? 'رُفضت.' : 'Rejected.');
             if (act==='ban') await client.sendMessage(toCanonical(session.requester_id), isAr ? 'حُظرت.' : 'Banned.');
             return true;
