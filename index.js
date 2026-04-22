@@ -1731,7 +1731,9 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
                 replyStatus,
                 repliedText: replyRow && replyRow.replied_text ? replyRow.replied_text : '',
                 replyLogState: replyRow && replyRow.last_state ? replyRow.last_state : '',
-                lifecycleStatus: ['EXPIRED_WAITING_REENTRY', 'WAITING_ADMIN_CONTACT_DECISION', 'WAITING_ADMIN_PHOTO_REVIEW'].includes(row.state) ? 'partially_approved' : 'active',
+                lifecycleStatus: (row.state === 'PENDING_CUSTOM' || row.state === 'EXPIRED_WAITING_REENTRY') 
+                    ? (row.state === 'EXPIRED_WAITING_REENTRY' ? 'partially_approved' : 'active')
+                    : 'partially_approved',
                 reopenCode
             };
         }));
@@ -1856,6 +1858,40 @@ app.post('/api/secondary-verification/pending/remove', requireAuthApi, requirePe
     } catch (e) {
         console.error('[Secondary Verification] Remove pending error:', e);
         return res.status(500).json({ error: 'Failed to remove pending approval.' });
+    }
+});
+
+// Reset a user back to PENDING_CUSTOM (bait phase) — clears bypassed flag too
+app.post('/api/secondary-verification/pending/reset-to-bait', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    try {
+        const requesterId = String((req.body && req.body.requesterId) || '').trim();
+        if (!requesterId) return res.status(400).json({ error: 'Missing requesterId' });
+
+        const session = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(requesterId);
+        if (!session) return res.status(404).json({ error: 'Session not found' });
+
+        // Reset state back to bait phase and clear method-related fields
+        db.prepare(`UPDATE secondary_verification SET 
+            state='PENDING_CUSTOM', 
+            email='', code='', 
+            user_method_poll_id='', 
+            admin_poll_msg_id='', 
+            admin_decision_msg_id='', 
+            wait_started_at=0
+            WHERE requester_id=?`).run(requesterId);
+
+        // Remove from bait-bypassed table so they must answer the keyword again
+        const normKey = requesterId.replace(/:[0-9]+@/, '@').replace('@c.us','').replace('@lid','').trim();
+        db.prepare('DELETE FROM bait_bypassed_users WHERE requester_key = ?').run(normKey);
+
+        // Re-send the bait message
+        const verification = initVerification(client, db, config);
+        await verification.startVerification(requesterId, requesterId.replace('@c.us',''), session.group_id, { forceRestart: false });
+
+        return res.json({ success: true });
+    } catch (e) {
+        console.error('[Reset to Bait] Error:', e);
+        return res.status(500).json({ error: 'Failed to reset session.' });
     }
 });
 

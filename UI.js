@@ -3532,12 +3532,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     + '<div style="font-size:11px;color:var(--text-muted);">' + (currentLang === 'en' ? 'Reply log: ' : 'سجل الرد: ') + replyBadge + (replyCount > 0 ? ' • ' + (currentLang === 'en' ? 'Replies: ' : 'عدد الردود: ') + replyCount : '') + (replyMeta ? ' • ' + replyMeta : '') + '</div>'
                     + '<div style="font-size:10px;color:var(--text-muted);">' + ageText + '</div>'
                     + '</div>'
-                    + '<button class="btn btn-primary btn-sm pending-secondary-trigger-btn" style="padding:4px 8px; margin-right:4px;" data-requester-id="' + requesterData + '" data-group-id="' + groupData + '">'
-                    + (currentLang === 'en' ? 'Resend Verification' : 'إعادة إرسال التحقق')
-                    + '</button>'
-                    + '<button class="btn btn-danger btn-sm pending-secondary-reject-btn" style="padding:4px 8px;" data-requester-id="' + requesterData + '" data-group-id="' + groupData + '">'
-                    + (currentLang === 'en' ? 'Reject' : 'رفض')
-                    + '</button>'
+                    + '<button class="btn btn-primary btn-sm pending-secondary-trigger-btn" style="padding:4px 8px; margin-right:4px;" data-requester-id="' + requesterData + '" data-group-id="' + groupData + '">' + (currentLang === 'en' ? 'Resend Verification' : 'إعادة إرسال التحقق') + '</button>'
+                    + (lifecycleStatus === 'partially_approved' ? '<button class="btn btn-warning btn-sm pending-secondary-reset-btn" style="padding:4px 8px; margin-right:4px;" data-requester-id="' + requesterData + '" title="' + (currentLang === 'en' ? 'Reset back to keyword bait phase' : 'إعادة إلى مرحلة الكلمة السرية') + '">' + (currentLang === 'en' ? '↺ Reset to Bait' : '↺ إعادة للبداية') + '</button>' : '')
+                    + '<button class="btn btn-danger btn-sm pending-secondary-reject-btn" style="padding:4px 8px;" data-requester-id="' + requesterData + '" data-group-id="' + groupData + '">' + (currentLang === 'en' ? 'Reject' : 'رفض') + '</button>'
                     + '</div>';
             }
 
@@ -3561,6 +3558,24 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         btn.disabled = true;
                         btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
                         removePendingSecondaryApproval(requesterId, groupId);
+                    };
+                });
+
+                const resetBtns = document.querySelectorAll('.pending-secondary-reset-btn');
+                resetBtns.forEach(btn => {
+                    btn.onclick = async () => {
+                        const requesterId = decodeURIComponent(btn.getAttribute('data-requester-id') || '');
+                        btn.disabled = true;
+                        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+                        try {
+                            const r = await fetch('/api/secondary-verification/pending/reset-to-bait', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ requesterId })
+                            });
+                            if (r.ok) { refreshPendingSecondaryApprovals(); }
+                            else { btn.disabled = false; btn.innerHTML = (currentLang === 'en' ? '↺ Reset to Bait' : '↺ إعادة للبداية'); }
+                        } catch(e) { btn.disabled = false; btn.innerHTML = (currentLang === 'en' ? '↺ Reset to Bait' : '↺ إعادة للبداية'); }
                     };
                 });
             }
