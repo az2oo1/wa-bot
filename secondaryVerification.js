@@ -419,7 +419,7 @@ function initVerification(client, db, config) {
             if (state === 'PENDING_EMAIL_INPUT') {
                 if (!isText) return false;
                 if (text.trim() === '1') {
-                    db.prepare("UPDATE secondary_verification SET state='PENDING_METHOD', wait_started_at=0 WHERE requester_id=?").run(session.requester_id);
+                    db.prepare("UPDATE secondary_verification SET state='PENDING_METHOD', email='', code='', user_method_poll_id='', wait_started_at=0 WHERE requester_id=?").run(session.requester_id);
                     await sendMethodPoll(client, db, config, db.prepare('SELECT * FROM secondary_verification WHERE requester_id=?').get(session.requester_id));
                     return true;
                 }
