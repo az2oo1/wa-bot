@@ -3111,6 +3111,12 @@ client.on('message', async msg => {
         const ignoredMessageTypes = new Set(['revoked', 'ciphertext', 'e2e_notification', 'notification_template', 'gp2', 'protocol']);
         if (ignoredMessageTypes.has(msg.type)) return;
 
+        // ── [VERIFICATION DEBUG] ──────────────────────────────────────────────
+        if (config.enableSecondaryVerification && !msg.isGroupMsg) {
+            console.log('[VRF-MSG] Incoming DM │ from:', msg.from, '│ fromMe:', msg.fromMe, '│ type:', msg.type, '│ body:', (msg.body||'').substring(0, 50));
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         const verification = initVerification(client, db, config);
         const handledByVerification = await verification.handleIncomingMessage(msg);
         if (handledByVerification) return;

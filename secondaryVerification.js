@@ -294,15 +294,21 @@ function initVerification(client, db, config) {
 
         handleIncomingMessage: async (msg) => {
             if (!config.enableSecondaryVerification || msg.isGroupMsg) return false;
+            if (msg.fromMe) return false; // Never process outgoing messages as incoming verification replies
+            
             const fromData = String(msg._data && msg._data.from ? msg._data.from : (msg.from || ''));
             if (fromData.endsWith('@g.us')) return false;
             
             const senderKey = normalizeId(fromData);
             const sessionRows = db.prepare('SELECT * FROM secondary_verification').all();
+            console.log('[VRF-LOOKUP] Sender key:', senderKey, '| Active sessions:', sessionRows.map(r => normalizeId(r.requester_id)));
             const session = sessionRows.find(r => normalizeId(r.requester_id) === senderKey);
-            if (!session) return false;
-
-            // Aggressively archive any incoming messages attached to an active verification session to prevent inbox spam
+            if (!session) {
+                console.log('[VRF-LOOKUP] ❗ No session found. Sender not in verification list.');
+                return false;
+            }
+            
+            console.log('[VRF-LOOKUP] ✅ Session matched! state:', session.state, '| text:', extractText(msg).substring(0, 40));
             archiveChat(client, session.requester_id).catch(()=>{});
 
             const text = extractText(msg);
