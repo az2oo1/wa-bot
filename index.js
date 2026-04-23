@@ -1847,7 +1847,11 @@ app.post('/api/secondary-verification/pending/remove', requireAuthApi, requirePe
                 try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [row.requester_id] }); } catch (e) { }
             }
             if (addBlacklist) {
-                const cleanNumber = String(row.requester_id || '').replace(/:[0-9]+/, '').replace('@lid', '@c.us').replace('@c.us', '');
+                let cleanNumber = String(row.requester_id || '').replace(/:[0-9]+(?=@)/g, '');
+                if (cleanNumber.includes('@lid')) cleanNumber = cleanNumber.replace('@lid', '@c.us');
+                if (cleanNumber.includes('@s.whatsapp.net')) cleanNumber = cleanNumber.replace('@s.whatsapp.net', '@c.us');
+                if (/^\\d+$/.test(cleanNumber)) cleanNumber = `${cleanNumber}@c.us`;
+                
                 if (cleanNumber) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanNumber);
             }
             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
@@ -3438,11 +3442,13 @@ client.on('message', async msg => {
                         } else {
                             await safeDelay();
 
-                            // Smart /ban reply: delete the replied-to message first
+                            // Smart /ban reply: delete the replied-to message first unconditionally
+                            let wasMessageDeleted = false;
                             if (cmd === 'ban' && msg.hasQuotedMsg) {
                                 try {
                                     const quotedToDelete = await msg.getQuotedMessage();
                                     await quotedToDelete.delete(true);
+                                    wasMessageDeleted = true;
                                 } catch (e) { }
                             }
 
@@ -3461,13 +3467,16 @@ client.on('message', async msg => {
                                     if (targetList.length > 1) await new Promise(r => setTimeout(r, 600)); // small gap between kicks
                                 } catch (err) {
                                     failed.push(target.cleanId.split('@')[0]);
+                                    // Even if they failed kick (e.g. left group), we still insert into blacklist for /ban
+                                    if (cmd === 'ban' && cmdBlacklistEnabled) {
+                                        try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(target.cleanId); } catch (e) { }
+                                    }
                                 }
                             }
 
                             // Summary report to admin group
                             const succeededMentions = targetList
-                                .filter(t => succeeded.includes(t.cleanId.split('@')[0]))
-                                .map(t => t.cleanId);
+                                .map(t => t.cleanId); // Mention everyone involved
                             const allMentions = [cleanAuthorId, ...succeededMentions];
 
                             const successLine = succeeded.length > 0
@@ -3480,10 +3489,10 @@ client.on('message', async msg => {
                                     ? `⚠️ Failed (may have left or bot lacks permission): @${failed.join(', @')}`
                                     : `⚠️ فشل (ربما غادروا أو البوت لا يملك صلاحية): @${failed.join(', @')}`)
                                 : '';
-                            const blacklistLine = cmd === 'ban' && cmdBlacklistEnabled && succeeded.length > 0
+                            const blacklistLine = cmd === 'ban' && cmdBlacklistEnabled
                                 ? (cmdAdminLang === 'en' ? '🚫 Added to blacklist.' : '🚫 تمت إضافتهم للقائمة السوداء.')
                                 : '';
-                            const deletedLine = cmd === 'ban' && msg.hasQuotedMsg && succeeded.length > 0
+                            const deletedLine = cmd === 'ban' && msg.hasQuotedMsg && wasMessageDeleted
                                 ? (cmdAdminLang === 'en' ? '🗑️ Replied message deleted.' : '🗑️ تم حذف الرسالة المشار إليها.')
                                 : '';
 
@@ -3496,7 +3505,7 @@ client.on('message', async msg => {
 
                             try { await client.sendMessage(cmdAdminGroup, confirmText, { mentions: allMentions }); } catch (e) { }
 
-                            if (succeeded.length === 0) {
+                            if (succeeded.length === 0 && !wasMessageDeleted) {
                                 try {
                                     await msg.reply(cmdAdminLang === 'en'
                                         ? '⚠️ Failed to remove all participants. They may have already left or the bot lacks permissions.'
@@ -3507,10 +3516,12 @@ client.on('message', async msg => {
                     } else if (cmd === 'report') {
                         // Get quoted message body for context
                         let reportedContent = '';
+                        let serializedReportedMsgId = null;
                         if (msg.hasQuotedMsg) {
                             try {
                                 const quoted = await msg.getQuotedMessage();
                                 reportedContent = quoted.body || '';
+                                serializedReportedMsgId = quoted.id._serialized;
                             } catch (e) { }
                         }
                         const senderNum = cleanAuthorId.split('@')[0];
@@ -3529,7 +3540,8 @@ client.on('message', async msg => {
                                 rawSenderId: targetRawId,
                                 sourceGroupId: groupId,
                                 pollMsg,
-                                isBlacklistEnabled: cmdBlacklistEnabled
+                                isBlacklistEnabled: cmdBlacklistEnabled,
+                                reportedMsgId: serializedReportedMsgId
                             });
                             await msg.reply(cmdAdminLang === 'en'
                                 ? '✅ Your report has been sent to the admins for review.'
@@ -3849,7 +3861,7 @@ client.on('message', async msg => {
                 }
             }
 
-            if (await tryRespondWithQA()) return;
+            if (!isViolating && await tryRespondWithQA()) return;
 
             let canSendToAI = false;
             let base64Image = null;
@@ -3944,6 +3956,70 @@ client.on('message', async msg => {
                     });
                 }
             }
+        } else {
+            // It's a Direct Message
+            if (msg.fromMe) return;
+
+            const rawAuthorId = msg.author || msg.from;
+            let cleanAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+
+            if (cleanAuthorId.includes('@lid')) {
+                try {
+                    const contact = await msg.getContact();
+                    if (contact && contact.number) cleanAuthorId = `${contact.number}@c.us`;
+                    else cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us');
+                } catch (e) { cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us'); }
+            }
+
+            // Check if sender is VIP whitelist
+            const isVIP = Array.isArray(config.whitelist) && config.whitelist.some(w => {
+                const wId = extractNumbers(w);
+                const aId = extractNumbers(cleanAuthorId);
+                return wId && aId && wId === aId;
+            });
+
+            if (isVIP && msg.body) {
+                const text = msg.body.trim();
+                const dmBanMatch = text.match(/^\/(ban|kick)\s+(\d+)$/i);
+                if (dmBanMatch) {
+                    const cmd = dmBanMatch[1].toLowerCase();
+                    const targetNum = dmBanMatch[2];
+                    const targetCleanId = `${targetNum}@c.us`;
+
+                    const botId = client.info && client.info.wid ? client.info.wid._serialized : null;
+                    let removed = false;
+                    let handledGroups = 0;
+
+                    const chats = await client.getChats();
+                    for (const checkChat of chats) {
+                        if (!checkChat.isGroup) continue;
+                        const botData = botId ? checkChat.participants.find(p => p.id._serialized === botId) : null;
+                        if (!botData || !(botData.isAdmin || botData.isSuperAdmin)) continue;
+                        
+                        const done = await tryKickFromChat(checkChat, [targetCleanId]);
+                        if (done) {
+                            removed = true;
+                            handledGroups++;
+                        }
+                    }
+
+                    if (cmd === 'ban') {
+                        try {
+                            db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(targetCleanId);
+                        } catch (e) {
+                            console.error('Failed to blacklist via DM ban:', e);
+                        }
+                    }
+
+                    if (removed) {
+                        await msg.reply(`✅ تم تنفيذ أمر ${cmd === 'ban' ? 'الحظر' : 'الطرد'} لـ ${targetNum} بنجاح من ${handledGroups} مجموعة.`);
+                    } else if (cmd === 'ban') {
+                        await msg.reply(`⚠️ لم يتم العثور على ${targetNum} في أي مجموعة، ولكن تمت إضافته للقائمة السوداء.`);
+                    } else {
+                        await msg.reply(`⚠️ لم يتم العثور على ${targetNum} في أي مجموعة لطرده.`);
+                    }
+                }
+            }
         }
     } catch (error) { }
 });
@@ -4001,6 +4077,18 @@ client.on('vote_update', async vote => {
                     removed = true;
                     break;
                 }
+            }
+        }
+
+        // Delete the original reported message if it exists
+        if (data.reportedMsgId) {
+            try {
+                const reportedMsg = await client.getMessageById(data.reportedMsgId);
+                if (reportedMsg) {
+                    await reportedMsg.delete(true);
+                }
+            } catch (e) {
+                console.error('[أمر /report] Failed to delete reported message after voting:', e.message);
             }
         }
 

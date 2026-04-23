@@ -155,7 +155,7 @@ async function resolveSessionAction(action, client, db, session) {
     } else if (action === 'ban') {
         const cg = await client.getChatById(session.group_id).catch(()=>null);
         if (cg && cg.rejectGroupMembershipRequests) try { await cg.rejectGroupMembershipRequests({ requesterIds: [canon] }); } catch(e){}
-        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(key);
+        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(canon);
         upsertReplyLog(db, canon, session.group_id, 'no_reply', '', 'banned');
     }
 }
