@@ -1960,6 +1960,30 @@ app.post('/api/secondary-verification/stop', requireAuthApi, requirePermission('
         return res.status(500).json({ error: 'Failed to stop approval process.' });
     }
 });
+app.post('/api/webhooks/missed-call', async (req, res) => {
+    try {
+        if (!config.enableMissedCallReply) return res.status(403).json({ error: 'Feature disabled' });
+        if (!config.missedCallToken || req.body.token !== config.missedCallToken) return res.status(401).json({ error: 'Unauthorized' });
+        
+        let phoneNumber = String(req.body.phoneNumber || '').trim();
+        if (!phoneNumber) return res.status(400).json({ error: 'Phone number required' });
+        
+        // Clean phone number (remove +, spaces, dashes, parentheses)
+        phoneNumber = phoneNumber.replace(/[\s\-\+\(\)]/g, '');
+        
+        if (!config.missedCallMessage) return res.status(400).json({ error: 'No message configured' });
+        
+        // Format to WhatsApp ID format
+        const waId = `${phoneNumber}@c.us`;
+        
+        await client.sendMessage(waId, config.missedCallMessage);
+        
+        return res.json({ success: true });
+    } catch (e) {
+        console.error('[Webhook Error]', e);
+        return res.status(500).json({ error: 'Internal error' });
+    }
+});
 
 app.post('/save', requireAuthApi, (req, res) => {
     try {
@@ -4461,16 +4485,15 @@ async function rejectExpiredSecondaryVerificationSessions() {
             if (chatObj) {
                 try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [row.requester_id] }); } catch (e) { }
             }
-            const isAr = config.secondaryVerificationLanguage === 'ar';
-            const approvalKeywords = String(config.approvalKeyword || 'yes')
-                .split(',')
-                .map(value => value.trim())
-                .filter(Boolean);
-            const keywordHint = approvalKeywords.length > 0 ? approvalKeywords.join(' / ') : (isAr ? 'موافقة' : 'yes');
-            const expiryMessage = isAr
-                ? `انتهت فترة التحقق هذه. إذا أردت إعادة التحقق، أرسل كلمة: ${keywordHint}`
-                : `This verification window has expired. If you want to authenticate again, send: ${keywordHint}`;
-            await client.sendMessage(row.requester_id, expiryMessage).catch(() => { });
+            if (row.state !== 'PENDING_CUSTOM') {
+                const isAr = config.secondaryVerificationLanguage === 'ar';
+                const reopenCode = String(config.secondaryVerificationReopenCode || process.env.WA_VERIFICATION_REOPEN_CODE || '').trim().toLowerCase();
+                const hintWord = reopenCode || (isAr ? 'متابعة' : 'reopen');
+                const expiryMessage = isAr
+                    ? `انتهت فترة التحقق هذه. إذا أردت إعادة التحقق، أرسل كلمة: ${hintWord}`
+                    : `This verification window has expired. If you want to authenticate again, send: ${hintWord}`;
+                await client.sendMessage(row.requester_id, expiryMessage).catch(() => { });
+            }
 
             db.prepare(`
                 UPDATE secondary_verification

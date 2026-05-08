@@ -703,6 +703,39 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
 
                 </div>
 
+                <div class="card-grid" style="margin-bottom: 20px;">
+                    <!-- Webhook Integrations -->
+                    <div class="card success">
+                        <div class="card-header">
+                            <h3 style="color:var(--accent);"><i class="fas fa-satellite-dish"></i> ${t('الرد التلقائي على المكالمات (Webhook)', 'SIM Missed Call Auto-Reply')}</h3>
+                        </div>
+                        <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.8;">${t('يرسل رسالة واتساب تلقائية لأي رقم اتصل بشريحتك ولم ترد عليه. (يتطلب تطبيق MacroDroid على هاتفك)', 'Sends an auto-reply WhatsApp message to anyone who calls your SIM card and you miss it. (Requires MacroDroid app)')}</p>
+                        <div class="toggle-row green" style="margin-bottom:12px; background:rgba(0,0,0,0.1); padding:8px; border-radius:6px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableMissedCallReply" ${config.enableMissedCallReply ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label green">${t('تفعيل الرد التلقائي للمكالمات', 'Enable Missed Call Auto-Reply')}</div>
+                            </div>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('رمز الأمان (Token)', 'Webhook Secret Token')}</label>
+                            <input type="text" id="missedCallToken" value="${config.missedCallToken || Math.random().toString(36).substring(2, 15)}" placeholder="${t('رمز سري لحماية الرابط', 'Secret token to protect the endpoint')}">
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('رسالة الرد التلقائي', 'Auto-Reply Message')}</label>
+                            <textarea id="missedCallMessage" rows="3" placeholder="${t('مرحباً، لقد رأيت اتصالك. سأرد عليك في أقرب وقت عبر الواتساب.', 'Hello, I missed your call. I will reply on WhatsApp ASAP.')}">${config.missedCallMessage || ''}</textarea>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);background:rgba(0,0,0,0.1);padding:10px;border-radius:6px;border:1px solid var(--card-border);">
+                            <strong style="color:var(--accent);">${t('رابط الويب هوك الخاص بك:', 'Your Webhook URL:')}</strong><br>
+                            <code>http://YOUR_BOT_IP:3000/api/webhooks/missed-call</code><br><br>
+                            ${t('في MacroDroid، استخدم إجراء HTTP Request (POST) وارسل JSON التالي:', 'In MacroDroid, use HTTP Request (POST) action and send this JSON:')}<br>
+                            <pre style="margin-top:5px;background:black;color:#00ff00;padding:5px;border-radius:4px;">{
+  "phoneNumber": "[call_number]",
+  "token": "YOUR_TOKEN"
+}</pre>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card-grid">
                     <!-- Verification Card -->
                     <div class="card info">
@@ -826,20 +859,31 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         </div>
                         <div class="field-row" style="margin-bottom:15px;">
                             <div class="field-group">
-                                <label class="field-label">${t('نطاق البريد الجامعي', 'College Email Domain')}</label>
-                                <input type="text" id="emailDomain" value="${config.emailDomain || 'college.edu'}" placeholder="college.edu">
+                                <label class="field-label">${t('نطاقات البريد المسموحة (مفصولة بفاصلة)', 'Allowed Email Domains (comma separated)')}</label>
+                                <input type="text" id="emailDomain" value="${config.emailDomain || 'college.edu'}" placeholder="college.edu, gmail.com, hotmail.com">
                             </div>
                         </div>
                         <div class="sub-panel" style="margin-top:10px;">
-                            <h4>${t('إعدادات البريد (Outlook)', 'Email Settings (Outlook)')}</h4>
-                            <div class="field-row">
+                            <h4><i class="fas fa-envelope"></i> ${t('إعدادات خادم البريد (SMTP)', 'Email Server Settings (SMTP)')}</h4>
+                            <p style="font-size:12px; color:var(--text-muted); margin-bottom:12px;">${t('يدعم أي مزود مثل Gmail, Outlook, iCloud. (كلمة المرور قد تتطلب App Password)', 'Supports any provider like Gmail, Outlook, iCloud. (Password may require an App Password)')}</p>
+                            <div class="field-row" style="margin-bottom:10px;">
                                 <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('البريد الإلكتروني', 'Outlook Email')}</label>
-                                    <input type="text" id="outlookEmail" value="${config.outlookEmail || ''}" placeholder="you@outlook.com">
+                                    <label class="field-label">${t('خادم SMTP', 'SMTP Host')}</label>
+                                    <input type="text" id="smtpHost" value="${config.smtpHost || 'smtp-mail.outlook.com'}" placeholder="smtp.gmail.com">
                                 </div>
                                 <div class="field-group" style="margin-bottom:0;">
-                                    <label class="field-label">${t('كلمة المرور', 'Outlook Password')}</label>
-                                    <input type="password" id="outlookPassword" value="${config.outlookPassword || ''}" placeholder="Password or App Password">
+                                    <label class="field-label">${t('منفذ SMTP', 'SMTP Port')}</label>
+                                    <input type="number" id="smtpPort" value="${config.smtpPort || 587}" placeholder="587">
+                                </div>
+                            </div>
+                            <div class="field-row">
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('البريد الإلكتروني', 'Sender Email')}</label>
+                                    <input type="text" id="outlookEmail" value="${config.outlookEmail || ''}" placeholder="your-email@gmail.com">
+                                </div>
+                                <div class="field-group" style="margin-bottom:0;">
+                                    <label class="field-label">${t('كلمة المرور أو App Password', 'Password / App Password')}</label>
+                                    <input type="password" id="outlookPassword" value="${config.outlookPassword || ''}" placeholder="App Password">
                                 </div>
                             </div>
                         </div>
@@ -5262,8 +5306,14 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     approvalKeyword: approvalWordsArr.join(','),
                     banKeyword: banWordsArr.join(','),
                     emailDomain: document.getElementById('emailDomain') ? document.getElementById('emailDomain').value.trim() : '',
+                    smtpHost: document.getElementById('smtpHost') ? document.getElementById('smtpHost').value.trim() : '',
+                    smtpPort: document.getElementById('smtpPort') ? parseInt(document.getElementById('smtpPort').value, 10) : 587,
                     outlookEmail: document.getElementById('outlookEmail') ? document.getElementById('outlookEmail').value.trim() : '',
                     outlookPassword: document.getElementById('outlookPassword') ? document.getElementById('outlookPassword').value.trim() : '',
+
+                    enableMissedCallReply: document.getElementById('enableMissedCallReply') ? document.getElementById('enableMissedCallReply').checked : false,
+                    missedCallToken: document.getElementById('missedCallToken') ? document.getElementById('missedCallToken').value.trim() : '',
+                    missedCallMessage: document.getElementById('missedCallMessage') ? document.getElementById('missedCallMessage').value.trim() : '',
 
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
                     enableWordFilterSmartMatch: document.getElementById('enableWordFilterSmartMatch') ? document.getElementById('enableWordFilterSmartMatch').checked : false,

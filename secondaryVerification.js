@@ -235,6 +235,10 @@ function initVerification(client, db, config) {
                 const existing = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(reqCanon);
                 if (existing) {
                     if (isTest && existing.flow_type !== 'test') { console.log('[startVerification] failed: overlaps with real session'); return false; }
+                    const activeStates = ['PENDING_METHOD', 'PENDING_CUSTOM', 'PENDING_EMAIL_INPUT', 'PENDING_PHOTO_UPLOAD', 'PENDING_CODE'];
+                    if (!isTest && !options.forceRestart && activeStates.includes(existing.state)) {
+                        return false; 
+                    }
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(existing.requester_id);
                     // Also wipe trailing reply logs so the dashboard doesn't show ghost interaction timestamps!
                     db.prepare('DELETE FROM secondary_verification_reply_log WHERE requester_id = ?').run(existing.requester_id);
@@ -256,21 +260,16 @@ function initVerification(client, db, config) {
                     upsertReplyLog(db, reqCanon, groupId, 'sent', '', 'PENDING_CUSTOM');
                     if (!isTest) markBaitSent(db, reqCanon);
                 } else {
-                    let msgText = isAr ? 'تم قبول طلبك مبدئياً. سأرسل لك الآن قائمة خيارات التحقق.' : 'Your request was accepted initially. I will now send you the verification options.';
                     if (hasBypassed) {
                          const gName = await resolveGroupName(client, groupId);
-                         msgText = isAr ? `مرحباً مجدداً. لقد لاحظنا طلبك للانضمام إلى "${gName}" وسنتابع من حيث توقفت. يرجى إكمال عملية التحقق الخاصة بك:` : `Welcome back. We noticed your request to join "${gName}" and will continue from where you left off. Please complete your verification:`;
+                         const msgText = isAr ? `مرحباً مجدداً. لقد لاحظنا طلبك للانضمام إلى "${gName}" وسنتابع من حيث توقفت. يرجى إكمال عملية التحقق الخاصة بك:` : `Welcome back. We noticed your request to join "${gName}" and will continue from where you left off. Please complete your verification:`;
+                         await client.sendMessage(reqCanon, msgText);
                     }
-                    await client.sendMessage(reqCanon, msgText);
                     await archiveChat(client, reqCanon);
                     upsertReplyLog(db, reqCanon, groupId, 'sent', '', 'PENDING_METHOD');
-                    if (!isEmail && !isPhoto) {
-                        await resolveSessionAction('approve', client, db, {requester_id: reqCanon, group_id: groupId});
-                        await client.sendMessage(reqCanon, isAr ? 'تمت الموافقة عليك.' : 'You have been approved.');
-                    } else {
-                        const sess = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(reqCanon);
-                        if (sess) await sendMethodPoll(client, db, config, sess);
-                    }
+                    
+                    const sess = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(reqCanon);
+                    if (sess) await sendMethodPoll(client, db, config, sess);
                 }
                 return true;
             } catch (err) {
@@ -421,17 +420,22 @@ function initVerification(client, db, config) {
                     await sendMethodPoll(client, db, config, db.prepare('SELECT * FROM secondary_verification WHERE requester_id=?').get(session.requester_id));
                     return true;
                 }
-                const dom = (config.emailDomain || 'college.edu').trim();
-                const em = text.trim();
-                if (!em.endsWith(`@${dom}`) || !em.includes('@')) {
-                    await msg.reply(isAr ? `يجب أن ينتهي البريد بـ @${dom}` : `Email must end with @${dom}`);
+                const doms = (config.emailDomain || 'college.edu').split(',').map(d => d.trim().toLowerCase()).filter(Boolean);
+                const em = text.trim().toLowerCase();
+                if (!em.includes('@') || !doms.some(d => em.endsWith(`@${d}`))) {
+                    const domsStr = doms.map(d => '@' + d).join(' أو ');
+                    const domsStrEn = doms.map(d => '@' + d).join(' or ');
+                    await msg.reply(isAr ? `يجب أن ينتهي البريد بأحد النطاقات المسموحة: ${domsStr}` : `Email must end with one of the allowed domains: ${domsStrEn}`);
                     return true;
                 }
                 const code = Math.floor(100000 + Math.random() * 900000).toString();
                 db.prepare("UPDATE secondary_verification SET state='PENDING_CODE', email=?, code=? WHERE requester_id=?").run(em, code, session.requester_id);
 
                 if (config.outlookEmail && config.outlookPassword) {
-                    const trans = nodemailer.createTransport({ host: 'smtp-mail.outlook.com', port: 587, secure: false, auth: { user: config.outlookEmail, pass: config.outlookPassword }, tls: { minVersion: 'TLSv1.2' } });
+                    const smtpHost = config.smtpHost || 'smtp-mail.outlook.com';
+                    const smtpPort = config.smtpPort ? parseInt(config.smtpPort, 10) : 587;
+                    const secure = smtpPort === 465;
+                    const trans = nodemailer.createTransport({ host: smtpHost, port: smtpPort, secure: secure, auth: { user: config.outlookEmail, pass: config.outlookPassword }, tls: { minVersion: 'TLSv1.2' } });
                     try {
                         await trans.sendMail({ from: config.outlookEmail, to: em, subject: isAr?'التحقق':'Verification', text: (isAr?'الرمز: ':'Code: ') + code });
                         logEmail(db, senderKey, session.group_id, em, 'sent');
@@ -517,7 +521,8 @@ function initVerification(client, db, config) {
                 const isAr = config.secondaryVerificationLanguage === 'ar';
                 if (choice === 'email' && uSess.require_email) {
                     db.prepare("UPDATE secondary_verification SET state='PENDING_EMAIL_INPUT' WHERE requester_id=?").run(uSess.requester_id);
-                    await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'أرسل بريدك الجامعي (@' + (config.emailDomain||'.edu') + ')' : 'Send your student email.');
+                    const domsStr = (config.emailDomain || 'college.edu').split(',').map(d => '@' + d.trim()).join(' / ');
+                    await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'أرسل بريدك الإلكتروني المسموح (' + domsStr + ')' : 'Send your allowed email (' + domsStr + ').');
                 } else if (choice === 'photo' && uSess.require_photo) {
                     db.prepare("UPDATE secondary_verification SET state='PENDING_PHOTO_UPLOAD' WHERE requester_id=?").run(uSess.requester_id);
                     await client.sendMessage(toCanonical(uSess.requester_id), isAr ? 'أرسل صورة من البلاك بورد تُظهر مقرراتك.' : 'Send a screenshot of your Blackboard courses.');
