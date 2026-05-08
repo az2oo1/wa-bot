@@ -393,8 +393,15 @@ function loadConfigFromDB() {
         approvalKeyword: "yes",
         banKeyword: "no",
         emailDomain: "college.edu",
+        smtpHost: "",
+        smtpPort: 587,
         outlookEmail: "",
         outlookPassword: "",
+        enableMissedCallReply: false,
+        missedCallToken: "",
+        missedCallMessage: "",
+        enableMissedCallReturning: false,
+        missedCallReturningMessage: "",
         safeMode: false,
         purgeScheduleEnabled: false, purgeScheduleIntervalHours: 24,
         adminSyncEnabled: false, adminSyncIntervalHours: 1,
@@ -413,9 +420,9 @@ function loadConfigFromDB() {
         if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits', 'aiFilterTriggerWords', 'globalQA', 'secondaryVerificationGroups'].includes(row.key)) {
             try { newConfig[row.key] = JSON.parse(row.value); } catch(e) { }
         }
-        else if (['enableWordFilter', 'enableWordFilterSmartMatch', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled', 'enableQASmartMatch', 'autoPurgeScheduleEnabled', 'adminWhitelistSyncEnabled', 'enableSecondaryVerification', 'enableKeywordVerification', 'enableEmailVerification', 'enablePhotoVerification', 'enableSecondarySmartMatch'].includes(row.key)) {
+        else if (['enableWordFilter', 'enableWordFilterSmartMatch', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled', 'enableQASmartMatch', 'autoPurgeScheduleEnabled', 'adminWhitelistSyncEnabled', 'enableSecondaryVerification', 'enableKeywordVerification', 'enableEmailVerification', 'enablePhotoVerification', 'enableSecondarySmartMatch', 'enableMissedCallReply', 'enableMissedCallReturning'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
-        } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes', 'secondaryVerificationDelay', 'secondaryVerificationTimeoutDays'].includes(row.key)) {
+        } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes', 'secondaryVerificationDelay', 'secondaryVerificationTimeoutDays', 'smtpPort'].includes(row.key)) {
             newConfig[row.key] = parseInt(row.value, 10);
         } else newConfig[row.key] = row.value;
     });
@@ -489,6 +496,13 @@ function saveConfigToDB(conf) {
         setGlobal.run('secondaryVerificationGroups', JSON.stringify(conf.secondaryVerificationGroups || []));
         setGlobal.run('secondaryVerificationLanguage', conf.secondaryVerificationLanguage || 'en');
         setGlobal.run('secondaryVerificationTimeoutDays', String(Math.max(1, parseInt(conf.secondaryVerificationTimeoutDays, 10) || 2)));
+        setGlobal.run('smtpHost', conf.smtpHost || '');
+        setGlobal.run('smtpPort', String(conf.smtpPort || 587));
+        setGlobal.run('enableMissedCallReply', conf.enableMissedCallReply ? '1' : '0');
+        setGlobal.run('missedCallToken', conf.missedCallToken || '');
+        setGlobal.run('missedCallMessage', conf.missedCallMessage || '');
+        setGlobal.run('enableMissedCallReturning', conf.enableMissedCallReturning ? '1' : '0');
+        setGlobal.run('missedCallReturningMessage', conf.missedCallReturningMessage || '');
         setGlobal.run('secondaryVerificationPartialTimeoutMinutes', String(Math.max(1, parseInt(conf.secondaryVerificationPartialTimeoutMinutes, 10) || 30)));
         setGlobal.run('secondaryVerificationDelay', String(Math.max(1, parseInt(conf.secondaryVerificationDelay, 10) || 3600)));
         setGlobal.run('secondaryVerificationReopenCode', conf.secondaryVerificationReopenCode || '');
@@ -1976,7 +1990,22 @@ app.post('/api/webhooks/missed-call', async (req, res) => {
         // Format to WhatsApp ID format
         const waId = `${phoneNumber}@c.us`;
         
-        await client.sendMessage(waId, config.missedCallMessage);
+        let messageToSend = config.missedCallMessage;
+        
+        if (config.enableMissedCallReturning && config.missedCallReturningMessage) {
+            try {
+                const chat = await client.getChatById(waId);
+                // Check if we have history with this chat
+                const messages = await chat.fetchMessages({ limit: 1 });
+                if (messages && messages.length > 0) {
+                    messageToSend = config.missedCallReturningMessage;
+                }
+            } catch (err) {
+                console.error('[Webhook] Failed to check chat history:', err.message);
+            }
+        }
+        
+        await client.sendMessage(waId, messageToSend);
         
         return res.json({ success: true });
     } catch (e) {

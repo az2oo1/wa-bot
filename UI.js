@@ -338,6 +338,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 <button class="nav-item" onclick="showPage('page-general', this)">
                     <span class="nav-icon"><i class="fas fa-cog"></i></span> ${t('الإعدادات العامة', 'General Settings')}
                 </button>
+                <button class="nav-item" onclick="showPage('page-missed-call', this)">
+                    <span class="nav-icon"><i class="fas fa-satellite-dish"></i></span> ${t('المكالمات الفائتة', 'Missed Calls')}
+                </button>
                 <button class="nav-item" onclick="showPage('page-spam', this)">
                     <span class="nav-icon"><i class="fas fa-shield-alt"></i></span> ${t('مكافحة الإزعاج', 'Anti-Spam')}
                 </button>
@@ -703,39 +706,6 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
 
                 </div>
 
-                <div class="card-grid" style="margin-bottom: 20px;">
-                    <!-- Webhook Integrations -->
-                    <div class="card success">
-                        <div class="card-header">
-                            <h3 style="color:var(--accent);"><i class="fas fa-satellite-dish"></i> ${t('الرد التلقائي على المكالمات (Webhook)', 'SIM Missed Call Auto-Reply')}</h3>
-                        </div>
-                        <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.8;">${t('يرسل رسالة واتساب تلقائية لأي رقم اتصل بشريحتك ولم ترد عليه. (يتطلب تطبيق MacroDroid على هاتفك)', 'Sends an auto-reply WhatsApp message to anyone who calls your SIM card and you miss it. (Requires MacroDroid app)')}</p>
-                        <div class="toggle-row green" style="margin-bottom:12px; background:rgba(0,0,0,0.1); padding:8px; border-radius:6px;">
-                            <div class="toggle-left">
-                                <label class="switch"><input type="checkbox" id="enableMissedCallReply" ${config.enableMissedCallReply ? 'checked' : ''}><span class="slider"></span></label>
-                                <div class="toggle-label green">${t('تفعيل الرد التلقائي للمكالمات', 'Enable Missed Call Auto-Reply')}</div>
-                            </div>
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('رمز الأمان (Token)', 'Webhook Secret Token')}</label>
-                            <input type="text" id="missedCallToken" value="${config.missedCallToken || Math.random().toString(36).substring(2, 15)}" placeholder="${t('رمز سري لحماية الرابط', 'Secret token to protect the endpoint')}">
-                        </div>
-                        <div class="field-group">
-                            <label class="field-label">${t('رسالة الرد التلقائي', 'Auto-Reply Message')}</label>
-                            <textarea id="missedCallMessage" rows="3" placeholder="${t('مرحباً، لقد رأيت اتصالك. سأرد عليك في أقرب وقت عبر الواتساب.', 'Hello, I missed your call. I will reply on WhatsApp ASAP.')}">${config.missedCallMessage || ''}</textarea>
-                        </div>
-                        <div style="font-size:11px;color:var(--text-muted);background:rgba(0,0,0,0.1);padding:10px;border-radius:6px;border:1px solid var(--card-border);">
-                            <strong style="color:var(--accent);">${t('رابط الويب هوك الخاص بك:', 'Your Webhook URL:')}</strong><br>
-                            <code>http://YOUR_BOT_IP:3000/api/webhooks/missed-call</code><br><br>
-                            ${t('في MacroDroid، استخدم إجراء HTTP Request (POST) وارسل JSON التالي:', 'In MacroDroid, use HTTP Request (POST) action and send this JSON:')}<br>
-                            <pre style="margin-top:5px;background:black;color:#00ff00;padding:5px;border-radius:4px;">{
-  "phoneNumber": "[call_number]",
-  "token": "YOUR_TOKEN"
-}</pre>
-                        </div>
-                    </div>
-                </div>
-
                 <div class="card-grid">
                     <!-- Verification Card -->
                     <div class="card info">
@@ -942,6 +912,58 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
 
                 </div>
 
+            </div>
+
+            <div class="page" id="page-missed-call">
+                <div class="card-grid">
+                    <!-- Webhook Integrations -->
+                    <div class="card success">
+                        <div class="card-header">
+                            <h3 style="color:var(--accent);"><i class="fas fa-satellite-dish"></i> ${t('الرد التلقائي على المكالمات (Webhook)', 'SIM Missed Call Auto-Reply')}</h3>
+                        </div>
+                        <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.8;">${t('يرسل رسالة واتساب تلقائية لأي رقم اتصل بشريحتك ولم ترد عليه. (يتطلب تطبيق MacroDroid على هاتفك)', 'Sends an auto-reply WhatsApp message to anyone who calls your SIM card and you miss it. (Requires MacroDroid app)')}</p>
+                        
+                        <div class="toggle-row green" style="margin-bottom:12px; background:rgba(0,0,0,0.1); padding:8px; border-radius:6px;">
+                            <div class="toggle-left">
+                                <label class="switch"><input type="checkbox" id="enableMissedCallReply" ${config.enableMissedCallReply ? 'checked' : ''}><span class="slider"></span></label>
+                                <div class="toggle-label green">${t('تفعيل الرد التلقائي للمكالمات', 'Enable Missed Call Auto-Reply')}</div>
+                            </div>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('رمز الأمان (Token)', 'Webhook Secret Token')}</label>
+                            <input type="text" id="missedCallToken" value="${config.missedCallToken || Math.random().toString(36).substring(2, 15)}" placeholder="${t('رمز سري لحماية الرابط', 'Secret token to protect the endpoint')}">
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('رسالة الرد التلقائي (للاتصال الأول)', 'Auto-Reply Message (First Time)')}</label>
+                            <textarea id="missedCallMessage" rows="3" placeholder="${t('مرحباً، لقد رأيت اتصالك. سأرد عليك في أقرب وقت عبر الواتساب.', 'Hello, I missed your call. I will reply on WhatsApp ASAP.')}">${config.missedCallMessage || ''}</textarea>
+                        </div>
+                        
+                        <div style="margin-top: 20px; border-top: 1px solid var(--card-border); padding-top: 15px;">
+                            <h4 style="margin-bottom: 10px; color: var(--accent);">${t('جهات الاتصال السابقة', 'Previous Contacts')}</h4>
+                            <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${t('أرسل رسالة مختلفة إذا كان هناك محادثة سابقة مع هذا الرقم.', 'Send a different message if you already have a chat history with this number.')}</p>
+                            <div class="toggle-row" style="margin-bottom:12px;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" id="enableMissedCallReturning" ${config.enableMissedCallReturning ? 'checked' : ''}><span class="slider"></span></label>
+                                    <div class="toggle-label">${t('إرسال رسالة مختلفة لجهات الاتصال السابقة', 'Send different message to previous contacts')}</div>
+                                </div>
+                            </div>
+                            <div class="field-group">
+                                <label class="field-label">${t('رسالة المتصل السابق', 'Returning Caller Message')}</label>
+                                <textarea id="missedCallReturningMessage" rows="3" placeholder="${t('أهلاً مجدداً! رأيت اتصالك، سأتواصل معك قريباً.', 'Hey again! Missed your call, I will text you soon.')}">${config.missedCallReturningMessage || ''}</textarea>
+                            </div>
+                        </div>
+
+                        <div style="font-size:11px;color:var(--text-muted);background:rgba(0,0,0,0.1);padding:10px;border-radius:6px;border:1px solid var(--card-border); margin-top:15px;">
+                            <strong style="color:var(--accent);">${t('رابط الويب هوك الخاص بك:', 'Your Webhook URL:')}</strong><br>
+                            <code>http://YOUR_BOT_IP:3000/api/webhooks/missed-call</code><br><br>
+                            ${t('في MacroDroid، استخدم إجراء HTTP Request (POST) وارسل JSON التالي:', 'In MacroDroid, use HTTP Request (POST) action and send this JSON:')}<br>
+                            <pre style="margin-top:5px;background:black;color:#00ff00;padding:5px;border-radius:4px;">{
+  "phoneNumber": "[call_number]",
+  "token": "YOUR_TOKEN"
+}</pre>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <div class="page" id="page-spam">
@@ -2288,6 +2310,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 'page-status': '${t("حالة الاتصال", "Connection Status")}',
                 'page-blacklist': '${t("إدارة الأرقام", "Manage Numbers")}',
                 'page-general': '${t("الإعدادات العامة", "General Settings")}',
+                'page-missed-call': '${t("المكالمات الفائتة", "Missed Calls")}',
                 'page-spam': '${t("مكافحة الإزعاج", "Anti-Spam")}',
                 'page-media': '${t("فلتر الوسائط", "Media Filter")}',
                 'page-ai': '${t("الذكاء الاصطناعي", "AI Moderator")}',
@@ -5314,6 +5337,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     enableMissedCallReply: document.getElementById('enableMissedCallReply') ? document.getElementById('enableMissedCallReply').checked : false,
                     missedCallToken: document.getElementById('missedCallToken') ? document.getElementById('missedCallToken').value.trim() : '',
                     missedCallMessage: document.getElementById('missedCallMessage') ? document.getElementById('missedCallMessage').value.trim() : '',
+                    enableMissedCallReturning: document.getElementById('enableMissedCallReturning') ? document.getElementById('enableMissedCallReturning').checked : false,
+                    missedCallReturningMessage: document.getElementById('missedCallReturningMessage') ? document.getElementById('missedCallReturningMessage').value.trim() : '',
 
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
                     enableWordFilterSmartMatch: document.getElementById('enableWordFilterSmartMatch') ? document.getElementById('enableWordFilterSmartMatch').checked : false,
