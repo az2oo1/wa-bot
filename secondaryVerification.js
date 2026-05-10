@@ -3,6 +3,7 @@ const { Poll } = require('whatsapp-web.js');
 
 const VERIFICATION_DEBUG = process.env.WA_VERIFICATION_DEBUG === 'true';
 const BAIT_REPEAT_COOLDOWN_MS = Math.max(0, parseInt(process.env.WA_BAIT_REPEAT_COOLDOWN_HOURS || '24', 10) * 60 * 60 * 1000);
+const userReminderCooldowns = new Map();
 
 function debugLog(msg, meta = {}) {
     if (VERIFICATION_DEBUG) console.log(`[SecondaryVerif] ${msg} ${JSON.stringify(meta)}`);
@@ -503,7 +504,13 @@ function initVerification(client, db, config) {
                     await sendMethodPoll(client, db, config, db.prepare('SELECT * FROM secondary_verification WHERE requester_id=?').get(session.requester_id));
                     return true;
                 }
-                await msg.reply(isAr ? 'قيد مراجعة المشرفين. للرجوع أرسل 1' : 'Waiting for admins. Send 1 to return.');
+
+                const now = Date.now();
+                const lastReminder = userReminderCooldowns.get(session.requester_id) || 0;
+                if (now - lastReminder > 10 * 60 * 1000) {
+                    await msg.reply(isAr ? 'قيد مراجعة المشرفين. للرجوع أرسل 1' : 'Waiting for admins. Send 1 to return.');
+                    userReminderCooldowns.set(session.requester_id, now);
+                }
                 return true;
             }
 

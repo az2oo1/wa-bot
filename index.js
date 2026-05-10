@@ -3447,15 +3447,25 @@ client.on('message', async msg => {
                     let targetList = []; // [{ rawId, cleanId }]
 
                     if (msg.mentionedIds && msg.mentionedIds.length > 0) {
-                        if (cmd === 'ban' || cmd === 'kick') {
-                            // All mentioned numbers
-                            for (const mid of msg.mentionedIds) {
-                                targetList.push({ rawId: mid, cleanId: mid.replace(/:[0-9]+/, '') });
+                        const mentions = await msg.getMentions().catch(() => []);
+                        const idsToProcess = (cmd === 'ban' || cmd === 'kick') ? msg.mentionedIds : [msg.mentionedIds[0]];
+                        for (const mid of idsToProcess) {
+                            let cleanId = mid.replace(/:[0-9]+/, '');
+                            let rawId = mid;
+                            if (cleanId.includes('@lid')) {
+                                const contact = mentions.find(c => c.id && c.id._serialized === mid);
+                                if (contact && contact.number) {
+                                    cleanId = `${contact.number}@c.us`;
+                                } else {
+                                    try {
+                                        const fallbackContact = await client.getContactById(mid);
+                                        if (fallbackContact && fallbackContact.number) cleanId = `${fallbackContact.number}@c.us`;
+                                        else cleanId = cleanId.replace('@lid', '@c.us');
+                                    } catch (e) { cleanId = cleanId.replace('@lid', '@c.us'); }
+                                }
+                                rawId = cleanId; // Use resolved @c.us for ban/kick
                             }
-                        } else {
-                            // /report: only first mention
-                            const mid = msg.mentionedIds[0];
-                            targetList.push({ rawId: mid, cleanId: mid.replace(/:[0-9]+/, '') });
+                            targetList.push({ rawId, cleanId });
                         }
                     }
 
@@ -3463,8 +3473,16 @@ client.on('message', async msg => {
                     if (targetList.length === 0 && msg.hasQuotedMsg) {
                         try {
                             const quoted = await msg.getQuotedMessage();
-                            const qRawId = quoted.author || quoted.from;
-                            const qCleanId = qRawId ? qRawId.replace(/:[0-9]+/, '') : null;
+                            let qRawId = quoted.author || quoted.from;
+                            let qCleanId = qRawId ? qRawId.replace(/:[0-9]+/, '') : null;
+                            if (qCleanId && qCleanId.includes('@lid')) {
+                                try {
+                                    const contact = await quoted.getContact();
+                                    if (contact && contact.number) qCleanId = `${contact.number}@c.us`;
+                                    else qCleanId = qCleanId.replace('@lid', '@c.us');
+                                } catch (e) { qCleanId = qCleanId.replace('@lid', '@c.us'); }
+                                qRawId = qCleanId; // Use resolved @c.us
+                            }
                             if (qRawId) targetList.push({ rawId: qRawId, cleanId: qCleanId });
                         } catch (e) { }
                     }
