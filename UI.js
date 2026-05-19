@@ -923,6 +923,12 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         </div>
                         <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.8;">${t('يرسل رسالة واتساب تلقائية لأي رقم اتصل بشريحتك ولم ترد عليه. (يتطلب تطبيق MacroDroid على هاتفك)', 'Sends an auto-reply WhatsApp message to anyone who calls your SIM card and you miss it. (Requires MacroDroid app)')}</p>
                         
+                        <div class="field-group" style="margin-bottom: 20px; border-bottom: 1px solid var(--card-border); padding-bottom: 20px;">
+                            <label class="field-label">${t('رمز الدولة الافتراضي (للمكالمات المحلية)', 'Default Country Code (for local calls)')}</label>
+                            <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">${t('إذا وصل الرقم يبدأ بـ 0 (مثل 059)، سيتم استبدال الصفر بهذا الرمز لتتمكن من مراسلته (مثل 966 ليصبح 96659).', 'If number starts with 0, it will be replaced by this code (e.g. 059 -> 96659).')}</p>
+                            <input type="number" id="webhookCountryCode" value="${config.webhookCountryCode || '966'}" placeholder="966">
+                        </div>
+                        
                         <div class="toggle-row green" style="margin-bottom:12px; background:rgba(0,0,0,0.1); padding:8px; border-radius:6px;">
                             <div class="toggle-left">
                                 <label class="switch"><input type="checkbox" id="enableMissedCallReply" ${config.enableMissedCallReply ? 'checked' : ''}><span class="slider"></span></label>
@@ -953,9 +959,25 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             </div>
                         </div>
 
+                        <div style="margin-top: 20px; border-top: 1px solid var(--card-border); padding-top: 15px;">
+                            <h4 style="margin-bottom: 10px; color: var(--accent);"><i class="fas fa-phone-volume"></i> ${t('المكالمات المُجاب عليها', 'Answered Calls')}</h4>
+                            <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">${t('أرسل رسالة تلقائية فور انتهائك من الرد على مكالمة شخص ما.', 'Send an automated message right after you finish an answered call.')}</p>
+                            <div class="toggle-row green" style="margin-bottom:12px;">
+                                <div class="toggle-left">
+                                    <label class="switch"><input type="checkbox" id="enableAnsweredCallReply" ${config.enableAnsweredCallReply ? 'checked' : ''}><span class="slider"></span></label>
+                                    <div class="toggle-label">${t('إرسال رسالة بعد إنهاء المكالمة المردود عليها', 'Send message after finishing answered call')}</div>
+                                </div>
+                            </div>
+                            <div class="field-group">
+                                <label class="field-label">${t('رسالة المكالمة المُجاب عليها', 'Answered Call Message')}</label>
+                                <textarea id="answeredCallMessage" rows="3" placeholder="${t('سعدت بالاتصال بك، يمكنك التواصل معي هنا عبر الواتساب في أي وقت.', 'Nice talking to you, you can also reach me here on WhatsApp anytime.')}">${config.answeredCallMessage || ''}</textarea>
+                            </div>
+                        </div>
+
                         <div style="font-size:11px;color:var(--text-muted);background:rgba(0,0,0,0.1);padding:10px;border-radius:6px;border:1px solid var(--card-border); margin-top:15px;">
                             <strong style="color:var(--accent);">${t('رابط الويب هوك الخاص بك:', 'Your Webhook URL:')}</strong><br>
-                            <code>http://YOUR_BOT_IP:3000/api/webhooks/missed-call</code><br><br>
+                            <code>http://YOUR_BOT_IP:3000/api/webhooks/missed-call</code><br>
+                            <code>http://YOUR_BOT_IP:3000/api/webhooks/answered-call</code><br><br>
                             ${t('في MacroDroid، استخدم إجراء HTTP Request (POST) وارسل JSON التالي:', 'In MacroDroid, use HTTP Request (POST) action and send this JSON:')}<br>
                             <pre style="margin-top:5px;background:black;color:#00ff00;padding:5px;border-radius:4px;">{
   "phoneNumber": "[call_number]",
@@ -5339,6 +5361,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     missedCallMessage: document.getElementById('missedCallMessage') ? document.getElementById('missedCallMessage').value.trim() : '',
                     enableMissedCallReturning: document.getElementById('enableMissedCallReturning') ? document.getElementById('enableMissedCallReturning').checked : false,
                     missedCallReturningMessage: document.getElementById('missedCallReturningMessage') ? document.getElementById('missedCallReturningMessage').value.trim() : '',
+                    webhookCountryCode: document.getElementById('webhookCountryCode') ? document.getElementById('webhookCountryCode').value.trim() : '',
+                    enableAnsweredCallReply: document.getElementById('enableAnsweredCallReply') ? document.getElementById('enableAnsweredCallReply').checked : false,
+                    answeredCallMessage: document.getElementById('answeredCallMessage') ? document.getElementById('answeredCallMessage').value.trim() : '',
 
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
                     enableWordFilterSmartMatch: document.getElementById('enableWordFilterSmartMatch') ? document.getElementById('enableWordFilterSmartMatch').checked : false,

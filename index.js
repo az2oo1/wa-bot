@@ -402,6 +402,9 @@ function loadConfigFromDB() {
         missedCallMessage: "",
         enableMissedCallReturning: false,
         missedCallReturningMessage: "",
+        webhookCountryCode: "966",
+        enableAnsweredCallReply: false,
+        answeredCallMessage: "",
         safeMode: false,
         purgeScheduleEnabled: false, purgeScheduleIntervalHours: 24,
         adminSyncEnabled: false, adminSyncIntervalHours: 1,
@@ -420,7 +423,7 @@ function loadConfigFromDB() {
         if (['defaultWords', 'blockedTypes', 'spamTypes', 'spamLimits', 'aiFilterTriggerWords', 'globalQA', 'secondaryVerificationGroups'].includes(row.key)) {
             try { newConfig[row.key] = JSON.parse(row.value); } catch(e) { }
         }
-        else if (['enableWordFilter', 'enableWordFilterSmartMatch', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled', 'enableQASmartMatch', 'autoPurgeScheduleEnabled', 'adminWhitelistSyncEnabled', 'enableSecondaryVerification', 'enableKeywordVerification', 'enableEmailVerification', 'enablePhotoVerification', 'enableSecondarySmartMatch', 'enableMissedCallReply', 'enableMissedCallReturning'].includes(row.key)) {
+        else if (['enableWordFilter', 'enableWordFilterSmartMatch', 'enableAIFilter', 'enableAIMedia', 'autoAction', 'enableBlacklist', 'enableWhitelist', 'enableAntiSpam', 'safeMode', 'enableJoinProfileScreening', 'purgeScheduleEnabled', 'adminSyncEnabled', 'globalQAEnabled', 'enableQASmartMatch', 'autoPurgeScheduleEnabled', 'adminWhitelistSyncEnabled', 'enableSecondaryVerification', 'enableKeywordVerification', 'enableEmailVerification', 'enablePhotoVerification', 'enableSecondarySmartMatch', 'enableMissedCallReply', 'enableMissedCallReturning', 'enableAnsweredCallReply'].includes(row.key)) {
             newConfig[row.key] = row.value === '1';
         } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes', 'secondaryVerificationDelay', 'secondaryVerificationTimeoutDays', 'smtpPort'].includes(row.key)) {
             newConfig[row.key] = parseInt(row.value, 10);
@@ -503,6 +506,9 @@ function saveConfigToDB(conf) {
         setGlobal.run('missedCallMessage', conf.missedCallMessage || '');
         setGlobal.run('enableMissedCallReturning', conf.enableMissedCallReturning ? '1' : '0');
         setGlobal.run('missedCallReturningMessage', conf.missedCallReturningMessage || '');
+        setGlobal.run('webhookCountryCode', conf.webhookCountryCode || '966');
+        setGlobal.run('enableAnsweredCallReply', conf.enableAnsweredCallReply ? '1' : '0');
+        setGlobal.run('answeredCallMessage', conf.answeredCallMessage || '');
         setGlobal.run('secondaryVerificationPartialTimeoutMinutes', String(Math.max(1, parseInt(conf.secondaryVerificationPartialTimeoutMinutes, 10) || 30)));
         setGlobal.run('secondaryVerificationDelay', String(Math.max(1, parseInt(conf.secondaryVerificationDelay, 10) || 3600)));
         setGlobal.run('secondaryVerificationReopenCode', conf.secondaryVerificationReopenCode || '');
@@ -1985,10 +1991,27 @@ app.post('/api/webhooks/missed-call', async (req, res) => {
         // Clean phone number (remove +, spaces, dashes, parentheses)
         phoneNumber = phoneNumber.replace(/[\s\-\+\(\)]/g, '');
         
+        if (config.webhookCountryCode && phoneNumber.startsWith('0')) {
+            phoneNumber = config.webhookCountryCode + phoneNumber.substring(1);
+        }
+        
         if (!config.missedCallMessage) return res.status(400).json({ error: 'No message configured' });
         
+        // Verify if the number is registered on WhatsApp
+        let numberDetails = null;
+        try {
+            numberDetails = await client.getNumberId(phoneNumber);
+        } catch (err) {
+            console.error(`[Webhook] Failed to verify number ${phoneNumber}:`, err.message);
+        }
+        
+        if (!numberDetails) {
+            console.warn(`[Webhook] Phone number ${phoneNumber} is not registered on WhatsApp. Skipping reply.`);
+            return res.status(400).json({ error: 'Number not registered on WhatsApp' });
+        }
+        
         // Format to WhatsApp ID format
-        const waId = `${phoneNumber}@c.us`;
+        const waId = numberDetails._serialized;
         
         let messageToSend = config.missedCallMessage;
         
@@ -2006,6 +2029,44 @@ app.post('/api/webhooks/missed-call', async (req, res) => {
         }
         
         await client.sendMessage(waId, messageToSend);
+        
+        return res.json({ success: true });
+    } catch (e) {
+        console.error('[Webhook Error]', e);
+        return res.status(500).json({ error: 'Internal error' });
+    }
+});
+
+app.post('/api/webhooks/answered-call', async (req, res) => {
+    try {
+        if (!config.enableAnsweredCallReply) return res.status(403).json({ error: 'Feature disabled' });
+        if (!config.missedCallToken || req.body.token !== config.missedCallToken) return res.status(401).json({ error: 'Unauthorized' });
+        
+        let phoneNumber = String(req.body.phoneNumber || '').trim();
+        if (!phoneNumber) return res.status(400).json({ error: 'Phone number required' });
+        
+        phoneNumber = phoneNumber.replace(/[\s\-\+\(\)]/g, '');
+        
+        if (config.webhookCountryCode && phoneNumber.startsWith('0')) {
+            phoneNumber = config.webhookCountryCode + phoneNumber.substring(1);
+        }
+        
+        if (!config.answeredCallMessage) return res.status(400).json({ error: 'No message configured' });
+        
+        let numberDetails = null;
+        try {
+            numberDetails = await client.getNumberId(phoneNumber);
+        } catch (err) {
+            console.error(`[Webhook] Failed to verify number ${phoneNumber}:`, err.message);
+        }
+        
+        if (!numberDetails) {
+            console.warn(`[Webhook] Phone number ${phoneNumber} is not registered on WhatsApp. Skipping reply.`);
+            return res.status(400).json({ error: 'Number not registered on WhatsApp' });
+        }
+        
+        const waId = numberDetails._serialized;
+        await client.sendMessage(waId, config.answeredCallMessage);
         
         return res.json({ success: true });
     } catch (e) {
