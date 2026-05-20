@@ -2571,12 +2571,29 @@ app.post('/api/users/:userId/access', requireAuthApi, requirePermission('users:m
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Safe Mode: random delay 10-60s to mimic human behaviour and avoid WhatsApp bot detection
-async function safeDelay() {
+async function safeDelay(chatOrId) {
     if (!config.safeMode) return;
     const ms = (Math.floor(Math.random() * 51) + 10) * 1000; // 10–60 seconds
     console.log(`[أمان] وضع آمن: تأخير ${ms / 1000} ثانية قبل الإجراء...`);
-    await new Promise(r => setTimeout(r, ms));
-};
+    
+    let chatObj = null;
+    if (chatOrId) {
+        if (typeof chatOrId === 'string') {
+            try { chatObj = await client.getChatById(chatOrId); } catch(e) {}
+        } else if (typeof chatOrId.sendStateTyping === 'function') {
+            chatObj = chatOrId;
+        }
+    }
+    
+    if (ms > 5000 && chatObj) {
+        await new Promise(r => setTimeout(r, 5000));
+        try { await chatObj.sendStateTyping(); } catch(e) {}
+        await new Promise(r => setTimeout(r, ms - 5000));
+        try { await chatObj.clearState(); } catch(e) {}
+    } else {
+        await new Promise(r => setTimeout(r, ms));
+    }
+}
 
 // ── Shared global purge function ──────────────────────────────────────────────
 async function runGlobalPurge() {
@@ -3057,7 +3074,7 @@ client.on('group_join', async (notification) => {
                     isKicked = true;
                     setTimeout(async () => {
                         try {
-                            await safeDelay();
+                            await safeDelay(chat);
                             await chat.removeParticipants([participantId]);
                             const reportText = tAdmin(
                                 groupConfig,
@@ -3074,7 +3091,7 @@ client.on('group_join', async (notification) => {
             if (!isKicked && groupConfig && groupConfig.enableWelcomeMessage && groupConfig.welcomeMessageText) {
                 setTimeout(async () => {
                     try {
-                        await safeDelay();
+                        await safeDelay(chat);
                         const welcomeText = groupConfig.welcomeMessageText.replace(/{user}/g, `@${cleanJoinedId.split('@')[0]}`);
                         await client.sendMessage(groupId, welcomeText, { mentions: [cleanJoinedId] });
                     } catch (err) { }
@@ -3095,7 +3112,7 @@ client.on('group_join', async (notification) => {
                         });
                         if (!profileResult.isViolating) return;
 
-                        await safeDelay();
+                        await safeDelay(chat);
                         await chat.removeParticipants([participantId]);
                         if (isBlacklistEnabledForGroup) {
                             try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanJoinedId); } catch (e) { }
@@ -3376,7 +3393,7 @@ client.on('message', async msg => {
                             const userName = contact ? (contact.name || contact.number) : cleanAuthorId.split('@')[0];
                             finalAnswer = finalAnswer.replace(/{user}/g, userName);
 
-                            await safeDelay();
+                            await safeDelay(msg.from);
                             if (matchedQA && matchedQA.mediaFile) {
                                 const mediaPath = path.join(__dirname, 'media', groupId, matchedQA.mediaFile);
                                 if (fs.existsSync(mediaPath)) {
@@ -3451,7 +3468,7 @@ client.on('message', async msg => {
                                 gFinalAnswer = gFinalAnswer.replace(/{user}/g, guserName);
 
                                 if (gFinalAnswer || gqa.mediaFile) {
-                                    await safeDelay();
+                                    await safeDelay(msg.from);
                                     if (gqa.mediaFile) {
                                         const globalMediaPath = path.join(__dirname, 'media', 'global-qa', gqa.mediaFile);
                                         if (fs.existsSync(globalMediaPath)) {
@@ -3572,7 +3589,7 @@ client.on('message', async msg => {
                                     : '⚠️ يجب أن يكون البوت مشرفاً في المجموعة لتنفيذ هذا الأمر.');
                             } catch (e) { }
                         } else {
-                            await safeDelay();
+                            await safeDelay(msg.from);
 
                             // Smart /ban reply: delete the replied-to message first unconditionally
                             let wasMessageDeleted = false;
@@ -3833,7 +3850,7 @@ client.on('message', async msg => {
                 const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanAuthorId) : false;
                 if ((useGlobal && (globalBl || isExtBlocked)) || inCustom) {
                     console.log(`[أمان] رقم محظور أرسل رسالة. سيتم حذفه.`);
-                    await safeDelay();
+                    await safeDelay(msg.from);
                     await msg.delete(true);
                     await chat.removeParticipants([rawAuthorId]);
                     return;
@@ -3842,7 +3859,7 @@ client.on('message', async msg => {
 
             if (blockedTypes.includes(internalMsgType)) {
                 console.log(`[أمان] رصد نوع ممنوع قطعي (${internalMsgType}). يتم الحذف.`);
-                await safeDelay();
+                await safeDelay(msg.from);
                 try { await msg.delete(true); } catch (e) { }
                 if (blockedAction === 'auto') {
                     try {
@@ -3917,7 +3934,7 @@ client.on('message', async msg => {
                     console.log(`[أمان] تم رصد مزعج في (${chat.name}): ${spamFlagReason}`);
                     spamMutedUsers.set(trackerKey, Date.now() + 60000);
                     for (const m of tracker) abortedMessages.add(m.id);
-                    await safeDelay();
+                    await safeDelay(msg.from);
                     try { await msg.delete(true); } catch (e) { }
                     for (const m of tracker) {
                         if (m.id !== msgId) {
@@ -4056,7 +4073,7 @@ client.on('message', async msg => {
 
                 const cleanBodyFallback = stripRawVCardBlocks(msg.body || '');
                 const messageContent = normalizedMessageText || cleanBodyFallback || '[مرفق وسائط]';
-                await safeDelay();
+                await safeDelay(msg.from);
                 await msg.delete(true);
 
                 if (isAutoActionEnabled) {
