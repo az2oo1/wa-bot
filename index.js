@@ -2180,7 +2180,6 @@ async function sendMetaMessage(to, messageText) {
         throw new Error('Meta API credentials missing in configuration');
     }
     
-    const { default: axios } = await import('axios');
     const url = `https://graph.facebook.com/v17.0/${config.metaPhoneId}/messages`;
     
     const data = {
@@ -2190,12 +2189,21 @@ async function sendMetaMessage(to, messageText) {
         text: { body: messageText }
     };
 
-    const headers = {
-        "Authorization": `Bearer ${config.metaAccessToken}`,
-        "Content-Type": "application/json"
-    };
+    const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+            "Authorization": `Bearer ${config.metaAccessToken}`,
+            "Content-Type": "application/json"
+        },
+        body: JSON.stringify(data)
+    });
 
-    return axios.post(url, data, { headers });
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Meta API Error: ${response.status} ${response.statusText} - ${errorText}`);
+    }
+
+    return await response.json();
 }
 
 app.post('/save', requireAuthApi, (req, res) => {

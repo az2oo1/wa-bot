@@ -2436,7 +2436,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             }
 
             document.addEventListener('DOMContentLoaded', () => {
-                const savedMode = localStorage.getItem('appMode') || 'group';
+                const savedMode = '${config.appMode || 'group'}';
+                localStorage.setItem('appMode', savedMode);
                 const appModeSelect = document.getElementById('appModeSelect');
                 if (appModeSelect) {
                     appModeSelect.value = savedMode;
