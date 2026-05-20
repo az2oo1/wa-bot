@@ -10,6 +10,7 @@ const multer = require('multer');
 const { exec } = require('child_process');
 const renderDashboard = require('./UI.js');
 const { initVerification } = require('./secondaryVerification.js');
+const { initCampaigns } = require('./campaignManager.js');
 
 // Ensure media storage directory exists
 if (!fs.existsSync('./media')) fs.mkdirSync('./media');
@@ -353,6 +354,35 @@ db.exec(`
         PRIMARY KEY (user_id, key),
         FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS campaigns (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        template_name TEXT,
+        template_language TEXT,
+        phone_col TEXT,
+        header_vars TEXT,
+        body_vars TEXT,
+        capabilities TEXT,
+        excel_path TEXT,
+        excel_headers TEXT,
+        scan_interval_ms INTEGER,
+        last_scanned_at INTEGER,
+        sent_ids TEXT,
+        status TEXT DEFAULT 'active',
+        created_at INTEGER
+    );
+
+    CREATE TABLE IF NOT EXISTS campaign_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        campaign_id INTEGER,
+        phone TEXT,
+        row_data TEXT,
+        status TEXT,
+        error TEXT,
+        sent_at INTEGER,
+        FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+    );
 `);
 
 const colsToAdd = [
@@ -417,7 +447,7 @@ function loadConfigFromDB() {
         defaultAdminGroup: '', defaultAdminLanguage: 'ar', defaultWords: [], aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية.',
         aiFilterTriggerWords: ['نعم'],
         ollamaUrl: 'http://localhost:11434', ollamaModel: 'llava', groupsConfig: {},
-        appMode: 'group', metaPhoneId: '', metaAccessToken: '', metaVerifyToken: ''
+        appMode: 'group', metaPhoneId: '', metaAccessToken: '', metaVerifyToken: '', metaTemplateName: '', metaTemplateLanguage: 'ar'
     };
 
     db.prepare('SELECT * FROM global_settings').all().forEach(row => {
@@ -428,7 +458,7 @@ function loadConfigFromDB() {
             newConfig[row.key] = row.value === '1';
         } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes', 'secondaryVerificationDelay', 'secondaryVerificationTimeoutDays', 'smtpPort'].includes(row.key)) {
             newConfig[row.key] = parseInt(row.value, 10);
-        } else if (['appMode', 'metaPhoneId', 'metaAccessToken', 'metaVerifyToken'].includes(row.key)) {
+        } else if (['appMode', 'metaPhoneId', 'metaAccessToken', 'metaVerifyToken', 'metaTemplateName', 'metaTemplateLanguage'].includes(row.key)) {
             newConfig[row.key] = row.value;
         } else newConfig[row.key] = row.value;
     });
@@ -549,6 +579,8 @@ function saveConfigToDB(conf) {
         setGlobal.run('metaPhoneId', conf.metaPhoneId || '');
         setGlobal.run('metaAccessToken', conf.metaAccessToken || '');
         setGlobal.run('metaVerifyToken', conf.metaVerifyToken || '');
+        setGlobal.run('metaTemplateName', conf.metaTemplateName || '');
+        setGlobal.run('metaTemplateLanguage', conf.metaTemplateLanguage || 'ar');
 
         const setLLM = db.prepare('INSERT OR REPLACE INTO llm_settings (key, value) VALUES (?, ?)');
         setLLM.run('aiPrompt', conf.aiPrompt); setLLM.run('ollamaUrl', conf.ollamaUrl); setLLM.run('ollamaModel', conf.ollamaModel);
@@ -2202,8 +2234,13 @@ async function sendMetaMessage(to, messageText) {
     }
     
     const url = `https://graph.facebook.com/v17.0/${config.metaPhoneId}/messages`;
-    
-    const data = {
+    const headers = {
+        "Authorization": `Bearer ${config.metaAccessToken}`,
+        "Content-Type": "application/json"
+    };
+
+    // Try free-form text first
+    const freeFormData = {
         messaging_product: "whatsapp",
         to: to,
         type: "text",
@@ -2212,19 +2249,50 @@ async function sendMetaMessage(to, messageText) {
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: {
-            "Authorization": `Bearer ${config.metaAccessToken}`,
-            "Content-Type": "application/json"
-        },
-        body: JSON.stringify(data)
+        headers,
+        body: JSON.stringify(freeFormData)
     });
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Meta API Error: ${response.status} ${response.statusText} - ${errorText}`);
+    if (response.ok) {
+        return await response.json();
     }
 
-    return await response.json();
+    const errorText = await response.text();
+    let errorJson = null;
+    try { errorJson = JSON.parse(errorText); } catch(e) {}
+
+    // Check for 131047: outside 24-hour re-engagement window
+    const is131047 = errorJson && errorJson.error && errorJson.error.code === 131047;
+
+    if (is131047 && config.metaTemplateName) {
+        console.log(`[Meta API] Free-form rejected (131047), falling back to template '${config.metaTemplateName}'...`);
+        const templateData = {
+            messaging_product: "whatsapp",
+            to: to,
+            type: "template",
+            template: {
+                name: config.metaTemplateName,
+                language: { code: config.metaTemplateLanguage || 'ar' }
+            }
+        };
+        const tplResponse = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(templateData)
+        });
+        if (tplResponse.ok) {
+            console.log(`[Meta API] Template message sent successfully to ${to}`);
+            return await tplResponse.json();
+        }
+        const tplError = await tplResponse.text();
+        throw new Error(`Meta API Template Error: ${tplResponse.status} - ${tplError}`);
+    }
+
+    if (is131047 && !config.metaTemplateName) {
+        throw new Error(`Meta API Error 131047: Outside 24h window. Configure a Message Template in Meta API settings to fix this.`);
+    }
+
+    throw new Error(`Meta API Error: ${response.status} ${response.statusText} - ${errorText}`);
 }
 
 app.post('/save', requireAuthApi, (req, res) => {
@@ -2268,6 +2336,9 @@ app.post('/api/admin-sync/run', requireAuthApi, requirePermission('security:mana
         res.status(500).json({ error: e.message || 'خطأ في المزامنة.' });
     }
 });
+
+// Initialize Campaign Manager
+initCampaigns(app, db, config, sendMetaMessage, upload);
 
 app.listen(3000, () => console.log('لوحة التحكم تعمل عبر المنفذ 3000...'));
 

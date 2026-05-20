@@ -347,6 +347,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 <button class="nav-item" data-mode="business" onclick="showPage('page-meta-api', this)">
                     <span class="nav-icon"><i class="fas fa-plug"></i></span> ${t('اتصال Meta API', 'Meta API Config')}
                 </button>
+                <button class="nav-item" data-mode="business" onclick="showPage('page-campaigns', this)">
+                    <span class="nav-icon"><i class="fas fa-bullhorn"></i></span> ${t('إدارة الحملات (Excel)', 'Campaign Manager')}
+                </button>
                 <button class="nav-item" data-mode="group" onclick="showPage('page-spam', this)">
                     <span class="nav-icon"><i class="fas fa-shield-alt"></i></span> ${t('مكافحة الإزعاج', 'Anti-Spam')}
                 </button>
@@ -1031,6 +1034,53 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             <div style="margin-bottom:8px; font-weight:bold; color:var(--text);"><i class="fas fa-link"></i> ${t('رابط Webhook الخاص بك:', 'Your Webhook URL:')}</div>
                             <div style="font-family:monospace; color:var(--accent);">https://your-domain.com/webhook</div>
                             <div style="margin-top:8px; font-size:12px;">${t('انسخ هذا الرابط وألصقه في إعدادات Meta للخطاف الخفي.', 'Copy this URL and paste it into the Meta Webhook settings.')}</div>
+                        </div>
+                    </div>
+                    <div class="card warning card-grid-full">
+                        <div class="card-header">
+                            <h3 style="color:var(--orange);"><i class="fas fa-file-alt"></i> ${t('قالب الرسالة (Re-engagement)', 'Message Template (Re-engagement)')}</h3>
+                        </div>
+                        <div style="font-size:13px; color:var(--text-muted); margin-bottom:18px; background:var(--input-bg); padding:12px 16px; border-radius:10px; border:1px solid rgba(255,171,64,0.3); line-height:1.8;">
+                            <i class="fas fa-info-circle" style="color:var(--orange);"></i>
+                            ${t(
+                                'واتساب يرفض إرسال رسائل حرة لأشخاص لم يتواصلوا معك خلال 24 ساعة (خطأ 131047). الحل هو استخدام قالب رسالة معتمد مسبقاً من Meta. أضف اسم القالب هنا وسيتم استخدامه تلقائياً عند الفشل.',
+                                'WhatsApp blocks free-form messages to people who have not contacted you in the last 24 hours (error 131047). Use a pre-approved Meta Message Template. Add its name here and it will be used automatically as a fallback.'
+                            )}
+                            <br><br>
+                            <a href="https://business.facebook.com/wa/manage/message-templates/" target="_blank" style="color:var(--blue);"><i class="fas fa-external-link-alt"></i> ${t('إنشاء قالب في Meta Business Manager', 'Create a template in Meta Business Manager')}</a>
+                        </div>
+                        <div class="field-row" style="max-width:600px;">
+                            <div class="field-group">
+                                <label class="field-label">${t('اسم القالب', 'Template Name')}</label>
+                                <input type="text" id="metaTemplateName" placeholder="e.g. hello_world" value="${config.metaTemplateName || ''}">
+                            </div>
+                            <div class="field-group">
+                                <label class="field-label">${t('كود اللغة', 'Language Code')}</label>
+                                <input type="text" id="metaTemplateLanguage" placeholder="e.g. ar or en_US" value="${config.metaTemplateLanguage || 'ar'}">
+                            </div>
+                        </div>
+                        <div style="font-size:12px; color:var(--text-muted); margin-top:8px;">
+                            ${t('القالب الافتراضي من Meta هو hello_world باللغة en_US.', "Meta's built-in default template is hello_world with language en_US. You can create a custom Arabic template using the link above.")}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="page" id="page-campaigns">
+                <div class="page-header">
+                    <h2><i class="fas fa-bullhorn"></i> ${t('إدارة الحملات (Excel)', 'Campaign Manager')}</h2>
+                    <p>${t('أرسل حملات رسائل مخصصة باستخدام ملفات Excel وقوالب Meta.', 'Send customized broadcast campaigns using Excel files and Meta templates.')}</p>
+                </div>
+                <div class="card-grid card-grid-full">
+                    <div class="card">
+                        <div class="card-header" style="justify-content: space-between; display: flex; align-items: center;">
+                            <h3 style="color:var(--blue); margin:0;"><i class="fas fa-list"></i> ${t('الحملات الحالية', 'Current Campaigns')}</h3>
+                            <button class="btn primary" onclick="openCampaignModal()"><i class="fas fa-plus"></i> ${t('حملة جديدة', 'New Campaign')}</button>
+                        </div>
+                        <div id="campaignsList" style="margin-top: 15px; display: grid; gap: 15px;">
+                            <div style="text-align:center; padding:20px; color:var(--text-muted);">
+                                <i class="fas fa-spinner fa-spin"></i> ${t('جاري التحميل...', 'Loading...')}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2050,6 +2100,102 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 <button type="button" class="btn btn-primary btn-full" onclick="submitFirstLoginChange()"><i class="fas fa-key"></i> ${t('حفظ ومتابعة', 'Save and Continue')}</button>
             </div>
         </div>
+        
+        <div id="campaignModal" class="modal">
+            <div class="modal-content" style="max-width: 750px;">
+                <div class="modal-header">
+                    <h3 style="color:var(--blue);"><i class="fas fa-bullhorn"></i> <span id="campaignModalTitle">${t('حملة جديدة', 'New Campaign')}</span></h3>
+                    <button class="close" onclick="closeCampaignModal()"><i class="fas fa-times"></i></button>
+                </div>
+                
+                <!-- Step 1: Upload Excel -->
+                <div class="card" style="margin-bottom:15px; border-left:4px solid var(--blue);">
+                    <div class="card-header"><h4 style="margin:0;"><i class="fas fa-file-excel"></i> 1. ${t('ملف البيانات', 'Data File')}</h4></div>
+                    <div class="field-row" style="margin-top:10px;">
+                        <input type="file" id="campaignExcelFile" accept=".xlsx, .xls, .csv" style="display:none;" onchange="handleCampaignExcelUpload(this)">
+                        <button class="btn secondary" onclick="document.getElementById('campaignExcelFile').click()"><i class="fas fa-upload"></i> ${t('اختر ملف Excel', 'Select Excel File')}</button>
+                        <span id="campaignExcelStatus" style="font-size:13px; color:var(--text-muted); margin-top:8px; display:inline-block;"></span>
+                    </div>
+                    <div id="campaignColumnsChips" style="margin-top:10px; display:flex; flex-wrap:wrap; gap:8px;"></div>
+                </div>
+
+                <!-- Step 2: Settings -->
+                <div class="card" style="margin-bottom:15px; border-left:4px solid var(--orange);">
+                    <div class="card-header"><h4 style="margin:0;"><i class="fas fa-cog"></i> 2. ${t('إعدادات الحملة', 'Campaign Settings')}</h4></div>
+                    <div class="field-row" style="margin-top:10px;">
+                        <div class="field-group">
+                            <label class="field-label">${t('اسم الحملة', 'Campaign Name')}</label>
+                            <input type="text" id="campaignName" placeholder="e.g. Rent Reminder April">
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('رقم الهاتف', 'Phone Column')}</label>
+                            <select id="campaignPhoneCol"><option value="">-- ${t('اختر عمود', 'Select Col')} --</option></select>
+                        </div>
+                    </div>
+                    <div class="field-row">
+                        <div class="field-group">
+                            <label class="field-label">${t('اسم قالب Meta', 'Meta Template Name')}</label>
+                            <input type="text" id="campaignTemplateName" value="${config.metaTemplateName || ''}">
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('لغة القالب', 'Template Language')}</label>
+                            <input type="text" id="campaignTemplateLang" value="${config.metaTemplateLanguage || 'ar'}">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 3: Variables -->
+                <div class="card" style="margin-bottom:15px; border-left:4px solid var(--accent);">
+                    <div class="card-header"><h4 style="margin:0;"><i class="fas fa-brackets-curly"></i> 3. ${t('المتغيرات', 'Variables')}</h4></div>
+                    
+                    <div style="margin-top:10px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label class="field-label" style="margin:0;">${t('متغيرات العنوان (Header)', 'Header Variables')}</label>
+                            <button class="btn secondary" style="padding:4px 8px; font-size:12px;" onclick="addCampaignVar('header')"><i class="fas fa-plus"></i></button>
+                        </div>
+                        <div id="campaignHeaderVars" style="display:flex; flex-direction:column; gap:8px; margin-bottom:15px;"></div>
+
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                            <label class="field-label" style="margin:0;">${t('متغيرات النص (Body)', 'Body Variables')}</label>
+                            <button class="btn secondary" style="padding:4px 8px; font-size:12px;" onclick="addCampaignVar('body')"><i class="fas fa-plus"></i></button>
+                        </div>
+                        <div id="campaignBodyVars" style="display:flex; flex-direction:column; gap:8px;"></div>
+                    </div>
+                </div>
+
+                <!-- Step 4: Capabilities -->
+                <div class="card" style="margin-bottom:15px; border-left:4px solid var(--purple);">
+                    <div class="card-header" style="justify-content:space-between; display:flex;">
+                        <h4 style="margin:0;"><i class="fas fa-bolt"></i> 4. ${t('القدرات الذكية', 'Smart Capabilities')}</h4>
+                        <div style="position:relative;">
+                            <button class="btn secondary" onclick="toggleCapDropdown()"><i class="fas fa-plus"></i> ${t('إضافة قدرة', 'Add Capability')}</button>
+                            <div id="capDropdown" style="display:none; position:absolute; right:0; top:100%; background:var(--card-bg); border:1px solid var(--card-border); border-radius:8px; z-index:100; min-width:200px; box-shadow:0 4px 12px rgba(0,0,0,0.2);">
+                                <div style="padding:10px; cursor:pointer; border-bottom:1px solid var(--card-border);" onclick="addCapability('days_reminder')"><i class="fas fa-clock"></i> ${t('تذكير الأيام', 'Days Reminder')}</div>
+                                <div style="padding:10px; cursor:pointer; border-bottom:1px solid var(--card-border);" onclick="addCapability('days_left_var')"><i class="fas fa-calendar-day"></i> ${t('متغير: الأيام المتبقية', 'Days Left Variable')}</div>
+                                <div style="padding:10px; cursor:pointer;" onclick="addCapability('auto_scan')"><i class="fas fa-sync"></i> ${t('مسح تلقائي (Auto-Scan)', 'Auto-Scan Excel')}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="campaignCapabilities" style="margin-top:10px; display:flex; flex-direction:column; gap:10px;"></div>
+                </div>
+
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+                    <button class="btn secondary" onclick="closeCampaignModal()">${t('إلغاء', 'Cancel')}</button>
+                    <button class="btn primary" onclick="saveCampaign()"><i class="fas fa-save"></i> ${t('حفظ', 'Save')}</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="campaignLogsModal" class="modal">
+            <div class="modal-content" style="max-width: 800px;">
+                <div class="modal-header">
+                    <h3 style="color:var(--blue);"><i class="fas fa-history"></i> ${t('سجل الحملة', 'Campaign Logs')}</h3>
+                    <button class="close" onclick="closeModal('campaignLogsModal')"><i class="fas fa-times"></i></button>
+                </div>
+                <div id="campaignLogsContent" style="max-height:60vh; overflow-y:auto; margin-top:15px; font-size:13px;">
+                </div>
+            </div>
+        </div>
 
         <script>
             const currentLang = '${lang}';
@@ -2390,7 +2536,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 'page-archive': '${t("الأرشيف", "Archive")}',
                 'page-users': '${t("إدارة المستخدمين", "User Management")}',
                 'page-about': '${t("حول", "About")}',
-                'page-meta-api': '${t("اتصال Meta API", "Meta API Connection")}'
+                'page-meta-api': '${t("اتصال Meta API", "Meta API Connection")}',
+                'page-campaigns': '${t("إدارة الحملات (Excel)", "Campaign Manager")}'
             };
             function showPage(pageId, btn) {
                 document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -2405,6 +2552,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 }
                 if (pageId === 'page-users') {
                     umLoadData();
+                }
+                if (pageId === 'page-campaigns') {
+                    fetchCampaigns();
                 }
                 if (pageId === 'page-archive') {
                     if (typeof refreshPendingSecondaryApprovals === 'function') refreshPendingSecondaryApprovals();
@@ -5451,6 +5601,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     metaPhoneId: document.getElementById('metaPhoneId') ? document.getElementById('metaPhoneId').value.trim() : '',
                     metaAccessToken: document.getElementById('metaAccessToken') ? document.getElementById('metaAccessToken').value.trim() : '',
                     metaVerifyToken: document.getElementById('metaVerifyToken') ? document.getElementById('metaVerifyToken').value.trim() : '',
+                    metaTemplateName: document.getElementById('metaTemplateName') ? document.getElementById('metaTemplateName').value.trim() : '',
+                    metaTemplateLanguage: document.getElementById('metaTemplateLanguage') ? document.getElementById('metaTemplateLanguage').value.trim() : 'ar',
                     appMode: localStorage.getItem('appMode') || 'group',
 
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
@@ -5488,6 +5640,290 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 await saveConfig();
             }
             
+// --- CAMPAIGN MANAGER JS ---
+            let currentCampaignExcelCols = [];
+            let campaignVarsHeaderCount = 0;
+            let campaignVarsBodyCount = 0;
+            let campaignCapabilities = [];
+            let campaignFileObj = null;
+
+            async function fetchCampaigns() {
+                try {
+                    const res = await fetch('/api/campaigns');
+                    const data = await res.json();
+                    const list = document.getElementById('campaignsList');
+                    if (data.campaigns.length === 0) {
+                        list.innerHTML = `<div style="text-align:center; padding:20px; color:var(--text-muted);">${dict.no_data}</div>`;
+                        return;
+                    }
+                    list.innerHTML = data.campaigns.map(c => `
+                        <div style="border:1px solid var(--card-border); background:var(--input-bg); border-radius:10px; padding:15px; margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <h4 style="margin:0; color:var(--text);">${c.name}</h4>
+                                <div style="font-size:12px; color:var(--text-muted); margin-top:4px;">
+                                    <i class="fas fa-file-excel"></i> ${c.excel_path ? c.excel_path.split('/').pop() : 'N/A'} | 
+                                    <i class="fas fa-envelope"></i> Template: ${c.template_name} | 
+                                    <span style="color:${c.status === 'active' ? 'var(--green)' : 'var(--orange)'};">${c.status.toUpperCase()}</span>
+                                </div>
+                            </div>
+                            <div style="display:flex; gap:8px;">
+                                <button class="btn primary" style="padding:6px 12px; font-size:12px;" onclick="runCampaign(${c.id})"><i class="fas fa-play"></i> Run</button>
+                                <button class="btn secondary" style="padding:6px 12px; font-size:12px;" onclick="viewCampaignLogs(${c.id})"><i class="fas fa-history"></i></button>
+                                <button class="btn danger" style="padding:6px 12px; font-size:12px;" onclick="deleteCampaign(${c.id})"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </div>
+                    `).join('');
+                } catch(e) {
+                    console.error(e);
+                }
+            }
+
+            function openCampaignModal() {
+                document.getElementById('campaignModal').classList.add('show');
+                currentCampaignExcelCols = [];
+                campaignVarsHeaderCount = 0;
+                campaignVarsBodyCount = 0;
+                campaignCapabilities = [];
+                campaignFileObj = null;
+                document.getElementById('campaignName').value = '';
+                document.getElementById('campaignHeaderVars').innerHTML = '';
+                document.getElementById('campaignBodyVars').innerHTML = '';
+                document.getElementById('campaignCapabilities').innerHTML = '';
+                document.getElementById('campaignColumnsChips').innerHTML = '';
+                document.getElementById('campaignExcelStatus').innerText = '';
+                document.getElementById('campaignPhoneCol').innerHTML = '<option value="">-- Select Col --</option>';
+            }
+
+            function closeCampaignModal() {
+                document.getElementById('campaignModal').classList.remove('show');
+            }
+
+            async function handleCampaignExcelUpload(input) {
+                if (!input.files || input.files.length === 0) return;
+                const file = input.files[0];
+                
+                document.getElementById('campaignExcelStatus').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...';
+                
+                const formData = new FormData();
+                formData.append('excelFile', file);
+                
+                try {
+                    const res = await fetch('/api/campaigns/upload-excel', { method: 'POST', body: formData });
+                    const data = await res.json();
+                    
+                    if (data.success) {
+                        campaignFileObj = data.filePath;
+                        currentCampaignExcelCols = data.headers;
+                        
+                        document.getElementById('campaignExcelStatus').innerHTML = `<span style="color:var(--green);"><i class="fas fa-check"></i> ${file.name}</span>`;
+                        
+                        document.getElementById('campaignColumnsChips').innerHTML = currentCampaignExcelCols.map(h => 
+                            `<span style="background:rgba(76,175,80,0.1); color:var(--green); padding:4px 8px; border-radius:12px; font-size:12px; border:1px solid rgba(76,175,80,0.2);">${h}</span>`
+                        ).join('');
+                        
+                        const pcol = document.getElementById('campaignPhoneCol');
+                        pcol.innerHTML = '<option value="">-- Select Col --</option>' + currentCampaignExcelCols.map(h => `<option value="${h}">${h}</option>`).join('');
+                        
+                        document.querySelectorAll('.camp-col-select').forEach(sel => {
+                            const val = sel.value;
+                            sel.innerHTML = '<option value="">-- Select Col --</option>' + currentCampaignExcelCols.map(h => `<option value="${h}">${h}</option>`).join('') + '<option value="[Days Left]">[Days Left]</option>';
+                            sel.value = val;
+                        });
+                    } else {
+                        document.getElementById('campaignExcelStatus').innerHTML = `<span style="color:var(--red);">${data.error}</span>`;
+                    }
+                } catch(e) {
+                     document.getElementById('campaignExcelStatus').innerHTML = `<span style="color:var(--red);">Error uploading</span>`;
+                }
+            }
+
+            function addCampaignVar(section) {
+                const isHeader = section === 'header';
+                const c = isHeader ? ++campaignVarsHeaderCount : ++campaignVarsBodyCount;
+                const container = document.getElementById(isHeader ? 'campaignHeaderVars' : 'campaignBodyVars');
+                
+                const div = document.createElement('div');
+                div.style.display = 'flex';
+                div.style.gap = '10px';
+                div.style.alignItems = 'center';
+                div.innerHTML = `
+                    <span style="background:var(--accent); color:#fff; width:30px; height:30px; display:flex; align-items:center; justify-content:center; border-radius:50%; font-size:12px; font-weight:bold;">{{${c}}}</span>
+                    <select class="camp-col-select" data-section="${section}" data-var="${c}" style="flex:1; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:10px; color:var(--text);">
+                        <option value="">-- Select Col --</option>
+                        ${currentCampaignExcelCols.map(h => `<option value="${h}">${h}</option>`).join('')}
+                        <option value="[Days Left]">[Days Left]</option>
+                    </select>
+                    <button class="btn danger" style="padding:4px 8px; font-size:12px;" onclick="this.parentElement.remove()"><i class="fas fa-trash"></i></button>
+                `;
+                container.appendChild(div);
+            }
+
+            function toggleCapDropdown() {
+                const drop = document.getElementById('capDropdown');
+                drop.style.display = drop.style.display === 'none' ? 'block' : 'none';
+            }
+
+            function addCapability(type) {
+                toggleCapDropdown();
+                const id = Date.now();
+                
+                let html = '';
+                if (type === 'days_reminder') {
+                    html = `
+                        <div style="background:var(--input-bg); border:1px solid rgba(156,39,176,0.3); border-radius:8px; padding:12px; border-left:4px solid var(--purple);">
+                            <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                                <div style="font-weight:bold; color:var(--purple);"><i class="fas fa-clock"></i> ${t('تذكير الأيام', 'Days Reminder')}</div>
+                                <button class="btn danger" style="padding:2px 6px; font-size:10px;" onclick="this.parentElement.parentElement.remove()"><i class="fas fa-times"></i></button>
+                            </div>
+                            <div style="display:flex; gap:10px;">
+                                <select class="cap-input camp-col-select" data-prop="dateCol" style="flex:1; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:8px; color:var(--text);">
+                                    <option value="">-- ${t('عمود التاريخ', 'Date Column')} --</option>
+                                    ${currentCampaignExcelCols.map(h => `<option value="${h}">${h}</option>`).join('')}
+                                </select>
+                                <select class="cap-input" data-prop="direction" style="width:100px; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:8px; color:var(--text);">
+                                    <option value="before">${t('قبل', 'Before')}</option>
+                                    <option value="after">${t('بعد', 'After')}</option>
+                                </select>
+                                <input type="number" class="cap-input" data-prop="days" placeholder="${t('أيام (مثل 3)', 'Days (e.g. 3)')}" style="width:100px;">
+                            </div>
+                        </div>
+                    `;
+                } else if (type === 'days_left_var') {
+                     html = `
+                        <div style="background:var(--input-bg); border:1px solid rgba(156,39,176,0.3); border-radius:8px; padding:12px; border-left:4px solid var(--purple);">
+                            <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                                <div style="font-weight:bold; color:var(--purple);"><i class="fas fa-calendar-day"></i> ${t('متغير: الأيام المتبقية', 'Days Left Variable')}</div>
+                                <button class="btn danger" style="padding:2px 6px; font-size:10px;" onclick="this.parentElement.parentElement.remove()"><i class="fas fa-times"></i></button>
+                            </div>
+                            <div style="display:flex; gap:10px;">
+                                <select class="cap-input camp-col-select" data-prop="dateCol" style="flex:1; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:8px; color:var(--text);">
+                                    <option value="">-- ${t('عمود التاريخ', 'Date Column')} --</option>
+                                    ${currentCampaignExcelCols.map(h => `<option value="${h}">${h}</option>`).join('')}
+                                </select>
+                                <select class="cap-input" data-prop="varSection" style="width:100px; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:8px; color:var(--text);">
+                                    <option value="body">Body</option>
+                                    <option value="header">Header</option>
+                                </select>
+                                <input type="number" class="cap-input" data-prop="varNum" placeholder="Var # (e.g. 2)" style="width:100px;">
+                            </div>
+                        </div>
+                    `;
+                } else if (type === 'auto_scan') {
+                    html = `
+                        <div style="background:var(--input-bg); border:1px solid rgba(156,39,176,0.3); border-radius:8px; padding:12px; border-left:4px solid var(--purple);">
+                            <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                                <div style="font-weight:bold; color:var(--purple);"><i class="fas fa-sync"></i> ${t('مسح تلقائي (Auto-Scan)', 'Auto-Scan Excel')}</div>
+                                <button class="btn danger" style="padding:2px 6px; font-size:10px;" onclick="this.parentElement.parentElement.remove()"><i class="fas fa-times"></i></button>
+                            </div>
+                            <div>
+                                <select class="cap-input" data-prop="interval" style="width:100%; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:8px; color:var(--text);">
+                                    <option value="daily">Daily</option>
+                                    <option value="2days">Every 2 Days</option>
+                                    <option value="weekly">Weekly</option>
+                                    <option value="monthly">Monthly</option>
+                                </select>
+                            </div>
+                        </div>
+                    `;
+                }
+                
+                const div = document.createElement('div');
+                div.className = 'campaign-cap-item';
+                div.dataset.type = type;
+                div.innerHTML = html;
+                document.getElementById('campaignCapabilities').appendChild(div);
+            }
+
+            async function saveCampaign() {
+                if (!campaignFileObj) return showToast(dict.no_data || 'Please upload an Excel file first');
+                
+                const payload = {
+                    name: document.getElementById('campaignName').value,
+                    template_name: document.getElementById('campaignTemplateName').value,
+                    template_language: document.getElementById('campaignTemplateLang').value,
+                    phone_col: document.getElementById('campaignPhoneCol').value,
+                    excel_path: campaignFileObj,
+                    excel_headers: currentCampaignExcelCols,
+                    header_vars: [],
+                    body_vars: [],
+                    capabilities: []
+                };
+                
+                if (!payload.name || !payload.phone_col || !payload.template_name) return showToast(dict.save_fail || 'Please fill all required fields');
+                
+                document.querySelectorAll('#campaignHeaderVars .camp-col-select').forEach(el => {
+                    if(el.value) payload.header_vars.push({ varNum: el.dataset.var, col: el.value });
+                });
+                
+                document.querySelectorAll('#campaignBodyVars .camp-col-select').forEach(el => {
+                    if(el.value) payload.body_vars.push({ varNum: el.dataset.var, col: el.value });
+                });
+                
+                document.querySelectorAll('.campaign-cap-item').forEach(el => {
+                    const type = el.dataset.type;
+                    const cap = { type };
+                    el.querySelectorAll('.cap-input').forEach(inp => cap[inp.dataset.prop] = inp.value);
+                    payload.capabilities.push(cap);
+                });
+                
+                try {
+                    const res = await fetch('/api/campaigns', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        closeCampaignModal();
+                        showToast(dict.save_success || 'Campaign Created!');
+                        fetchCampaigns();
+                    } else showToast(data.error);
+                } catch(e) {
+                    showToast('Error saving campaign');
+                }
+            }
+
+            async function runCampaign(id) {
+                if (!confirm(t('تأكيد تشغيل الحملة؟', 'Run this campaign now?'))) return;
+                try {
+                    await fetch('/api/campaigns/'+id+'/run', { method:'POST' });
+                    showToast(t('تم بدء الحملة في الخلفية', 'Campaign started in background'));
+                    setTimeout(fetchCampaigns, 3000);
+                } catch(e) { showToast('Error'); }
+            }
+
+            async function deleteCampaign(id) {
+                if (!confirm(t('تأكيد حذف الحملة؟', 'Delete this campaign?'))) return;
+                try {
+                    await fetch('/api/campaigns/'+id, { method:'DELETE' });
+                    fetchCampaigns();
+                } catch(e) { showToast('Error'); }
+            }
+
+            async function viewCampaignLogs(id) {
+                document.getElementById('campaignLogsModal').classList.add('show');
+                const content = document.getElementById('campaignLogsContent');
+                content.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted);"><i class="fas fa-spinner fa-spin"></i> Loading...</div>';
+                try {
+                    const res = await fetch('/api/campaigns/'+id+'/logs');
+                    const data = await res.json();
+                    if (data.logs.length === 0) {
+                        content.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-muted);">No logs yet.</div>';
+                        return;
+                    }
+                    content.innerHTML = data.logs.map(log => `
+                        <div style="border-bottom:1px solid var(--card-border); padding:8px 0; display:flex; justify-content:space-between;">
+                            <div>
+                                <b>${log.phone}</b> <span style="color:${log.status==='sent'?'var(--green)':'var(--red)'}">${log.status}</span>
+                                ${log.error ? `<div style="color:var(--red); font-size:11px;">${log.error}</div>` : ''}
+                            </div>
+                            <div style="color:var(--text-muted); font-size:11px;">${new Date(log.sent_at).toLocaleString()}</div>
+                        </div>
+                    `).join('');
+                } catch(e) {
+                    content.innerHTML = 'Error loading logs';
+                }
+            }
         </script>
         <div class="modal" id="confirmModal">
             <div class="modal-content" style="max-width:460px;">
