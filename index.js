@@ -461,6 +461,10 @@ function loadConfigFromDB() {
             enableCommands: g.enable_commands !== 0
         };
     });
+    
+    // TEMPORARY: Force app mode back to group mode as requested by user
+    newConfig.appMode = 'group';
+    
     return newConfig;
 }
 
@@ -2132,6 +2136,8 @@ app.get('/webhook', (req, res) => {
 // Meta API Webhook Receiver
 app.post('/webhook', async (req, res) => {
     const body = req.body;
+    console.log('[Meta API] Webhook Received Payload:', JSON.stringify(body));
+
     if (body.object) {
         if (body.entry && body.entry[0].changes && body.entry[0].changes[0] && body.entry[0].changes[0].value.messages && body.entry[0].changes[0].value.messages[0]) {
             const phoneNumberId = body.entry[0].changes[0].value.metadata.phone_number_id;
@@ -2880,8 +2886,7 @@ const client = new Client({
             '--disable-renderer-backgrounding',
             '--disable-device-orientation-request-prompt',
             '--no-default-browser-check',
-            '--start-maximized',
-            `--user-data-dir=${browserProfileDir}`
+            '--start-maximized'
         ]
     }
 });
@@ -3082,6 +3087,11 @@ process.on('unhandledRejection', (reason, promise) => {
     const reasonMsg = reason ? (reason.message || reason.toString()) : 'Unknown rejection';
     const reasonStack = reason && reason.stack ? reason.stack : 'No stack trace';
 
+    // Ignore known harmless puppeteer tear-down errors
+    if (reasonMsg.includes('Attempted to use detached Frame') || reasonMsg.includes('Target closed') || reasonMsg.includes('Session closed') || reasonMsg.includes('Execution context was destroyed')) {
+        return;
+    }
+
     console.error('[خطأ] رفض غير معالج:', {
         reason: reasonMsg,
         stack: reasonStack,
@@ -3090,7 +3100,7 @@ process.on('unhandledRejection', (reason, promise) => {
     });
 
     addConnectionLog('رفض غير معالج', reasonMsg);
-    if (!isInitializing && botStatus.includes('متصل')) {
+    if (!isInitializing && botStatus.includes('متصل') && !botStatus.includes('Meta API')) {
         botStatus = '<i class="fas fa-exclamation-triangle"></i> حدث خطأ غير متوقع';
         botStatusKind = 'error';
     }
