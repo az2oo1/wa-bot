@@ -2005,7 +2005,19 @@ app.post('/api/webhooks/missed-call', async (req, res) => {
         
         if (!config.missedCallMessage) return res.status(400).json({ error: 'No message configured' });
         
-        // Verify if the number is registered on WhatsApp
+        let messageToSend = config.missedCallMessage;
+        
+        if (config.appMode === 'business') {
+            try {
+                await sendMetaMessage(phoneNumber, messageToSend);
+                return res.json({ success: true, mode: 'business' });
+            } catch (err) {
+                console.error(`[Webhook] Failed to send Meta API message to ${phoneNumber}:`, err.response?.data || err.message);
+                return res.status(500).json({ error: 'Failed to send Meta API message' });
+            }
+        }
+        
+        // Verify if the number is registered on WhatsApp (Group Mode)
         let numberDetails = null;
         try {
             numberDetails = await client.getNumberId(phoneNumber);
@@ -2020,8 +2032,6 @@ app.post('/api/webhooks/missed-call', async (req, res) => {
         
         // Format to WhatsApp ID format
         const waId = numberDetails._serialized;
-        
-        let messageToSend = config.missedCallMessage;
         
         if (config.enableMissedCallReturning && config.missedCallReturningMessage) {
             try {
@@ -2061,6 +2071,16 @@ app.post('/api/webhooks/answered-call', async (req, res) => {
         
         if (!config.answeredCallMessage) return res.status(400).json({ error: 'No message configured' });
         
+        if (config.appMode === 'business') {
+            try {
+                await sendMetaMessage(phoneNumber, config.answeredCallMessage);
+                return res.json({ success: true, mode: 'business' });
+            } catch (err) {
+                console.error(`[Webhook] Failed to send Meta API message to ${phoneNumber}:`, err.response?.data || err.message);
+                return res.status(500).json({ error: 'Failed to send Meta API message' });
+            }
+        }
+
         let numberDetails = null;
         try {
             numberDetails = await client.getNumberId(phoneNumber);
