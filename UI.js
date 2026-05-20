@@ -296,6 +296,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 opacity: 1;
             }
 
+            body.app-mode-business .nav-item[data-mode="group"] { display: none !important; }
+            body.app-mode-group .nav-item[data-mode="business"] { display: none !important; }
+
             @media (max-width: 1100px) {
                 .um-layout,
                 .um-access-grid,
@@ -326,51 +329,54 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
 
             <div class="sidebar-nav-scroll">
                 <div class="nav-section">${t('الرئيسية', 'Main')}</div>
-                <button class="nav-item active" onclick="showPage('page-status', this)">
+                <button class="nav-item active" data-mode="all" onclick="showPage('page-status', this)">
                     <span class="nav-icon"><i class="fas fa-satellite-dish"></i></span> ${t('حالة الاتصال', 'Connection Status')}
                 </button>
-                <button class="nav-item" onclick="showPage('page-blacklist', this)">
+                <button class="nav-item" data-mode="group" onclick="showPage('page-blacklist', this)">
                     <span class="nav-icon"><i class="fas fa-users-slash"></i></span> ${t('إدارة الأرقام', 'Manage Numbers')}
                     <span class="nav-badge" id="blacklist-count">0</span>
                 </button>
 
                 <div class="nav-section">${t('الإعدادات', 'Settings')}</div>
-                <button class="nav-item" onclick="showPage('page-general', this)">
+                <button class="nav-item" data-mode="all" onclick="showPage('page-general', this)">
                     <span class="nav-icon"><i class="fas fa-cog"></i></span> ${t('الإعدادات العامة', 'General Settings')}
                 </button>
-                <button class="nav-item" onclick="showPage('page-missed-call', this)">
-                    <span class="nav-icon"><i class="fas fa-satellite-dish"></i></span> ${t('المكالمات الفائتة', 'Missed Calls')}
+                <button class="nav-item" data-mode="business" onclick="showPage('page-missed-call', this)">
+                    <span class="nav-icon"><i class="fas fa-phone-alt"></i></span> ${t('إدارة المكالمات', 'Calls Management')}
                 </button>
-                <button class="nav-item" onclick="showPage('page-spam', this)">
+                <button class="nav-item" data-mode="business" onclick="showPage('page-meta-api', this)">
+                    <span class="nav-icon"><i class="fas fa-plug"></i></span> ${t('اتصال Meta API', 'Meta API Config')}
+                </button>
+                <button class="nav-item" data-mode="group" onclick="showPage('page-spam', this)">
                     <span class="nav-icon"><i class="fas fa-shield-alt"></i></span> ${t('مكافحة الإزعاج', 'Anti-Spam')}
                 </button>
-                <button class="nav-item" onclick="showPage('page-media', this)">
+                <button class="nav-item" data-mode="group" onclick="showPage('page-media', this)">
                     <span class="nav-icon"><i class="fas fa-filter"></i></span> ${t('فلتر الوسائط', 'Media Filter')}
                 </button>
-                <button class="nav-item" onclick="showPage('page-ai', this)">
+                <button class="nav-item" data-mode="all" onclick="showPage('page-ai', this)">
                     <span class="nav-icon"><i class="fas fa-brain"></i></span> ${t('الذكاء الاصطناعي', 'AI Moderator')}
                 </button>
-                <button class="nav-item" onclick="showPage('page-global-qa', this)">
+                <button class="nav-item" data-mode="all" onclick="showPage('page-global-qa', this)">
                     <span class="nav-icon"><i class="fas fa-comments"></i></span> ${t('الأسئلة العامة', 'Global Q&A')}
                 </button>
-                <button class="nav-item" onclick="showPage('page-groups', this)">
+                <button class="nav-item" data-mode="group" onclick="showPage('page-groups', this)">
                     <span class="nav-icon"><i class="fas fa-users-cog"></i></span> ${t('المجموعات المخصصة', 'Custom Groups')}
                 </button>
 
                 <div class="nav-section">${t('أدوات', 'Tools')}</div>
-                <button class="nav-item" onclick="openDebuggerModal()">
+                <button class="nav-item" data-mode="all" onclick="openDebuggerModal()">
                     <span class="nav-icon"><i class="fas fa-bug"></i></span> ${t('سجل الأحداث', 'Event Logs')}
                 </button>
-                <button class="nav-item" onclick="showPage('page-import-export', this)">
+                <button class="nav-item" data-mode="all" onclick="showPage('page-import-export', this)">
                     <span class="nav-icon"><i class="fas fa-exchange-alt"></i></span> ${t('استيراد/تصدير', 'Import/Export')}
                 </button>
-                <button class="nav-item" onclick="showPage('page-archive', this)">
+                <button class="nav-item" data-mode="all" onclick="showPage('page-archive', this)">
                     <span class="nav-icon"><i class="fas fa-box-archive"></i></span> ${t('الأرشيف', 'Archive')}
                 </button>
-                <button class="nav-item" onclick="showPage('page-users', this)">
+                <button class="nav-item" data-mode="all" onclick="showPage('page-users', this)">
                     <span class="nav-icon"><i class="fas fa-user-shield"></i></span> ${t('إدارة المستخدمين', 'User Management')}
                 </button>
-                <button class="nav-item" onclick="showPage('page-about', this)">
+                <button class="nav-item" data-mode="all" onclick="showPage('page-about', this)">
                     <span class="nav-icon"><i class="fas fa-info-circle"></i></span> ${t('حول', 'About')}
                 </button>
             </div>
@@ -391,6 +397,13 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 </div>
                 <div class="topbar-right">
                     
+                    <div style="display: flex; align-items: center; gap: 6px; background: var(--input-bg); padding: 4px 10px; border-radius: 20px; border: 1.5px solid var(--card-border);">
+                        <select id="appModeSelect" onchange="switchAppMode(this.value)" style="background: transparent; border: none; color: var(--text); outline: none; font-size: 13px; font-weight: 600; padding: 0;">
+                            <option value="group">${t('إدارة المجموعات', 'Group Management')}</option>
+                            <option value="business">${t('إدارة الأعمال', 'Business Management')}</option>
+                        </select>
+                    </div>
+
                     <div style="display: flex; align-items: center; gap: 6px; background: var(--input-bg); padding: 4px 10px; border-radius: 20px; border: 1.5px solid var(--card-border);">
                         <span style="font-size: 11px; font-weight: 700; color: ${lang === 'ar' ? 'var(--accent)' : 'var(--text-muted)'}; transition: color 0.3s;">AR</span>
                         <label class="switch" style="width: 36px; height: 20px;">
@@ -915,6 +928,10 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             </div>
 
             <div class="page" id="page-missed-call">
+                <div class="page-header">
+                    <h2><i class="fas fa-phone-alt"></i> ${t('إدارة المكالمات', 'Calls Management')}</h2>
+                    <p>${t('إعدادات الرد الآلي على المكالمات', 'Auto-reply settings for incoming calls')}</p>
+                </div>
                 <div class="card-grid">
                     <!-- Webhook Integrations -->
                     <div class="card success">
@@ -983,6 +1000,37 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
   "phoneNumber": "[call_number]",
   "token": "YOUR_TOKEN"
 }</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="page" id="page-meta-api">
+                <div class="page-header">
+                    <h2><i class="fas fa-plug"></i> ${t('اتصال Meta API', 'Meta API Connection')}</h2>
+                    <p>${t('قم بإعداد اتصال واجهة برمجة تطبيقات Meta الرسمية لتبادل الرسائل.', 'Configure your Official Meta API connection for messaging.')}</p>
+                </div>
+                <div class="card-grid">
+                    <div class="card info">
+                        <div class="card-header">
+                            <h3 style="color:var(--blue);"><i class="fab fa-meta"></i> ${t('إعدادات Meta API', 'Meta API Settings')}</h3>
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('معرف رقم الهاتف (Phone Number ID)', 'Phone Number ID')}</label>
+                            <input type="text" id="metaPhoneId" name="metaPhoneId" placeholder="e.g. 102345678912345" value="${config.metaPhoneId || ''}">
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('رمز الوصول (Access Token)', 'Access Token')}</label>
+                            <input type="password" id="metaAccessToken" name="metaAccessToken" placeholder="EAA..." value="${config.metaAccessToken || ''}">
+                        </div>
+                        <div class="field-group">
+                            <label class="field-label">${t('رمز التحقق (Verify Token للمسار الخفي)', 'Verify Token (for Webhook)')}</label>
+                            <input type="text" id="metaVerifyToken" name="metaVerifyToken" placeholder="${t('الرمز الذي تضعه في إعدادات Meta Webhook', 'The token you enter in Meta Webhook settings')}" value="${config.metaVerifyToken || ''}">
+                        </div>
+                        <div style="margin-top:20px; font-size:14px; color:var(--text-muted); background:var(--input-bg); padding:14px; border-radius:10px; border:1px solid var(--card-border);">
+                            <div style="margin-bottom:8px; font-weight:bold; color:var(--text);"><i class="fas fa-link"></i> ${t('رابط Webhook الخاص بك:', 'Your Webhook URL:')}</div>
+                            <div style="font-family:monospace; color:var(--accent);">https://your-domain.com/webhook</div>
+                            <div style="margin-top:8px; font-size:12px;">${t('انسخ هذا الرابط وألصقه في إعدادات Meta للخطاف الخفي.', 'Copy this URL and paste it into the Meta Webhook settings.')}</div>
                         </div>
                     </div>
                 </div>
@@ -2341,7 +2389,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 'page-import-export': '${t("استيراد/تصدير", "Import/Export")}',
                 'page-archive': '${t("الأرشيف", "Archive")}',
                 'page-users': '${t("إدارة المستخدمين", "User Management")}',
-                'page-about': '${t("حول", "About")}'
+                'page-about': '${t("حول", "About")}',
+                'page-meta-api': '${t("اتصال Meta API", "Meta API Connection")}'
             };
             function showPage(pageId, btn) {
                 document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -2362,6 +2411,39 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     if (typeof refreshEmailLogs === 'function') refreshEmailLogs();
                 }
             }
+            async function switchAppMode(mode) {
+                document.body.classList.remove('app-mode-group', 'app-mode-business');
+                document.body.classList.add('app-mode-' + mode);
+                localStorage.setItem('appMode', mode);
+                
+                // Show default page for mode if current page is hidden
+                const activeNav = document.querySelector('.nav-item.active');
+                if (activeNav && (activeNav.style.display === 'none' || getComputedStyle(activeNav).display === 'none')) {
+                    showPage('page-status', document.querySelector('.nav-item[onclick*="page-status"]'));
+                }
+                
+                // Save mode to backend
+                try {
+                    await fetch('/api/save-app-mode', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ appMode: mode })
+                    });
+                    showToast(currentLang === 'en' ? 'App mode updated' : 'تم تحديث وضع التطبيق');
+                } catch(e) {
+                    console.error('Failed to save app mode', e);
+                }
+            }
+
+            document.addEventListener('DOMContentLoaded', () => {
+                const savedMode = localStorage.getItem('appMode') || 'group';
+                const appModeSelect = document.getElementById('appModeSelect');
+                if (appModeSelect) {
+                    appModeSelect.value = savedMode;
+                }
+                document.body.classList.add('app-mode-' + savedMode);
+            });
+
             function toggleSidebar() {
                 document.getElementById('sidebar').classList.toggle('open');
                 document.getElementById('sidebarOverlay').classList.toggle('open');
@@ -5364,6 +5446,10 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     webhookCountryCode: document.getElementById('webhookCountryCode') ? document.getElementById('webhookCountryCode').value.trim() : '',
                     enableAnsweredCallReply: document.getElementById('enableAnsweredCallReply') ? document.getElementById('enableAnsweredCallReply').checked : false,
                     answeredCallMessage: document.getElementById('answeredCallMessage') ? document.getElementById('answeredCallMessage').value.trim() : '',
+
+                    metaPhoneId: document.getElementById('metaPhoneId') ? document.getElementById('metaPhoneId').value.trim() : '',
+                    metaAccessToken: document.getElementById('metaAccessToken') ? document.getElementById('metaAccessToken').value.trim() : '',
+                    metaVerifyToken: document.getElementById('metaVerifyToken') ? document.getElementById('metaVerifyToken').value.trim() : '',
 
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
                     enableWordFilterSmartMatch: document.getElementById('enableWordFilterSmartMatch') ? document.getElementById('enableWordFilterSmartMatch').checked : false,

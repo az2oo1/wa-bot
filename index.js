@@ -416,7 +416,8 @@ function loadConfigFromDB() {
         spamLimits: { text: 7, image: 3, video: 2, audio: 3, document: 3, sticker: 3 },
         defaultAdminGroup: '', defaultAdminLanguage: 'ar', defaultWords: [], aiPrompt: 'امنع أي رسالة تحتوي على إعلانات تجارية.',
         aiFilterTriggerWords: ['نعم'],
-        ollamaUrl: 'http://localhost:11434', ollamaModel: 'llava', groupsConfig: {}
+        ollamaUrl: 'http://localhost:11434', ollamaModel: 'llava', groupsConfig: {},
+        appMode: 'group', metaPhoneId: '', metaAccessToken: '', metaVerifyToken: ''
     };
 
     db.prepare('SELECT * FROM global_settings').all().forEach(row => {
@@ -427,6 +428,8 @@ function loadConfigFromDB() {
             newConfig[row.key] = row.value === '1';
         } else if (['spamDuplicateLimit', 'spamFloodLimit', 'purgeScheduleIntervalHours', 'adminSyncIntervalHours', 'autoPurgeIntervalMinutes', 'adminWhitelistSyncIntervalMinutes', 'secondaryVerificationDelay', 'secondaryVerificationTimeoutDays', 'smtpPort'].includes(row.key)) {
             newConfig[row.key] = parseInt(row.value, 10);
+        } else if (['appMode', 'metaPhoneId', 'metaAccessToken', 'metaVerifyToken'].includes(row.key)) {
+            newConfig[row.key] = row.value;
         } else newConfig[row.key] = row.value;
     });
 
@@ -541,6 +544,10 @@ function saveConfigToDB(conf) {
         setGlobal.run('defaultAdminLanguage', normalizeAdminLang(conf.defaultAdminLanguage));
         setGlobal.run('defaultWords', JSON.stringify(conf.defaultWords));
         setGlobal.run('aiFilterTriggerWords', JSON.stringify(conf.aiFilterTriggerWords || ['نعم']));
+        setGlobal.run('appMode', conf.appMode || 'group');
+        setGlobal.run('metaPhoneId', conf.metaPhoneId || '');
+        setGlobal.run('metaAccessToken', conf.metaAccessToken || '');
+        setGlobal.run('metaVerifyToken', conf.metaVerifyToken || '');
 
         const setLLM = db.prepare('INSERT OR REPLACE INTO llm_settings (key, value) VALUES (?, ?)');
         setLLM.run('aiPrompt', conf.aiPrompt); setLLM.run('ollamaUrl', conf.ollamaUrl); setLLM.run('ollamaModel', conf.ollamaModel);
@@ -2074,6 +2081,99 @@ app.post('/api/webhooks/answered-call', async (req, res) => {
         return res.status(500).json({ error: 'Internal error' });
     }
 });
+
+app.post('/api/save-app-mode', requireAuthApi, (req, res) => {
+    const newMode = req.body.appMode;
+    if (newMode !== 'group' && newMode !== 'business') return res.status(400).json({error: 'Invalid mode'});
+    
+    config.appMode = newMode;
+    db.prepare('INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)').run('appMode', newMode);
+    
+    console.log(`[معلومة] تم تغيير وضع التطبيق إلى: ${newMode}`);
+    addConnectionLog('تغيير الوضع', `تم التبديل إلى وضع ${newMode === 'business' ? 'الأعمال (Meta API)' : 'المجموعات (QR)'}`);
+
+    if (newMode === 'business') {
+        if (client && botStatusKind === 'ready' && !isInitializing) {
+            console.log('[معلومة] جاري إيقاف whatsapp-web.js لأن الوضع الحالي هو أعمال...');
+            try { client.destroy(); } catch(e) {}
+            botStatus = '<i class="fas fa-plug"></i> متصل عبر Meta API';
+            botStatusKind = 'ready';
+        }
+    } else {
+        if (botStatusKind !== 'ready' || botStatus.includes('Meta API')) {
+            console.log('[معلومة] جاري بدء whatsapp-web.js لأن الوضع الحالي هو مجموعات...');
+            botStatusKind = 'initializing';
+            initializeClientWithRetry(0);
+        }
+    }
+    
+    res.json({success: true, message: 'App mode updated'});
+});
+
+// Meta API Webhook Verification
+app.get('/webhook', (req, res) => {
+    const verify_token = config.metaVerifyToken;
+    let mode = req.query["hub.mode"];
+    let token = req.query["hub.verify_token"];
+    let challenge = req.query["hub.challenge"];
+
+    if (mode && token) {
+        if (mode === "subscribe" && token === verify_token) {
+            console.log("[Meta API] Webhook Verified!");
+            res.status(200).send(challenge);
+        } else {
+            res.sendStatus(403);
+        }
+    } else {
+        res.sendStatus(400);
+    }
+});
+
+// Meta API Webhook Receiver
+app.post('/webhook', async (req, res) => {
+    const body = req.body;
+    if (body.object) {
+        if (body.entry && body.entry[0].changes && body.entry[0].changes[0] && body.entry[0].changes[0].value.messages && body.entry[0].changes[0].value.messages[0]) {
+            const phoneNumberId = body.entry[0].changes[0].value.metadata.phone_number_id;
+            const from = body.entry[0].changes[0].value.messages[0].from; 
+            const msgBody = body.entry[0].changes[0].value.messages[0].text.body;
+
+            console.log(`[Meta API] Received message from ${from}: ${msgBody}`);
+
+            try {
+                await sendMetaMessage(from, `[Meta Auto-Reply] Received: ${msgBody}`);
+            } catch(e) {
+                console.error('[Meta API] Failed to auto-reply', e);
+            }
+        }
+        res.sendStatus(200);
+    } else {
+        res.sendStatus(404);
+    }
+});
+
+async function sendMetaMessage(to, messageText) {
+    if (!config.metaPhoneId || !config.metaAccessToken) {
+        throw new Error('Meta API credentials missing in configuration');
+    }
+    
+    const { default: axios } = await import('axios');
+    const url = `https://graph.facebook.com/v17.0/${config.metaPhoneId}/messages`;
+    
+    const data = {
+        messaging_product: "whatsapp",
+        to: to,
+        type: "text",
+        text: { body: messageText }
+    };
+
+    const headers = {
+        "Authorization": `Bearer ${config.metaAccessToken}`,
+        "Content-Type": "application/json"
+    };
+
+    return axios.post(url, data, { headers });
+}
 
 app.post('/save', requireAuthApi, (req, res) => {
     try {
@@ -4263,6 +4363,13 @@ async function initializeClientWithRetry(retryCount = 0, maxRetries = 5) {
         console.log(`[معلومة] المحاولة ${retryCount} لتهيئة الاتصال...`);
         addConnectionLog(`اعادة محاولة #${retryCount}`, `انتظر ${retryDelay}ms قبل اعادة المحاولة`);
         await new Promise(resolve => setTimeout(resolve, retryDelay));
+    }
+
+    if (config.appMode === 'business') {
+        console.log('[معلومة] تم تجاوز تهيئة whatsapp-web.js (Business Mode)');
+        botStatus = '<i class="fas fa-plug"></i> متصل عبر Meta API';
+        botStatusKind = 'ready';
+        return;
     }
 
     try {
