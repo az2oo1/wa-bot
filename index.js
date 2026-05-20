@@ -2155,23 +2155,44 @@ app.post('/webhook', async (req, res) => {
     const body = req.body;
     console.log('[Meta API] Webhook Received Payload:', JSON.stringify(body));
 
-    if (body.object) {
-        if (body.entry && body.entry[0].changes && body.entry[0].changes[0] && body.entry[0].changes[0].value.messages && body.entry[0].changes[0].value.messages[0]) {
-            const phoneNumberId = body.entry[0].changes[0].value.metadata.phone_number_id;
-            const from = body.entry[0].changes[0].value.messages[0].from; 
-            const msgBody = body.entry[0].changes[0].value.messages[0].text.body;
+    if (!body || !body.object) {
+        return res.sendStatus(404);
+    }
 
-            console.log(`[Meta API] Received message from ${from}: ${msgBody}`);
+    // Always respond 200 immediately so Meta doesn't retry
+    res.sendStatus(200);
 
-            try {
-                await sendMetaMessage(from, `[Meta Auto-Reply] Received: ${msgBody}`);
-            } catch(e) {
-                console.error('[Meta API] Failed to auto-reply', e);
+    try {
+        const entry = body.entry && body.entry[0];
+        const change = entry && entry.changes && entry.changes[0];
+        const value = change && change.value;
+
+        if (!value) return;
+
+        // Handle status updates (delivered, read, failed) — just log, no action
+        if (value.statuses && value.statuses.length > 0) {
+            for (const s of value.statuses) {
+                console.log(`[Meta API] Message status update: ${s.status} for ${s.recipient_id}${s.errors ? ' — Error: ' + JSON.stringify(s.errors) : ''}`);
             }
+            return;
         }
-        res.sendStatus(200);
-    } else {
-        res.sendStatus(404);
+
+        const messages = value.messages;
+        if (!messages || messages.length === 0) return;
+
+        const msg = messages[0];
+        const from = msg.from;
+        const msgType = msg.type;
+
+        if (msgType === 'text' && msg.text && msg.text.body) {
+            const msgBody = msg.text.body;
+            console.log(`[Meta API] Received text message from ${from}: ${msgBody}`);
+            // Auto-reply can be added here if needed
+        } else {
+            console.log(`[Meta API] Received non-text message from ${from}, type: ${msgType} — no auto-reply`);
+        }
+    } catch (e) {
+        console.error('[Meta API] Error processing webhook payload:', e.message || e);
     }
 });
 

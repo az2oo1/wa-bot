@@ -338,7 +338,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 </button>
 
                 <div class="nav-section">${t('الإعدادات', 'Settings')}</div>
-                <button class="nav-item" data-mode="all" onclick="showPage('page-general', this)">
+                <button class="nav-item" data-mode="group" onclick="showPage('page-general', this)">
                     <span class="nav-icon"><i class="fas fa-cog"></i></span> ${t('الإعدادات العامة', 'General Settings')}
                 </button>
                 <button class="nav-item" data-mode="business" onclick="showPage('page-missed-call', this)">
@@ -356,7 +356,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 <button class="nav-item" data-mode="all" onclick="showPage('page-ai', this)">
                     <span class="nav-icon"><i class="fas fa-brain"></i></span> ${t('الذكاء الاصطناعي', 'AI Moderator')}
                 </button>
-                <button class="nav-item" data-mode="all" onclick="showPage('page-global-qa', this)">
+                <button class="nav-item" data-mode="group" onclick="showPage('page-global-qa', this)">
                     <span class="nav-icon"><i class="fas fa-comments"></i></span> ${t('الأسئلة العامة', 'Global Q&A')}
                 </button>
                 <button class="nav-item" data-mode="group" onclick="showPage('page-groups', this)">
@@ -5451,6 +5451,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     metaPhoneId: document.getElementById('metaPhoneId') ? document.getElementById('metaPhoneId').value.trim() : '',
                     metaAccessToken: document.getElementById('metaAccessToken') ? document.getElementById('metaAccessToken').value.trim() : '',
                     metaVerifyToken: document.getElementById('metaVerifyToken') ? document.getElementById('metaVerifyToken').value.trim() : '',
+                    appMode: localStorage.getItem('appMode') || 'group',
 
                     enableWordFilter: document.getElementById('enableWordFilter').checked,
                     enableWordFilterSmartMatch: document.getElementById('enableWordFilterSmartMatch') ? document.getElementById('enableWordFilterSmartMatch').checked : false,
