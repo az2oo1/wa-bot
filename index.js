@@ -462,9 +462,6 @@ function loadConfigFromDB() {
         };
     });
     
-    // TEMPORARY: Force app mode back to group mode as requested by user
-    newConfig.appMode = 'group';
-    
     return newConfig;
 }
 
@@ -2097,12 +2094,12 @@ app.post('/api/save-app-mode', requireAuthApi, (req, res) => {
     addConnectionLog('تغيير الوضع', `تم التبديل إلى وضع ${newMode === 'business' ? 'الأعمال (Meta API)' : 'المجموعات (QR)'}`);
 
     if (newMode === 'business') {
-        if (client && botStatusKind === 'ready' && !isInitializing) {
-            console.log('[معلومة] جاري إيقاف whatsapp-web.js لأن الوضع الحالي هو أعمال...');
+        console.log('[معلومة] جاري إيقاف whatsapp-web.js لأن الوضع الحالي هو أعمال...');
+        if (client) {
             try { client.destroy(); } catch(e) {}
-            botStatus = '<i class="fas fa-plug"></i> متصل عبر Meta API';
-            botStatusKind = 'ready';
         }
+        botStatus = '<i class="fas fa-plug"></i> متصل عبر Meta API';
+        botStatusKind = 'ready';
     } else {
         if (botStatusKind !== 'ready' || botStatus.includes('Meta API')) {
             console.log('[معلومة] جاري بدء whatsapp-web.js لأن الوضع الحالي هو مجموعات...');
