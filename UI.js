@@ -350,6 +350,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 <button class="nav-item" data-mode="business" onclick="showPage('page-campaigns', this)">
                     <span class="nav-icon"><i class="fas fa-bullhorn"></i></span> ${t('إدارة الحملات (Excel)', 'Campaign Manager')}
                 </button>
+                <button class="nav-item" data-mode="business" onclick="showPage('page-quick-replies', this)">
+                    <span class="nav-icon"><i class="fas fa-bolt"></i></span> ${t('ردود الأزرار السريعة', 'Quick Replies')}
+                </button>
                 <button class="nav-item" data-mode="group" onclick="showPage('page-spam', this)">
                     <span class="nav-icon"><i class="fas fa-shield-alt"></i></span> ${t('مكافحة الإزعاج', 'Anti-Spam')}
                 </button>
@@ -1078,6 +1081,26 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                             <button class="btn primary" onclick="openCampaignModal()"><i class="fas fa-plus"></i> ${t('حملة جديدة', 'New Campaign')}</button>
                         </div>
                         <div id="campaignsList" style="margin-top: 15px; display: grid; gap: 15px;">
+                            <div style="text-align:center; padding:20px; color:var(--text-muted);">
+                                <i class="fas fa-spinner fa-spin"></i> ${t('جاري التحميل...', 'Loading...')}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="page" id="page-quick-replies">
+                <div class="page-header">
+                    <h2><i class="fas fa-bolt"></i> ${t('ردود الأزرار السريعة', 'Quick Replies')}</h2>
+                    <p>${t('إعداد ردود تلقائية عند ضغط العميل على أزرار القوالب.', 'Set up automatic responses when a customer taps a template button.')}</p>
+                </div>
+                <div class="card-grid card-grid-full">
+                    <div class="card">
+                        <div class="card-header" style="justify-content: space-between; display: flex; align-items: center;">
+                            <h3 style="color:var(--orange); margin:0;"><i class="fas fa-list"></i> ${t('الردود الحالية', 'Current Replies')}</h3>
+                            <button class="btn primary" onclick="openQRModal()"><i class="fas fa-plus"></i> ${t('رد جديد', 'New Reply')}</button>
+                        </div>
+                        <div id="qrList" style="margin-top: 15px; display: grid; gap: 15px;">
                             <div style="text-align:center; padding:20px; color:var(--text-muted);">
                                 <i class="fas fa-spinner fa-spin"></i> ${t('جاري التحميل...', 'Loading...')}
                             </div>
@@ -2197,6 +2220,77 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             </div>
         </div>
 
+        <div id="qrModal" class="modal">
+            <div class="modal-content" style="max-width: 600px;">
+                <div class="modal-header">
+                    <h3 style="color:var(--orange);"><i class="fas fa-bolt"></i> ${t('إضافة رد سريع', 'Add Quick Reply')}</h3>
+                    <button class="close" onclick="closeQRModal()"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body" style="padding-top:10px;">
+                    <div class="field-group">
+                        <label class="field-label">${t('Payload الزر (معرف الزر المخفي)', 'Button Payload ID')}</label>
+                        <input type="text" id="qrPayloadId" placeholder="e.g. PAYMENT_CONFIRM" class="input-full">
+                    </div>
+                    <div class="field-group">
+                        <label class="field-label">${t('نوع الإجراء', 'Action Type')}</label>
+                        <select id="qrActionType" class="input-full" onchange="toggleQRActionType()">
+                            <option value="send_template">Send Template</option>
+                            <option value="send_text">Send Text Message</option>
+                        </select>
+                    </div>
+                    
+                    <div id="qrTemplateSettings" style="background:rgba(0,0,0,0.02); padding:15px; border-radius:10px; margin-bottom:15px; border:1px solid var(--card-border);">
+                        <div style="display:flex; gap:10px; margin-bottom:15px;">
+                            <div style="flex:2;">
+                                <label class="field-label" style="font-size:12px;">${t('اسم القالب (Meta)', 'Template Name')}</label>
+                                <input type="text" id="qrTemplateName" placeholder="e.g. thank_you" class="input-full">
+                            </div>
+                            <div style="flex:1;">
+                                <label class="field-label" style="font-size:12px;">${t('اللغة', 'Language')}</label>
+                                <input type="text" id="qrTemplateLang" value="ar" class="input-full">
+                            </div>
+                        </div>
+                        
+                        <!-- Variables -->
+                        <div style="margin-bottom:15px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                                <label class="field-label" style="margin:0;"><i class="fas fa-heading"></i> ${t('متغيرات العنوان (Header)', 'Header Variables')}</label>
+                                <button class="btn secondary" style="padding:4px 8px; font-size:12px;" onclick="addQRVar('header')"><i class="fas fa-plus"></i></button>
+                            </div>
+                            <div id="qrHeaderVars" style="display:flex; flex-direction:column; gap:8px;"></div>
+                        </div>
+                        
+                        <div style="margin-bottom:15px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                                <label class="field-label" style="margin:0;"><i class="fas fa-align-left"></i> ${t('متغيرات النص (Body)', 'Body Variables')}</label>
+                                <button class="btn secondary" style="padding:4px 8px; font-size:12px;" onclick="addQRVar('body')"><i class="fas fa-plus"></i></button>
+                            </div>
+                            <div id="qrBodyVars" style="display:flex; flex-direction:column; gap:8px;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Capabilities -->
+                    <div class="field-group">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <label class="field-label" style="margin:0;"><i class="fas fa-magic"></i> ${t('قدرات إضافية (Capabilities)', 'Capabilities')}</label>
+                            <div style="position:relative;">
+                                <button class="btn secondary" style="padding:4px 10px; font-size:12px;" onclick="toggleQRCapDropdown()"><i class="fas fa-plus"></i> ${t('إضافة', 'Add')}</button>
+                                <div id="qrCapDropdown" style="display:none; position:absolute; left:0; top:30px; background:var(--card-bg); border:1px solid var(--card-border); border-radius:8px; box-shadow:0 4px 12px rgba(0,0,0,0.1); width:220px; z-index:100;">
+                                    <!-- Built dynamically -->
+                                </div>
+                            </div>
+                        </div>
+                        <div id="qrCapabilities" style="display:flex; flex-direction:column; gap:10px;"></div>
+                    </div>
+                </div>
+                
+                <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px; border-top:1px solid var(--card-border); padding-top:15px;">
+                    <button class="btn secondary" onclick="closeQRModal()">${t('إلغاء', 'Cancel')}</button>
+                    <button class="btn primary" onclick="saveQuickReply()"><i class="fas fa-save"></i> ${t('حفظ', 'Save')}</button>
+                </div>
+            </div>
+        </div>
+
         <script>
             const currentLang = '${lang}';
             const currentDir = '${dir}';
@@ -2537,7 +2631,8 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 'page-users': '${t("إدارة المستخدمين", "User Management")}',
                 'page-about': '${t("حول", "About")}',
                 'page-meta-api': '${t("اتصال Meta API", "Meta API Connection")}',
-                'page-campaigns': '${t("إدارة الحملات (Excel)", "Campaign Manager")}'
+                'page-campaigns': '${t("إدارة الحملات (Excel)", "Campaign Manager")}',
+                'page-quick-replies': '${t("ردود الأزرار السريعة", "Quick Replies")}'
             };
             function showPage(pageId, btn) {
                 document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -2555,6 +2650,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 }
                 if (pageId === 'page-campaigns') {
                     fetchCampaigns();
+                }
+                if (pageId === 'page-quick-replies') {
+                    fetchQuickReplies();
                 }
                 if (pageId === 'page-archive') {
                     if (typeof refreshPendingSecondaryApprovals === 'function') refreshPendingSecondaryApprovals();
@@ -5758,80 +5856,81 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 container.appendChild(div);
             }
 
+            let globalCapabilitiesRegistry = [];
+
+            async function loadCapabilitiesRegistry() {
+                try {
+                    const res = await fetch('/api/capabilities');
+                    const data = await res.json();
+                    globalCapabilitiesRegistry = data.capabilities;
+                    
+                    const buildDropdown = (targetId, context) => {
+                        const drop = document.getElementById(targetId);
+                        if (!drop) return;
+                        drop.innerHTML = globalCapabilitiesRegistry
+                            .filter(c => c.target === 'both' || c.target === context)
+                            .map(c => `<div style="padding:10px; cursor:pointer; border-bottom:1px solid var(--card-border);" onclick="addCapability('${c.id}', '${context}')"><i class="fas ${c.icon}"></i> ${c.title}</div>`)
+                            .join('');
+                    };
+                    buildDropdown('capDropdown', 'campaign');
+                    buildDropdown('qrCapDropdown', 'quick_reply');
+                } catch(e) { console.error(e); }
+            }
+
             function toggleCapDropdown() {
                 const drop = document.getElementById('capDropdown');
                 drop.style.display = drop.style.display === 'none' ? 'block' : 'none';
             }
+            
+            function toggleQRCapDropdown() {
+                const drop = document.getElementById('qrCapDropdown');
+                if(drop) drop.style.display = drop.style.display === 'none' ? 'block' : 'none';
+            }
 
-            function addCapability(type) {
-                toggleCapDropdown();
-                const id = Date.now();
+            function addCapability(type, context = 'campaign') {
+                if (context === 'campaign') toggleCapDropdown();
+                else toggleQRCapDropdown();
                 
-                let html = '';
-                if (type === 'days_reminder') {
-                    html = `
-                        <div style="background:var(--input-bg); border:1px solid rgba(156,39,176,0.3); border-radius:8px; padding:12px; border-left:4px solid var(--purple);">
-                            <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                                <div style="font-weight:bold; color:var(--purple);"><i class="fas fa-clock"></i> ${t('تذكير الأيام', 'Days Reminder')}</div>
-                                <button class="btn danger" style="padding:2px 6px; font-size:10px;" onclick="this.parentElement.parentElement.remove()"><i class="fas fa-times"></i></button>
-                            </div>
-                            <div style="display:flex; gap:10px;">
-                                <select class="cap-input camp-col-select" data-prop="dateCol" style="flex:1; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:8px; color:var(--text);">
-                                    <option value="">-- ${t('عمود التاريخ', 'Date Column')} --</option>
-                                    ${currentCampaignExcelCols.map(h => `<option value="${h}">${h}</option>`).join('')}
-                                </select>
-                                <select class="cap-input" data-prop="direction" style="width:100px; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:8px; color:var(--text);">
-                                    <option value="before">${t('قبل', 'Before')}</option>
-                                    <option value="after">${t('بعد', 'After')}</option>
-                                </select>
-                                <input type="number" class="cap-input" data-prop="days" placeholder="${t('أيام (مثل 3)', 'Days (e.g. 3)')}" style="width:100px;">
-                            </div>
+                const capDef = globalCapabilitiesRegistry.find(c => c.id === type);
+                if (!capDef) return;
+                
+                let fieldsHtml = capDef.fields.map(f => {
+                    if (f.type === 'select') {
+                        return `<select class="cap-input" data-prop="${f.name}" style="flex:1; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:8px; color:var(--text);">
+                                    ${f.options.map(o => `<option value="${o.val}">${o.text}</option>`).join('')}
+                                </select>`;
+                    } else if (f.type === 'excel_column') {
+                        if (context === 'campaign') {
+                            return `<select class="cap-input camp-col-select" data-prop="${f.name}" style="flex:1; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:8px; color:var(--text);">
+                                        <option value="">-- ${f.label} --</option>
+                                        ${currentCampaignExcelCols.map(h => `<option value="${h}">${h}</option>`).join('')}
+                                    </select>`;
+                        } else {
+                            // Quick replies don't have an excel file uploaded right now, they read from past logs
+                            return `<input type="text" class="cap-input" data-prop="${f.name}" placeholder="${f.label} (Excel Header)" style="flex:1; padding:8px; border-radius:8px; border:1px solid var(--card-border); background:var(--input-bg); color:var(--text);">`;
+                        }
+                    } else {
+                        return `<input type="${f.type}" class="cap-input" data-prop="${f.name}" placeholder="${f.placeholder || f.label}" style="width:100px; padding:8px; border-radius:8px; border:1px solid var(--card-border); background:var(--input-bg); color:var(--text);">`;
+                    }
+                }).join('');
+
+                const html = `
+                    <div style="background:var(--input-bg); border:1px solid ${capDef.color}; border-radius:8px; padding:12px; border-left:4px solid ${capDef.color};">
+                        <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
+                            <div style="font-weight:bold; color:${capDef.color};"><i class="fas ${capDef.icon}"></i> ${capDef.title}</div>
+                            <button class="btn danger" style="padding:2px 6px; font-size:10px;" onclick="this.parentElement.parentElement.remove()"><i class="fas fa-times"></i></button>
                         </div>
-                    `;
-                } else if (type === 'days_left_var') {
-                     html = `
-                        <div style="background:var(--input-bg); border:1px solid rgba(156,39,176,0.3); border-radius:8px; padding:12px; border-left:4px solid var(--purple);">
-                            <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                                <div style="font-weight:bold; color:var(--purple);"><i class="fas fa-calendar-day"></i> ${t('متغير: الأيام المتبقية', 'Days Left Variable')}</div>
-                                <button class="btn danger" style="padding:2px 6px; font-size:10px;" onclick="this.parentElement.parentElement.remove()"><i class="fas fa-times"></i></button>
-                            </div>
-                            <div style="display:flex; gap:10px;">
-                                <select class="cap-input camp-col-select" data-prop="dateCol" style="flex:1; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:8px; color:var(--text);">
-                                    <option value="">-- ${t('عمود التاريخ', 'Date Column')} --</option>
-                                    ${currentCampaignExcelCols.map(h => `<option value="${h}">${h}</option>`).join('')}
-                                </select>
-                                <select class="cap-input" data-prop="varSection" style="width:100px; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:8px; color:var(--text);">
-                                    <option value="body">Body</option>
-                                    <option value="header">Header</option>
-                                </select>
-                                <input type="number" class="cap-input" data-prop="varNum" placeholder="Var # (e.g. 2)" style="width:100px;">
-                            </div>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            ${fieldsHtml}
                         </div>
-                    `;
-                } else if (type === 'auto_scan') {
-                    html = `
-                        <div style="background:var(--input-bg); border:1px solid rgba(156,39,176,0.3); border-radius:8px; padding:12px; border-left:4px solid var(--purple);">
-                            <div style="display:flex; justify-content:space-between; margin-bottom:10px;">
-                                <div style="font-weight:bold; color:var(--purple);"><i class="fas fa-sync"></i> ${t('مسح تلقائي (Auto-Scan)', 'Auto-Scan Excel')}</div>
-                                <button class="btn danger" style="padding:2px 6px; font-size:10px;" onclick="this.parentElement.parentElement.remove()"><i class="fas fa-times"></i></button>
-                            </div>
-                            <div>
-                                <select class="cap-input" data-prop="interval" style="width:100%; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:8px; color:var(--text);">
-                                    <option value="daily">Daily</option>
-                                    <option value="2days">Every 2 Days</option>
-                                    <option value="weekly">Weekly</option>
-                                    <option value="monthly">Monthly</option>
-                                </select>
-                            </div>
-                        </div>
-                    `;
-                }
+                    </div>
+                `;
                 
                 const div = document.createElement('div');
-                div.className = 'campaign-cap-item';
+                div.className = context === 'campaign' ? 'campaign-cap-item' : 'qr-cap-item';
                 div.dataset.type = type;
                 div.innerHTML = html;
-                document.getElementById('campaignCapabilities').appendChild(div);
+                document.getElementById(context === 'campaign' ? 'campaignCapabilities' : 'qrCapabilities').appendChild(div);
             }
 
             async function saveCampaign() {
@@ -5924,6 +6023,158 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     content.innerHTML = 'Error loading logs';
                 }
             }
+            // --- QUICK REPLIES LOGIC ---
+
+            let qrVarsHeaderCount = 0;
+            let qrVarsBodyCount = 0;
+
+            async function fetchQuickReplies() {
+                try {
+                    const res = await fetch('/api/quick-replies');
+                    const data = await res.json();
+                    
+                    const list = document.getElementById('qrList');
+                    if (data.quick_replies.length === 0) {
+                        list.innerHTML = `<div style="text-align:center; padding:30px; color:var(--text-muted);">
+                            <i class="fas fa-inbox fa-3x" style="margin-bottom:15px; opacity:0.3;"></i>
+                            <p>${t('لا توجد ردود حالية', 'No quick replies yet')}</p>
+                        </div>`;
+                        return;
+                    }
+
+                    list.innerHTML = data.quick_replies.map(qr => `
+                        <div style="background:var(--card-bg); border:1px solid var(--card-border); border-radius:12px; padding:15px; display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <h4 style="margin:0 0 5px 0; color:var(--orange); font-size:16px;">
+                                    <i class="fas fa-bolt"></i> ${qr.payload_id}
+                                </h4>
+                                <div style="font-size:13px; color:var(--text-muted); display:flex; gap:15px;">
+                                    <span><i class="fas fa-arrow-right"></i> Action: ${qr.action_type === 'send_template' ? 'Template' : 'Text'}</span>
+                                    ${qr.action_type === 'send_template' ? `<span><i class="fas fa-file-alt"></i> ${qr.action_data.template_name}</span>` : ''}
+                                </div>
+                                ${qr.capabilities.length > 0 ? `
+                                    <div style="margin-top:8px; display:flex; gap:5px; flex-wrap:wrap;">
+                                        ${qr.capabilities.map(c => `<span style="background:rgba(255,152,0,0.1); color:var(--orange); padding:2px 8px; border-radius:10px; font-size:11px;">${c.type}</span>`).join('')}
+                                    </div>
+                                ` : ''}
+                            </div>
+                            <div style="display:flex; gap:10px;">
+                                <button class="btn danger" onclick="deleteQuickReply(${qr.id})"><i class="fas fa-trash"></i></button>
+                            </div>
+                        </div>
+                    `).join('');
+                } catch(e) { console.error(e); }
+            }
+
+            function openQRModal() {
+                document.getElementById('qrPayloadId').value = '';
+                document.getElementById('qrTemplateName').value = '';
+                document.getElementById('qrTemplateLang').value = 'ar';
+                document.getElementById('qrHeaderVars').innerHTML = '';
+                document.getElementById('qrBodyVars').innerHTML = '';
+                document.getElementById('qrCapabilities').innerHTML = '';
+                qrVarsHeaderCount = 0;
+                qrVarsBodyCount = 0;
+                
+                document.getElementById('qrModal').classList.add('show');
+                document.getElementById('qrModal').style.display = 'block';
+                toggleQRActionType();
+            }
+
+            function closeQRModal() {
+                document.getElementById('qrModal').style.display = 'none';
+                document.getElementById('qrModal').classList.remove('show');
+            }
+
+            function toggleQRActionType() {
+                const type = document.getElementById('qrActionType').value;
+                document.getElementById('qrTemplateSettings').style.display = type === 'send_template' ? 'block' : 'none';
+            }
+
+            function addQRVar(section) {
+                const isHeader = section === 'header';
+                const c = isHeader ? ++qrVarsHeaderCount : ++qrVarsBodyCount;
+                const container = document.getElementById(isHeader ? 'qrHeaderVars' : 'qrBodyVars');
+                
+                const div = document.createElement('div');
+                div.style.display = 'flex';
+                div.style.gap = '10px';
+                div.style.alignItems = 'center';
+                div.innerHTML = `
+                    <span style="background:var(--accent); color:#fff; width:30px; height:30px; display:flex; align-items:center; justify-content:center; border-radius:50%; font-size:12px; font-weight:bold;">{{${c}}}</span>
+                    <input type="text" class="qr-col-input" data-section="${section}" data-var="${c}" placeholder="Excel Header Name (e.g. name)" style="flex:1; background:var(--input-bg); border:1px solid var(--card-border); border-radius:8px; padding:10px; color:var(--text);">
+                    <button class="btn danger" style="padding:4px 8px; font-size:12px;" onclick="this.parentElement.remove()"><i class="fas fa-trash"></i></button>
+                `;
+                container.appendChild(div);
+            }
+
+            async function saveQuickReply() {
+                const payloadId = document.getElementById('qrPayloadId').value.trim();
+                if (!payloadId) return showToast('Please enter Payload ID');
+
+                const actionType = document.getElementById('qrActionType').value;
+                
+                let actionData = {};
+                if (actionType === 'send_template') {
+                    actionData.template_name = document.getElementById('qrTemplateName').value.trim();
+                    actionData.template_language = document.getElementById('qrTemplateLang').value.trim();
+                    
+                    if (!actionData.template_name) return showToast('Please enter Template Name');
+
+                    actionData.header_vars = Array.from(document.querySelectorAll('.qr-col-input[data-section="header"]')).map(inp => ({
+                        varNum: parseInt(inp.dataset.var), col: inp.value.trim()
+                    })).filter(v => v.col);
+                    
+                    actionData.body_vars = Array.from(document.querySelectorAll('.qr-col-input[data-section="body"]')).map(inp => ({
+                        varNum: parseInt(inp.dataset.var), col: inp.value.trim()
+                    })).filter(v => v.col);
+                }
+
+                const capabilities = Array.from(document.querySelectorAll('.qr-cap-item')).map(item => {
+                    const type = item.dataset.type;
+                    const config = { type };
+                    item.querySelectorAll('.cap-input').forEach(inp => {
+                        config[inp.dataset.prop] = inp.value;
+                    });
+                    return config;
+                });
+
+                const reqBody = {
+                    payload_id: payloadId,
+                    action_type: actionType,
+                    action_data: actionData,
+                    capabilities: capabilities
+                };
+
+                try {
+                    const res = await fetch('/api/quick-replies', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(reqBody)
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        closeQRModal();
+                        fetchQuickReplies();
+                        showToast('Quick Reply Saved');
+                    } else {
+                        showToast(data.error);
+                    }
+                } catch(e) { console.error(e); }
+            }
+
+            async function deleteQuickReply(id) {
+                if (!confirm(t('متأكد؟', 'Are you sure?'))) return;
+                try {
+                    const res = await fetch('/api/quick-replies/' + id, { method: 'DELETE' });
+                    if ((await res.json()).success) {
+                        fetchQuickReplies();
+                    }
+                } catch(e) { console.error(e); }
+            }
+
+            // Init call when script loads
+            loadCapabilitiesRegistry();
         </script>
         <div class="modal" id="confirmModal">
             <div class="modal-content" style="max-width:460px;">

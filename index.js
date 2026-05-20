@@ -10,7 +10,7 @@ const multer = require('multer');
 const { exec } = require('child_process');
 const renderDashboard = require('./UI.js');
 const { initVerification } = require('./secondaryVerification.js');
-const { initCampaigns } = require('./campaignManager.js');
+const { initCampaigns, handleQuickReply } = require('./campaignManager.js');
 
 // Ensure media storage directory exists
 if (!fs.existsSync('./media')) fs.mkdirSync('./media');
@@ -382,6 +382,14 @@ db.exec(`
         error TEXT,
         sent_at INTEGER,
         FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS quick_replies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        payload_id TEXT NOT NULL,
+        action_type TEXT NOT NULL,
+        action_data TEXT,
+        capabilities TEXT
     );
 `);
 
@@ -2215,6 +2223,19 @@ app.post('/webhook', async (req, res) => {
         const msg = messages[0];
         const from = msg.from;
         const msgType = msg.type;
+
+        let buttonPayload = null;
+        if (msgType === 'button' && msg.button && msg.button.payload) {
+            buttonPayload = msg.button.payload;
+        } else if (msgType === 'interactive' && msg.interactive && msg.interactive.type === 'button_reply' && msg.interactive.button_reply) {
+            buttonPayload = msg.interactive.button_reply.id;
+        }
+
+        if (buttonPayload) {
+            console.log(`[Meta API] Received button payload from ${from}: ${buttonPayload}`);
+            const handled = await handleQuickReply(from, buttonPayload);
+            if (handled) return; // intercepted!
+        }
 
         if (msgType === 'text' && msg.text && msg.text.body) {
             const msgBody = msg.text.body;

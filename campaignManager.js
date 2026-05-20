@@ -1,6 +1,7 @@
 const xlsx = require('xlsx');
 const fs = require('fs');
 const path = require('path');
+const capRegistry = require('./capabilitiesRegistry.js');
 
 let gDb, gConfig, gSendMetaMessage;
 
@@ -140,6 +141,53 @@ function initCampaigns(app, db, config, sendMetaMessage, upload) {
 
     // Initialize all existing schedules on startup
     initSchedules();
+
+    // --- CAPABILITIES & QUICK REPLIES ROUTES ---
+    
+    app.get('/api/capabilities', (req, res) => {
+        res.json({ success: true, capabilities: capRegistry.getFrontendRegistry() });
+    });
+
+    app.get('/api/quick-replies', (req, res) => {
+        try {
+            const qr = gDb.prepare('SELECT * FROM quick_replies ORDER BY id DESC').all().map(q => ({
+                ...q,
+                action_data: JSON.parse(q.action_data || '{}'),
+                capabilities: JSON.parse(q.capabilities || '[]')
+            }));
+            res.json({ success: true, quick_replies: qr });
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    app.post('/api/quick-replies', (req, res) => {
+        try {
+            const data = req.body;
+            const stmt = gDb.prepare(`
+                INSERT INTO quick_replies (payload_id, action_type, action_data, capabilities)
+                VALUES (?, ?, ?, ?)
+            `);
+            const info = stmt.run(
+                data.payload_id,
+                data.action_type,
+                JSON.stringify(data.action_data || {}),
+                JSON.stringify(data.capabilities || [])
+            );
+            res.json({ success: true, id: info.lastInsertRowid });
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
+
+    app.delete('/api/quick-replies/:id', (req, res) => {
+        try {
+            gDb.prepare('DELETE FROM quick_replies WHERE id = ?').run(req.params.id);
+            res.json({ success: true });
+        } catch (e) {
+            res.status(500).json({ error: e.message });
+        }
+    });
 }
 
 function initSchedules() {
@@ -180,27 +228,7 @@ function normalizePhone(phoneRaw) {
     return p;
 }
 
-// Calculate days difference (positive = future, negative = past)
-function getDaysDiff(targetDateRaw) {
-    if (!targetDateRaw) return null;
-    
-    // Excel dates can be numeric (days since 1900) or strings
-    let targetDate;
-    if (typeof targetDateRaw === 'number') {
-        targetDate = new Date(Math.round((targetDateRaw - 25569) * 86400 * 1000));
-    } else {
-        targetDate = new Date(targetDateRaw);
-    }
-
-    if (isNaN(targetDate.getTime())) return null;
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    targetDate.setHours(0, 0, 0, 0);
-
-    const diffMs = targetDate.getTime() - today.getTime();
-    return Math.round(diffMs / 86400000);
-}
+// Removed getDaysDiff as it is now in capabilitiesRegistry.js
 
 async function executeCampaign(campaignId) {
     try {
@@ -248,31 +276,17 @@ async function executeCampaign(campaignId) {
             let shouldSend = true;
             let dynamicVars = {};
 
-            for (const cap of campaign.capabilities) {
-                if (cap.type === 'days_reminder') {
-                    const daysDiff = getDaysDiff(row[cap.dateCol]);
-                    if (daysDiff === null) {
+            for (const capConfig of campaign.capabilities) {
+                const plugin = capRegistry.getCapability(capConfig.type);
+                if (plugin) {
+                    const result = plugin.execute(row, capConfig, dynamicVars);
+                    if (!result) {
                         shouldSend = false;
                         break;
                     }
-                    
-                    const targetDays = parseInt(cap.days, 10);
-                    // If direction is 'before', targetDate should be +targetDays from today (daysDiff === targetDays)
-                    // If direction is 'after', targetDate should be -targetDays from today (daysDiff === -targetDays)
-                    const expectedDiff = cap.direction === 'before' ? targetDays : -targetDays;
-                    
-                    if (daysDiff !== expectedDiff) {
-                        shouldSend = false;
-                        break;
+                    if (plugin.hashGen) {
+                        rowHashData += plugin.hashGen(capConfig, row);
                     }
-
-                    // Include the target date in the hash so it only sends once for that date
-                    rowHashData += '|reminder_' + cap.dateCol + '_' + daysDiff;
-                } else if (cap.type === 'days_left_var') {
-                    const daysDiff = getDaysDiff(row[cap.dateCol]);
-                    dynamicVars[`${cap.varSection}_${cap.varNum}`] = daysDiff !== null ? Math.max(0, daysDiff).toString() : '0';
-                    // We also include this dynamic var in hash
-                    rowHashData += '|dl_' + daysDiff;
                 }
             }
 
@@ -359,6 +373,80 @@ async function executeCampaign(campaignId) {
     }
 }
 
+async function handleQuickReply(fromPhone, payloadId) {
+    try {
+        const qrRaw = gDb.prepare('SELECT * FROM quick_replies WHERE payload_id = ?').get(payloadId);
+        if (!qrRaw) return false; // not handled
+
+        const qr = {
+            ...qrRaw,
+            action_data: JSON.parse(qrRaw.action_data || '{}'),
+            capabilities: JSON.parse(qrRaw.capabilities || '[]')
+        };
+
+        // Get last excel row for this user
+        const lastLog = gDb.prepare('SELECT row_data FROM campaign_logs WHERE phone = ? ORDER BY sent_at DESC LIMIT 1').get(fromPhone);
+        const row = lastLog ? JSON.parse(lastLog.row_data || '{}') : {};
+
+        // Run capabilities
+        let dynamicVars = {};
+        for (const capConfig of qr.capabilities) {
+            const plugin = capRegistry.getCapability(capConfig.type);
+            if (plugin) {
+                const result = plugin.execute(row, capConfig, dynamicVars);
+                if (!result) return true; // intercepted but blocked by capability
+            }
+        }
+
+        if (qr.action_type === 'send_template') {
+            const ad = qr.action_data;
+            const headerComponents = (ad.header_vars || []).map(v => {
+                let val = v.col === '[Days Left]' ? dynamicVars[`header_${v.varNum}`] : row[v.col];
+                return { type: "text", text: String(val || '') };
+            });
+
+            const bodyComponents = (ad.body_vars || []).map(v => {
+                let val = v.col === '[Days Left]' ? dynamicVars[`body_${v.varNum}`] : row[v.col];
+                return { type: "text", text: String(val || '') };
+            });
+
+            const components = [];
+            if (headerComponents.length > 0) components.push({ type: "header", parameters: headerComponents });
+            if (bodyComponents.length > 0) components.push({ type: "body", parameters: bodyComponents });
+
+            const url = `https://graph.facebook.com/v17.0/${gConfig.metaPhoneId}/messages`;
+            const payload = {
+                messaging_product: "whatsapp",
+                to: fromPhone,
+                type: "template",
+                template: {
+                    name: ad.template_name,
+                    language: { code: ad.template_language || 'ar' },
+                    components: components
+                }
+            };
+
+            await fetch(url, {
+                method: 'POST',
+                headers: {
+                    "Authorization": `Bearer ${gConfig.metaAccessToken}`,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+            console.log(`[Quick Replies] Sent template ${ad.template_name} to ${fromPhone} based on payload ${payloadId}`);
+        } else if (qr.action_type === 'send_text') {
+            // Can add plain text response logic here later
+        }
+
+        return true; // handled successfully
+    } catch (e) {
+        console.error('[Quick Replies] Error:', e);
+        return true; // still count as intercepted to prevent fallback loop
+    }
+}
+
 module.exports = {
-    initCampaigns
+    initCampaigns,
+    handleQuickReply
 };
