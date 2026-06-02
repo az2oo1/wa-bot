@@ -888,6 +888,7 @@ let botStatusKind = 'initializing';
 const userTrackers = new Map(); const abortedMessages = new Set(); const spamMutedUsers = new Map();
 const groupRaidTrackers = new Map(); const lockedGroups = new Set();
 const joinProfileReviewCache = new Map();
+const rejectedRequestsCache = new Map();
 
 // Client initialization tracking and debugging
 let isInitializing = false;
@@ -1280,8 +1281,9 @@ async function runGlobalBlacklistPurge() {
             .map(p => p.id._serialized)
             .filter(id => {
                 const cleanId = id.replace(/:[0-9]+/, '');
-                const finalCleanId = cleanId.replace('@c.us', '');
-                const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                const finalCleanId = cleanId.replace('@c.us', '').replace('@lid', '');
+                const isLID = cleanId.includes('@lid');
+                const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
                 return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(id);
             });
 
@@ -1310,15 +1312,32 @@ async function runGlobalBlacklistPurge() {
                     if (!rawId) continue;
 
                     let cleanId = rawId.replace(/:[0-9]+/, '');
+                    let unmaskedSuccessfully = false;
+                    const originalUser = rawId.split('@')[0].split(':')[0];
+                    const originalIsLID = rawId.includes('@lid');
+
                     if (cleanId.includes('@lid')) {
                         try {
                             const contact = await client.getContactById(rawId);
-                            if (contact && contact.number) cleanId = `${contact.number}@c.us`;
-                        } catch (err) { }
+                            if (contact && contact.number) {
+                                const isLidDigits = originalIsLID && (contact.number === originalUser);
+                                if (!isLidDigits) {
+                                    cleanId = `${contact.number}@c.us`;
+                                    unmaskedSuccessfully = true;
+                                } else {
+                                    cleanId = `${originalUser}@c.us`;
+                                }
+                            } else {
+                                cleanId = `${originalUser}@c.us`;
+                            }
+                        } catch (err) {
+                            cleanId = `${originalUser}@c.us`;
+                        }
                     }
 
                     const finalCleanId = cleanId.replace(/:[0-9]+/, '').replace('@c.us', '');
-                    const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                    const isLID = originalIsLID && !unmaskedSuccessfully;
+                    const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
                     if (isExtBlocked || blacklistArr.includes(finalCleanId) || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId)) {
                         usersToReject.push(rawId);
                     }
@@ -2623,8 +2642,9 @@ async function runGlobalPurge() {
                 .map(p => p.id._serialized)
                 .filter(id => {
                     const cleanId = id.replace(/:[0-9]+/, '');
-                    const finalCleanId = cleanId.replace('@c.us', '');
-                    const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                    const finalCleanId = cleanId.replace('@c.us', '').replace('@lid', '');
+                    const isLID = cleanId.includes('@lid');
+                    const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
                     return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(id);
                 });
             if (usersToKick.length > 0) {
@@ -2653,8 +2673,9 @@ async function runGlobalPurge() {
                         }
                         if (!rawId) continue;
                         let cleanId = rawId.replace(/:[0-9]+/, '');
-                        const finalCleanId = cleanId.replace('@c.us', '');
-                        const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                        const finalCleanId = cleanId.replace('@c.us', '').replace('@lid', '');
+                        const isLID = cleanId.includes('@lid');
+                        const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
                         if (isExtBlocked || blacklistArr.includes(finalCleanId) || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId)) {
                             usersToReject.push(rawId);
                         }
@@ -4431,30 +4452,52 @@ async function screenPendingMembershipRequests() {
                 if (!rawRequesterId) continue;
 
                 const cacheKey = `${groupId}::${rawRequesterId}`;
+                const rejectedUntil = rejectedRequestsCache.get(cacheKey) || 0;
+                if (Date.now() < rejectedUntil) continue;
+
                 const lastTs = joinProfileReviewCache.get(cacheKey) || 0;
                 if (Date.now() - lastTs < 2 * 60 * 1000) continue;
                 joinProfileReviewCache.set(cacheKey, Date.now());
 
+                const originalRequesterJid = rawRequesterId;
                 let cleanRequesterId = rawRequesterId.replace(/:[0-9]+/, '');
+                let unmaskedSuccessfully = false;
+
+                const originalUser = rawRequesterId.split('@')[0].split(':')[0];
+                const originalIsLID = rawRequesterId.includes('@lid');
                 
                 // Always eagerly attempt to unmask Ghost IDs (15-digit @c.us or @lid) using local WhatsApp native contacts!
                 try {
                     const contact = await client.getContactById(rawRequesterId);
                     if (contact && contact.number) {
-                        cleanRequesterId = `${contact.number}@c.us`;
-                        rawRequesterId = `${contact.number}@c.us`;
-                    } else if (cleanRequesterId.includes('@lid')) {
-                        cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us');
-                        // Keep rawRequesterId as @lid so we can reject/approve correctly using the original JID
+                        const isLidDigits = originalIsLID && (contact.number === originalUser);
+                        if (!isLidDigits) {
+                            cleanRequesterId = `${contact.number}@c.us`;
+                            rawRequesterId = `${contact.number}@c.us`;
+                            if (originalIsLID) {
+                                unmaskedSuccessfully = true;
+                            }
+                        } else {
+                            cleanRequesterId = `${originalUser}@c.us`;
+                        }
+                    } else if (originalIsLID) {
+                        cleanRequesterId = `${originalUser}@c.us`;
                     }
                 } catch (e) {
-                    if (cleanRequesterId.includes('@lid')) {
-                        cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us');
-                        // Keep rawRequesterId as @lid so we can reject/approve correctly using the original JID
+                    if (originalIsLID) {
+                        cleanRequesterId = `${originalUser}@c.us`;
                     }
                 }
 
                 const finalCleanId = cleanRequesterId.replace('@c.us', '');
+                
+                // Skip if the user is already a member of the group
+                const isAlreadyMember = chat.participants && chat.participants.some(p => {
+                    const pId = p.id._serialized.replace(/:[0-9]+/, '');
+                    return pId === cleanRequesterId || pId === rawRequesterId || pId === originalRequesterJid;
+                });
+                if (isAlreadyMember) continue;
+
                 let isVIP = false;
 
                 if (isWhitelistEnabled) {
@@ -4471,7 +4514,7 @@ async function screenPendingMembershipRequests() {
 
                 if (isVIP) {
                     try {
-                        await chat.approveGroupMembershipRequests({ requesterIds: [rawRequesterId] });
+                        await chat.approveGroupMembershipRequests({ requesterIds: [originalRequesterJid] });
                         console.log(`[أمان] تم القبول التلقائي لـ VIP (${cleanRequesterId}) في: ${chat.name}`);
                     } catch (e) {}
                     continue;
@@ -4479,7 +4522,7 @@ async function screenPendingMembershipRequests() {
 
                 // ── Blacklist check for pending join requests ──────────────────
                 if (isBlacklistEnabled) {
-                    const isLID = rawRequesterId.includes('@lid');
+                    const isLID = originalRequesterJid.includes('@lid') && !unmaskedSuccessfully;
                     const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
                     const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
                     const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanRequesterId) : false;
@@ -4488,7 +4531,8 @@ async function screenPendingMembershipRequests() {
                     if ((useGlobalBl && (globalBl || isExtBlocked)) || inCustomBl) {
                         console.log(`[أمان] رفض طلب انضمام لرقم محظور (${cleanRequesterId}) في: ${chat.name}`);
                         try {
-                            await chat.rejectGroupMembershipRequests({ requesterIds: [rawRequesterId] });
+                            rejectedRequestsCache.set(cacheKey, Date.now() + 24 * 60 * 60 * 1000); // cache for 24h
+                            await chat.rejectGroupMembershipRequests({ requesterIds: [originalRequesterJid] });
                             const reportText = tAdmin(
                                 groupConfig,
                                 config,
@@ -4512,7 +4556,7 @@ async function screenPendingMembershipRequests() {
                 
                 if (isApprovedNum) {
                     try {
-                        await chat.approveGroupMembershipRequests({ requesterIds: [rawRequesterId] });
+                        await chat.approveGroupMembershipRequests({ requesterIds: [originalRequesterJid] });
                         console.log(`[أمان] تم القبول التلقائي لرقم متحقق منه (${cleanRequesterId}) في: ${chat.name}`);
                     } catch (e) {}
                     continue;
@@ -4539,7 +4583,8 @@ async function screenPendingMembershipRequests() {
                     });
                     if (profileResult.isViolating) {
                         try {
-                            await chat.rejectGroupMembershipRequests({ requesterIds: [rawRequesterId] });
+                            rejectedRequestsCache.set(cacheKey, Date.now() + 24 * 60 * 60 * 1000); // cache for 24h
+                            await chat.rejectGroupMembershipRequests({ requesterIds: [originalRequesterJid] });
                         } catch (e) {
                             continue;
                         }
@@ -4561,7 +4606,7 @@ async function screenPendingMembershipRequests() {
 
                 if (shouldRunSecondaryVerification) {
                     const verification = initVerification(client, db, config);
-                    const didStart = await verification.startVerification(rawRequesterId, cleanRequesterId, chat.id._serialized);
+                    const didStart = await verification.startVerification(originalRequesterJid, cleanRequesterId, chat.id._serialized);
                     if (didStart) {
                         // Rate limit to prevent WhatsApp banning the bot for spamming new pending requests all at once
                         const delaySecs = (config.secondaryVerificationDelay !== undefined && !isNaN(config.secondaryVerificationDelay)) ? config.secondaryVerificationDelay : 3600;

@@ -21,6 +21,10 @@ function normalizeId(value) {
 }
 
 function toCanonical(value) {
+    if (typeof value === 'string' && value.includes('@lid')) {
+        const user = value.split('@')[0].replace(/:[0-9]+/, '');
+        return `${user}@lid`;
+    }
     const raw = normalizeId(value);
     if (!raw) return '';
     return `${raw}@c.us`;
@@ -156,7 +160,8 @@ async function resolveSessionAction(action, client, db, session) {
     } else if (action === 'ban') {
         const cg = await client.getChatById(session.group_id).catch(()=>null);
         if (cg && cg.rejectGroupMembershipRequests) try { await cg.rejectGroupMembershipRequests({ requesterIds: [canon] }); } catch(e){}
-        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(canon);
+        const blKey = canon.replace('@lid', '@c.us');
+        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(blKey);
         upsertReplyLog(db, canon, session.group_id, 'no_reply', '', 'banned');
     }
 }
