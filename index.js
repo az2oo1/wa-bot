@@ -1363,6 +1363,167 @@ async function runGlobalBlacklistPurge() {
     };
 }
 
+async function runGlobalBlacklistScan() {
+    if (!client.info || !client.info.wid) {
+        const err = new Error('البوت غير متصل حالياً، يرجى الانتظار. / Bot disconnected, please wait.');
+        err.statusCode = 400;
+        throw err;
+    }
+
+    console.log('[تنظيف] بدأت عملية الفحص التشخيصي للمجموعات...');
+    const blacklistRows = db.prepare('SELECT number FROM blacklist').all();
+    const blacklistArr = blacklistRows.map(r => r.number);
+    const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
+    const blockedExtensionsArr = blockedExtensionsRows.map(r => r.ext);
+
+    const chats = await client.getChats();
+    const botId = client.info.wid._serialized;
+    const scanResults = [];
+
+    for (const chat of chats) {
+        if (!chat.isGroup) continue;
+
+        const botData = chat.participants.find(p => p.id._serialized === botId);
+        const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
+        if (!botIsAdmin) continue;
+
+        const flaggedParticipants = [];
+        const flaggedPendingRequests = [];
+        const groupId = chat.id._serialized;
+        const groupConfig = config.groupsConfig[groupId];
+
+        // 1. Scan group participants
+        for (const p of chat.participants) {
+            const id = p.id._serialized;
+            const cleanId = id.replace(/:[0-9]+/, '');
+            const finalCleanId = cleanId.replace('@c.us', '').replace('@lid', '');
+            const isLID = cleanId.includes('@lid');
+            
+            // Check if whitelisted
+            let isWhitelisted = false;
+            const isWhitelistEnabled = config.enableWhitelist && (!groupConfig || groupConfig.enableWhitelist !== false);
+            if (isWhitelistEnabled) {
+                const globalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanId);
+                const useGlobal = groupConfig ? (groupConfig.useGlobalWhitelist !== false) : true;
+                const inCustom = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanId) : false;
+                if ((useGlobal && globalWl) || inCustom) isWhitelisted = true;
+            }
+
+            if (!isWhitelisted) {
+                const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanId) : false;
+                const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanId);
+                const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
+
+                if ((useGlobalBl && (globalBl || isExtBlocked)) || inCustomBl) {
+                    let reason = '';
+                    if (useGlobalBl && globalBl) reason = 'Blacklisted';
+                    else if (useGlobalBl && isExtBlocked) reason = `Blocked prefix (+${blockedExtensionsArr.find(ext => finalCleanId.startsWith(ext))})`;
+                    else if (inCustomBl) reason = 'Custom Group Blacklist';
+
+                    flaggedParticipants.push({
+                        id,
+                        cleanId,
+                        reason,
+                        isLID
+                    });
+                }
+            }
+        }
+
+        // 2. Scan pending requests
+        try {
+            const pendingReqs = await chat.getGroupMembershipRequests();
+            if (pendingReqs && pendingReqs.length > 0) {
+                for (const req of pendingReqs) {
+                    let rawId = null;
+                    if (req) {
+                        if (typeof req.id === 'string') rawId = req.id;
+                        else if (req.id && req.id._serialized) rawId = req.id._serialized;
+                        else if (req.id && req.id.user && req.id.server) rawId = `${req.id.user}@${req.id.server}`;
+                        else if (typeof req.requesterId === 'string') rawId = req.requesterId;
+                        else if (typeof req.author === 'string') rawId = req.author;
+                    }
+                    if (!rawId) continue;
+
+                    let cleanId = rawId.replace(/:[0-9]+/, '');
+                    let unmaskedSuccessfully = false;
+                    const originalUser = rawId.split('@')[0].split(':')[0];
+                    const originalIsLID = rawId.includes('@lid');
+
+                    if (cleanId.includes('@lid')) {
+                        try {
+                            const contact = await client.getContactById(rawId);
+                            if (contact && contact.number) {
+                                const isLidDigits = originalIsLID && (contact.number === originalUser);
+                                if (!isLidDigits) {
+                                    cleanId = `${contact.number}@c.us`;
+                                    unmaskedSuccessfully = true;
+                                } else {
+                                    cleanId = `${originalUser}@c.us`;
+                                }
+                            } else {
+                                cleanId = `${originalUser}@c.us`;
+                            }
+                        } catch (err) {
+                            cleanId = `${originalUser}@c.us`;
+                        }
+                    }
+
+                    const finalCleanId = cleanId.replace(/:[0-9]+/, '').replace('@c.us', '');
+                    const isLID = originalIsLID && !unmaskedSuccessfully;
+
+                    // Whitelist check
+                    let isWhitelisted = false;
+                    const isWhitelistEnabled = config.enableWhitelist && (!groupConfig || groupConfig.enableWhitelist !== false);
+                    if (isWhitelistEnabled) {
+                        const globalWl = db.prepare('SELECT 1 FROM whitelist WHERE number = ?').get(cleanId);
+                        const useGlobal = groupConfig ? (groupConfig.useGlobalWhitelist !== false) : true;
+                        const inCustom = groupConfig && groupConfig.customWhitelist ? groupConfig.customWhitelist.includes(cleanId) : false;
+                        if ((useGlobal && globalWl) || inCustom) isWhitelisted = true;
+                    }
+
+                    if (!isWhitelisted) {
+                        const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                        const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanId) : false;
+                        const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanId);
+                        const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
+
+                        if ((useGlobalBl && (globalBl || isExtBlocked)) || inCustomBl) {
+                            let reason = '';
+                            if (useGlobalBl && globalBl) reason = 'Blacklisted';
+                            else if (useGlobalBl && isExtBlocked) reason = `Blocked prefix (+${blockedExtensionsArr.find(ext => finalCleanId.startsWith(ext))})`;
+                            else if (inCustomBl) reason = 'Custom Group Blacklist';
+
+                            flaggedPendingRequests.push({
+                                id: rawId,
+                                cleanId,
+                                reason,
+                                isLID: originalIsLID,
+                                unmasked: unmaskedSuccessfully
+                            });
+                        }
+                    }
+                }
+            }
+        } catch (e) {
+            console.error(`[فحص] فشل قراءة طلبات الانضمام المعلقة في ${chat.name}:`, e.message);
+        }
+
+        if (flaggedParticipants.length > 0 || flaggedPendingRequests.length > 0) {
+            scanResults.push({
+                groupId: chat.id._serialized,
+                groupName: chat.name,
+                flaggedParticipants,
+                flaggedPendingRequests
+            });
+        }
+    }
+
+    console.log(`[تنظيف] انتهت عملية الفحص التشخيصي للمجموعات. العثور على ${scanResults.length} مجموعات بها مخالفات.`);
+    return scanResults;
+}
+
 async function runAdminWhitelistSync() {
     if (!client.info || !client.info.wid) {
         const err = new Error('البوت غير متصل حالياً، يرجى الانتظار. / Bot disconnected, please wait.');
@@ -1484,6 +1645,16 @@ app.post('/api/blacklist/purge', requireAuthApi, requirePermission('security:man
     } catch (error) {
         console.error('[خطأ]', error);
         res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'حدث خطأ في السيرفر أثناء عملية المسح. / Server error during purge.' });
+    }
+});
+
+app.post('/api/blacklist/scan', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
+    try {
+        const scanResults = await runGlobalBlacklistScan();
+        res.json({ success: true, scanResults });
+    } catch (error) {
+        console.error('[خطأ]', error);
+        res.status(error.statusCode || 500).json({ error: error.statusCode ? error.message : 'حدث خطأ أثناء عملية الفحص. / Server error during scan.' });
     }
 });
 
@@ -1889,9 +2060,21 @@ app.post('/api/secondary-verification/pending/remove', requireAuthApi, requirePe
                 let cleanNumber = String(row.requester_id || '').replace(/:[0-9]+(?=@)/g, '');
                 if (cleanNumber.includes('@lid')) cleanNumber = cleanNumber.replace('@lid', '@c.us');
                 if (cleanNumber.includes('@s.whatsapp.net')) cleanNumber = cleanNumber.replace('@s.whatsapp.net', '@c.us');
-                if (/^\\d+$/.test(cleanNumber)) cleanNumber = `${cleanNumber}@c.us`;
+                if (/^\d+$/.test(cleanNumber)) cleanNumber = `${cleanNumber}@c.us`;
                 
                 if (cleanNumber) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanNumber);
+                if (row.requester_id && row.requester_id.includes('@lid')) {
+                    try {
+                        const contact = await client.getContactById(row.requester_id);
+                        if (contact && contact.number) {
+                            const originalUser = row.requester_id.split('@')[0].split(':')[0];
+                            if (contact.number !== originalUser) {
+                                const realCleanId = `${contact.number}@c.us`;
+                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(realCleanId);
+                            }
+                        }
+                    } catch (err) { }
+                }
             }
             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
             removed += 1;
@@ -3065,12 +3248,27 @@ client.on('group_join', async (notification) => {
 
         for (const participantId of notification.recipientIds) {
             let cleanJoinedId = participantId.replace(/:[0-9]+/, '');
+            let unmaskedSuccessfully = false;
+            const originalUser = participantId.split('@')[0].split(':')[0];
+            const originalIsLID = participantId.includes('@lid');
+
             if (cleanJoinedId.includes('@lid')) {
                 try {
                     const contact = await client.getContactById(participantId);
-                    if (contact && contact.number) cleanJoinedId = `${contact.number}@c.us`;
-                    else cleanJoinedId = cleanJoinedId.replace('@lid', '@c.us');
-                } catch (e) { cleanJoinedId = cleanJoinedId.replace('@lid', '@c.us'); }
+                    if (contact && contact.number) {
+                        const isLidDigits = originalIsLID && (contact.number === originalUser);
+                        if (!isLidDigits) {
+                            cleanJoinedId = `${contact.number}@c.us`;
+                            unmaskedSuccessfully = true;
+                        } else {
+                            cleanJoinedId = `${originalUser}@c.us`;
+                        }
+                    } else {
+                        cleanJoinedId = `${originalUser}@c.us`;
+                    }
+                } catch (e) {
+                    cleanJoinedId = `${originalUser}@c.us`;
+                }
             }
 
             let isWhitelisted = false;
@@ -3086,7 +3284,8 @@ client.on('group_join', async (notification) => {
             if (isBlacklistEnabledForGroup && !isWhitelisted) {
                 const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanJoinedId);
                 const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
-                const isExtBlocked = blockedExtensionsRows.some(r => cleanJoinedId.replace('@c.us', '').startsWith(r.ext));
+                const isLID = originalIsLID && !unmaskedSuccessfully;
+                const isExtBlocked = !isLID && blockedExtensionsRows.some(r => cleanJoinedId.replace('@c.us', '').startsWith(r.ext));
                 const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
                 const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanJoinedId) : false;
 
@@ -3137,6 +3336,12 @@ client.on('group_join', async (notification) => {
                         await chat.removeParticipants([participantId]);
                         if (isBlacklistEnabledForGroup) {
                             try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanJoinedId); } catch (e) { }
+                            if (participantId && participantId.includes('@lid')) {
+                                try {
+                                    const lidClean = participantId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
+                                } catch (err) { }
+                            }
                         }
 
                         const reportText = tAdmin(
@@ -3325,13 +3530,27 @@ client.on('message', async msg => {
 
             const rawAuthorId = msg.author || msg.from;
             let cleanAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+            let unmaskedSuccessfully = false;
+            const originalUser = rawAuthorId.split('@')[0].split(':')[0];
+            const originalIsLID = rawAuthorId.includes('@lid');
 
             if (cleanAuthorId.includes('@lid')) {
                 try {
                     const contact = await msg.getContact();
-                    if (contact && contact.number) cleanAuthorId = `${contact.number}@c.us`;
-                    else cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us');
-                } catch (e) { cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us'); }
+                    if (contact && contact.number) {
+                        const isLidDigits = originalIsLID && (contact.number === originalUser);
+                        if (!isLidDigits) {
+                            cleanAuthorId = `${contact.number}@c.us`;
+                            unmaskedSuccessfully = true;
+                        } else {
+                            cleanAuthorId = `${originalUser}@c.us`;
+                        }
+                    } else {
+                        cleanAuthorId = `${originalUser}@c.us`;
+                    }
+                } catch (e) {
+                    cleanAuthorId = `${originalUser}@c.us`;
+                }
             }
 
             const groupId = chat.id._serialized;
@@ -3562,7 +3781,7 @@ client.on('message', async msg => {
                                         else cleanId = cleanId.replace('@lid', '@c.us');
                                     } catch (e) { cleanId = cleanId.replace('@lid', '@c.us'); }
                                 }
-                                rawId = cleanId; // Use resolved @c.us for ban/kick
+                                // Keep rawId as mid (original @lid) so removeParticipants uses the correct group JID
                             }
                             targetList.push({ rawId, cleanId });
                         }
@@ -3580,7 +3799,7 @@ client.on('message', async msg => {
                                     if (contact && contact.number) qCleanId = `${contact.number}@c.us`;
                                     else qCleanId = qCleanId.replace('@lid', '@c.us');
                                 } catch (e) { qCleanId = qCleanId.replace('@lid', '@c.us'); }
-                                qRawId = qCleanId; // Use resolved @c.us
+                                // Keep qRawId as the original JID (which could be @lid)
                             }
                             if (qRawId) targetList.push({ rawId: qRawId, cleanId: qCleanId });
                         } catch (e) { }
@@ -3631,6 +3850,12 @@ client.on('message', async msg => {
                                     await chat.removeParticipants([target.rawId]);
                                     if (cmd === 'ban' && cmdBlacklistEnabled) {
                                         try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(target.cleanId); } catch (e) { }
+                                        if (target.rawId && target.rawId.includes('@lid')) {
+                                            try {
+                                                const lidClean = target.rawId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
+                                            } catch (err) { }
+                                        }
                                     }
                                     succeeded.push(target.cleanId.split('@')[0]);
                                     console.log(`[أمر] ${cmd} على ${target.cleanId} في ${chat.name} بواسطة ${cleanAuthorId}`);
@@ -3640,6 +3865,12 @@ client.on('message', async msg => {
                                     // Even if they failed kick (e.g. left group), we still insert into blacklist for /ban
                                     if (cmd === 'ban' && cmdBlacklistEnabled) {
                                         try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(target.cleanId); } catch (e) { }
+                                        if (target.rawId && target.rawId.includes('@lid')) {
+                                            try {
+                                                const lidClean = target.rawId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
+                                            } catch (err) { }
+                                        }
                                     }
                                 }
                             }
@@ -3866,7 +4097,8 @@ client.on('message', async msg => {
             if (isBlacklistEnabled) {
                 const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanAuthorId);
                 const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
-                const isExtBlocked = blockedExtensionsRows.some(r => cleanAuthorId.replace('@c.us', '').startsWith(r.ext));
+                const isLID = originalIsLID && !unmaskedSuccessfully;
+                const isExtBlocked = !isLID && blockedExtensionsRows.some(r => cleanAuthorId.replace('@c.us', '').startsWith(r.ext));
                 const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
                 const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanAuthorId) : false;
                 if ((useGlobal && (globalBl || isExtBlocked)) || inCustom) {
@@ -3885,7 +4117,15 @@ client.on('message', async msg => {
                 if (blockedAction === 'auto') {
                     try {
                         await chat.removeParticipants([rawAuthorId]);
-                        if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanAuthorId);
+                        if (isBlacklistEnabled) {
+                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanAuthorId); } catch (e) { }
+                            if (rawAuthorId && rawAuthorId.includes('@lid')) {
+                                try {
+                                    const lidClean = rawAuthorId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
+                                } catch (err) { }
+                            }
+                        }
                         const reportText = adminMessageLang === 'en'
                             ? `🚨 *Auto Ban (Blocked Type)*\nA member sent (${internalMsgType}) in "${chat.name}" and was removed.\n👤 *Sender:* @${cleanAuthorId.split('@')[0]}`
                             : `🚨 *حظر تلقائي (نوع ممنوع)*\nأرسل العضو ملف (${internalMsgType}) في "${chat.name}" وتم طرده.\n👤 *المرسل:* @${cleanAuthorId.split('@')[0]}`;
@@ -3980,7 +4220,13 @@ client.on('message', async msg => {
                         try {
                             await chat.removeParticipants([rawAuthorId]);
                             if (isBlacklistEnabled) {
-                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
+                                try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId); } catch (e) { }
+                                if (rawAuthorId && rawAuthorId.includes('@lid')) {
+                                    try {
+                                        const lidClean = rawAuthorId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                                        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
+                                    } catch (err) { }
+                                }
                             }
                             const reportText = adminMessageLang === 'en'
                                 ? `🚨 *Auto Ban (Spam)*\nThe member was removed from "${chat.name}"${isBlacklistEnabled ? ' and added to blacklist' : ''}.\n\n👤 *Sender:* @${senderId.split('@')[0]}\n📋 *Reason:* ${spamFlagReason}`
@@ -4100,7 +4346,15 @@ client.on('message', async msg => {
                 if (isAutoActionEnabled) {
                     try {
                         await chat.removeParticipants([rawAuthorId]);
-                        if (isBlacklistEnabled) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId);
+                        if (isBlacklistEnabled) {
+                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId); } catch (e) { }
+                            if (rawAuthorId && rawAuthorId.includes('@lid')) {
+                                try {
+                                    const lidClean = rawAuthorId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
+                                } catch (err) { }
+                            }
+                        }
 
                         const reportText = adminMessageLang === 'en'
                             ? `🚨 *Auto Moderation Report*\nViolating content was deleted and the member was removed from "${chat.name}".\n\n👤 *Sender:* @${senderId.split('@')[0]}\n📋 *Reason:* ${violationReason}\n📝 *Deleted Content:*\n"${messageContent}"`
@@ -4225,6 +4479,12 @@ client.on('vote_update', async vote => {
     if (yesSelected) {
         if (data.isBlacklistEnabled) {
             try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan); } catch (e) { }
+            if (data.rawSenderId && data.rawSenderId.includes('@lid')) {
+                try {
+                    const lidClean = data.rawSenderId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
+                } catch (err) { }
+            }
         }
 
         let removed = false;
@@ -4591,6 +4851,12 @@ async function screenPendingMembershipRequests() {
 
                         if (isBlacklistEnabled) {
                             try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanRequesterId); } catch (e) { }
+                            if (originalRequesterJid && originalRequesterJid.includes('@lid')) {
+                                try {
+                                    const lidClean = originalRequesterJid.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
+                                } catch (err) { }
+                            }
                         }
 
                         const reportText = tAdmin(

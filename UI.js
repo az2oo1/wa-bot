@@ -513,6 +513,9 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                         <button type="button" id="purgeBtn" class="btn btn-warning" style="width:100%; justify-content:center; padding:15px; font-size:16px;" onclick="purgeBlacklisted()">
                             <i class="fas fa-gavel"></i> ${t('تنفيذ الطرد الشامل الآن', 'Execute Global Purge Now')}
                         </button>
+                        <button type="button" id="scanBtn" class="btn btn-primary" style="width:100%; justify-content:center; padding:15px; font-size:16px; margin-top: 10px;" onclick="scanGroupsForFlags()">
+                            <i class="fas fa-search"></i> ${t('فحص تشخيصي للمجموعات', 'Run Group Diagnostic Scan')}
+                        </button>
                     </div>
 
                     <div class="card warning purge-card">
@@ -1978,6 +1981,19 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             </div>
         </div>
 
+        <div id="scanResultsModal" class="modal">
+            <div class="modal-content" style="max-width:850px;">
+                <div class="modal-header">
+                    <h3 style="color:var(--orange);"><i class="fas fa-search-plus"></i> ${t('نتائج الفحص التشخيصي للمجموعات', 'Group Diagnostic Scan Results')}</h3>
+                    <button class="close-modal" onclick="closeScanResultsModal()">×</button>
+                </div>
+                <div id="scanResultsContainer" style="max-height: 480px; overflow-y: auto; margin-bottom: 20px;">
+                    <!-- Results dynamic insertion -->
+                </div>
+                <button type="button" class="btn btn-ghost btn-full" onclick="closeScanResultsModal()">${t('إغلاق', 'Close')}</button>
+            </div>
+        </div>
+
         <div id="firstLoginModal" class="modal">
             <div class="modal-content" style="max-width:620px; border-color:rgba(255,171,64,0.35); background:linear-gradient(180deg,rgba(255,171,64,0.06) 0,var(--card-bg) 60%);">
                 <div class="modal-header">
@@ -2174,6 +2190,84 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                 clearInterval(debuggerInterval);
             }
 
+            function openScanResultsModal() { document.getElementById('scanResultsModal').classList.add('open'); }
+            function closeScanResultsModal() { document.getElementById('scanResultsModal').classList.remove('open'); }
+
+            async function scanGroupsForFlags() {
+                const btn = document.getElementById('scanBtn');
+                const origHtml = btn.innerHTML;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> ' + (currentLang === 'en' ? 'Scanning...' : 'جاري الفحص...');
+                btn.disabled = true;
+
+                try {
+                    const res = await fetch('/api/blacklist/scan', { method: 'POST' });
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok || data.error) {
+                        showToast('❌ ' + (data.error || (currentLang === 'en' ? 'Scan failed' : 'فشل الفحص')));
+                        btn.innerHTML = origHtml;
+                        btn.disabled = false;
+                        return;
+                    }
+
+                    const container = document.getElementById('scanResultsContainer');
+                    container.innerHTML = '';
+
+                    const results = data.scanResults || [];
+                    if (results.length === 0) {
+                        container.innerHTML = '<div style="text-align:center; padding:30px; color:var(--text-muted);">' + 
+                            (currentLang === 'en' ? 'No flagged users or pending requests found in any groups.' : 'لم يتم العثور على مستخدمين أو طلبات معلقة مخالفة في أي مجموعة.') + 
+                            '</div>';
+                    } else {
+                        let html = '';
+                        results.forEach(group => {
+                            html += `\<div class="sub-panel" style="margin-bottom:15px; border-color:var(--card-border);">
+                                \<h4 style="color:var(--accent); font-size:16px; margin-bottom:10px;"><i class="fas fa-users"></i> \${umEscapeHtml(group.groupName)}</h4>
+                                \<div style="font-size:11px; color:var(--text-muted); margin-top:-6px; margin-bottom:12px; font-family:monospace;">\${umEscapeHtml(group.groupId)}</div>`;
+                            
+                            if (group.flaggedParticipants && group.flaggedParticipants.length > 0) {
+                                html += `\<div style="font-weight:bold; font-size:13px; margin-bottom:6px; color:var(--red);"><i class="fas fa-user-slash"></i> ${currentLang === 'en' ? 'Flagged Members (Would be kicked):' : 'أعضاء مخالفون (سيتم طردهم):'}</div>`;
+                                group.flaggedParticipants.forEach(member => {
+                                    html += `\<div style="padding:6px 10px; background:rgba(255,82,82,0.05); border:1px solid rgba(255,82,82,0.15); border-radius:6px; margin-bottom:6px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
+                                        \<div>
+                                            \<span style="font-weight:600; color:var(--text);">\${umEscapeHtml(member.cleanId)}</span>
+                                            \${member.isLID ? \`\<span style="font-size:10px; background:rgba(64,196,255,0.15); color:var(--blue); padding:1px 5px; border-radius:4px; margin-inline-start:6px; font-family:monospace;">LID</span>\` : ''}
+                                            \<div style="font-size:10px; color:var(--text-muted); font-family:monospace; margin-top:2px;">ID: \${umEscapeHtml(member.id)}</div>
+                                        \</div>
+                                        \<div style="font-size:12px; color:var(--red); font-weight:600;">\${umEscapeHtml(member.reason)}</div>
+                                    \</div>\`;
+                                });
+                            }
+
+                            if (group.flaggedPendingRequests && group.flaggedPendingRequests.length > 0) {
+                                if (group.flaggedParticipants && group.flaggedParticipants.length > 0) {
+                                    html += `\<div style="height:1px; background:var(--card-border); margin:12px 0;"></div>\`;
+                                }
+                                html += `\<div style="font-weight:bold; font-size:13px; margin-bottom:6px; color:var(--orange);"><i class="fas fa-user-clock"></i> ${currentLang === 'en' ? 'Flagged Pending Requests (Would be rejected):' : 'طلبات معلقة مخالفة (سيتم رفضها):'}</div>`;
+                                group.flaggedPendingRequests.forEach(req => {
+                                    html += `\<div style="padding:6px 10px; background:rgba(255,171,64,0.05); border:1px solid rgba(255,171,64,0.15); border-radius:6px; margin-bottom:6px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
+                                        \<div>
+                                            \<span style="font-weight:600; color:var(--text);">\${umEscapeHtml(req.cleanId)}</span>
+                                            \${req.isLID ? \`\<span style="font-size:10px; background:rgba(64,196,255,0.15); color:var(--blue); padding:1px 5px; border-radius:4px; margin-inline-start:6px; font-family:monospace;">LID (\${req.unmasked ? (currentLang === 'en' ? 'Unmasked' : 'تم كشف الرقم') : (currentLang === 'en' ? 'Unresolved' : 'مخفي')})</span>\` : ''}
+                                            \<div style="font-size:10px; color:var(--text-muted); font-family:monospace; margin-top:2px;">ID: \${umEscapeHtml(req.id)}</div>
+                                        \</div>
+                                        \<div style="font-size:12px; color:var(--orange); font-weight:600;">\${umEscapeHtml(req.reason)}</div>
+                                    \</div>\`;
+                                });
+                            }
+                            html += `\</div>\`;
+                        });
+                        container.innerHTML = html;
+                    }
+
+                    openScanResultsModal();
+                } catch (e) {
+                    showToast('❌ ' + e.message);
+                } finally {
+                    btn.innerHTML = origHtml;
+                    btn.disabled = false;
+                }
+            }
+
             async function enforceFirstLoginChange() {
                 try {
                     const res = await fetch('/auth/me', { cache: 'no-store' });
@@ -2239,6 +2333,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             window.onclick = function(event) {
                 if (event.target === document.getElementById('ollamaModal')) closeOllamaModal();
                 if (event.target === document.getElementById('debuggerModal')) closeDebuggerModal();
+                if (event.target === document.getElementById('scanResultsModal')) closeScanResultsModal();
                 if (event.target === document.getElementById('confirmModal')) closeConfirmModal(false);
             }
 

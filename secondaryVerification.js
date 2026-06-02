@@ -162,6 +162,18 @@ async function resolveSessionAction(action, client, db, session) {
         if (cg && cg.rejectGroupMembershipRequests) try { await cg.rejectGroupMembershipRequests({ requesterIds: [canon] }); } catch(e){}
         const blKey = canon.replace('@lid', '@c.us');
         db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(blKey);
+        if (canon.includes('@lid')) {
+            try {
+                const contact = await client.getContactById(canon);
+                if (contact && contact.number) {
+                    const originalUser = canon.split('@')[0].split(':')[0];
+                    if (contact.number !== originalUser) {
+                        const realCleanId = `${contact.number}@c.us`;
+                        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(realCleanId);
+                    }
+                }
+            } catch (err) { }
+        }
         upsertReplyLog(db, canon, session.group_id, 'no_reply', '', 'banned');
     }
 }
