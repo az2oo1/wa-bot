@@ -2220,41 +2220,41 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
                     } else {
                         let html = '';
                         results.forEach(group => {
-                            html += `\<div class="sub-panel" style="margin-bottom:15px; border-color:var(--card-border);">
-                                \<h4 style="color:var(--accent); font-size:16px; margin-bottom:10px;"><i class="fas fa-users"></i> \${umEscapeHtml(group.groupName)}</h4>
-                                \<div style="font-size:11px; color:var(--text-muted); margin-top:-6px; margin-bottom:12px; font-family:monospace;">\${umEscapeHtml(group.groupId)}</div>`;
+                            html += \`<div class="sub-panel" style="margin-bottom:15px; border-color:var(--card-border);">
+                                <h4 style="color:var(--accent); font-size:16px; margin-bottom:10px;"><i class="fas fa-users"></i> \${umEscapeHtml(group.groupName)}</h4>
+                                <div style="font-size:11px; color:var(--text-muted); margin-top:-6px; margin-bottom:12px; font-family:monospace;">\${umEscapeHtml(group.groupId)}</div>\`;
                             
                             if (group.flaggedParticipants && group.flaggedParticipants.length > 0) {
-                                html += `\<div style="font-weight:bold; font-size:13px; margin-bottom:6px; color:var(--red);"><i class="fas fa-user-slash"></i> ${currentLang === 'en' ? 'Flagged Members (Would be kicked):' : 'أعضاء مخالفون (سيتم طردهم):'}</div>`;
+                                html += \`<div style="font-weight:bold; font-size:13px; margin-bottom:6px; color:var(--red);"><i class="fas fa-user-slash"></i> ${currentLang === 'en' ? 'Flagged Members (Would be kicked):' : 'أعضاء مخالفون (سيتم طردهم):'}</div>\`;
                                 group.flaggedParticipants.forEach(member => {
-                                    html += `\<div style="padding:6px 10px; background:rgba(255,82,82,0.05); border:1px solid rgba(255,82,82,0.15); border-radius:6px; margin-bottom:6px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
-                                        \<div>
-                                            \<span style="font-weight:600; color:var(--text);">\${umEscapeHtml(member.cleanId)}</span>
-                                            \${member.isLID ? \`\<span style="font-size:10px; background:rgba(64,196,255,0.15); color:var(--blue); padding:1px 5px; border-radius:4px; margin-inline-start:6px; font-family:monospace;">LID</span>\` : ''}
-                                            \<div style="font-size:10px; color:var(--text-muted); font-family:monospace; margin-top:2px;">ID: \${umEscapeHtml(member.id)}</div>
-                                        \</div>
-                                        \<div style="font-size:12px; color:var(--red); font-weight:600;">\${umEscapeHtml(member.reason)}</div>
-                                    \</div>\`;
+                                    html += \`<div style="padding:6px 10px; background:rgba(255,82,82,0.05); border:1px solid rgba(255,82,82,0.15); border-radius:6px; margin-bottom:6px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
+                                        <div>
+                                            <span style="font-weight:600; color:var(--text);">\${umEscapeHtml(member.cleanId)}</span>
+                                            \${member.isLID ? \`<span style="font-size:10px; background:rgba(64,196,255,0.15); color:var(--blue); padding:1px 5px; border-radius:4px; margin-inline-start:6px; font-family:monospace;">LID</span>\` : ''}
+                                            <div style="font-size:10px; color:var(--text-muted); font-family:monospace; margin-top:2px;">ID: \${umEscapeHtml(member.id)}</div>
+                                        </div>
+                                        <div style="font-size:12px; color:var(--red); font-weight:600;">\${umEscapeHtml(member.reason)}</div>
+                                    </div>\`;
                                 });
                             }
 
                             if (group.flaggedPendingRequests && group.flaggedPendingRequests.length > 0) {
                                 if (group.flaggedParticipants && group.flaggedParticipants.length > 0) {
-                                    html += `\<div style="height:1px; background:var(--card-border); margin:12px 0;"></div>\`;
+                                    html += \`<div style="height:1px; background:var(--card-border); margin:12px 0;"></div>\`;
                                 }
-                                html += `\<div style="font-weight:bold; font-size:13px; margin-bottom:6px; color:var(--orange);"><i class="fas fa-user-clock"></i> ${currentLang === 'en' ? 'Flagged Pending Requests (Would be rejected):' : 'طلبات معلقة مخالفة (سيتم رفضها):'}</div>`;
+                                html += \`<div style="font-weight:bold; font-size:13px; margin-bottom:6px; color:var(--orange);"><i class="fas fa-user-clock"></i> ${currentLang === 'en' ? 'Flagged Pending Requests (Would be rejected):' : 'طلبات معلقة مخالفة (سيتم رفضها):'}</div>\`;
                                 group.flaggedPendingRequests.forEach(req => {
-                                    html += `\<div style="padding:6px 10px; background:rgba(255,171,64,0.05); border:1px solid rgba(255,171,64,0.15); border-radius:6px; margin-bottom:6px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
-                                        \<div>
-                                            \<span style="font-weight:600; color:var(--text);">\${umEscapeHtml(req.cleanId)}</span>
-                                            \${req.isLID ? \`\<span style="font-size:10px; background:rgba(64,196,255,0.15); color:var(--blue); padding:1px 5px; border-radius:4px; margin-inline-start:6px; font-family:monospace;">LID (\${req.unmasked ? (currentLang === 'en' ? 'Unmasked' : 'تم كشف الرقم') : (currentLang === 'en' ? 'Unresolved' : 'مخفي')})</span>\` : ''}
-                                            \<div style="font-size:10px; color:var(--text-muted); font-family:monospace; margin-top:2px;">ID: \${umEscapeHtml(req.id)}</div>
-                                        \</div>
-                                        \<div style="font-size:12px; color:var(--orange); font-weight:600;">\${umEscapeHtml(req.reason)}</div>
-                                    \</div>\`;
+                                    html += \`<div style="padding:6px 10px; background:rgba(255,171,64,0.05); border:1px solid rgba(255,171,64,0.15); border-radius:6px; margin-bottom:6px; font-size:13px; display:flex; justify-content:space-between; align-items:center;">
+                                        <div>
+                                            <span style="font-weight:600; color:var(--text);">\${umEscapeHtml(req.cleanId)}</span>
+                                            \${req.isLID ? \`<span style="font-size:10px; background:rgba(64,196,255,0.15); color:var(--blue); padding:1px 5px; border-radius:4px; margin-inline-start:6px; font-family:monospace;">LID (\${req.unmasked ? (currentLang === 'en' ? 'Unmasked' : 'تم كشف الرقم') : (currentLang === 'en' ? 'Unresolved' : 'مخفي')})</span>\` : ''}
+                                            <div style="font-size:10px; color:var(--text-muted); font-family:monospace; margin-top:2px;">ID: \${umEscapeHtml(req.id)}</div>
+                                        </div>
+                                        <div style="font-size:12px; color:var(--orange); font-weight:600;">\${umEscapeHtml(req.reason)}</div>
+                                    </div>\`;
                                 });
                             }
-                            html += `\</div>\`;
+                            html += \`</div>\`;
                         });
                         container.innerHTML = html;
                     }
