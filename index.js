@@ -4445,12 +4445,12 @@ async function screenPendingMembershipRequests() {
                         rawRequesterId = `${contact.number}@c.us`;
                     } else if (cleanRequesterId.includes('@lid')) {
                         cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us');
-                        rawRequesterId = rawRequesterId.replace('@lid', '@c.us');
+                        // Keep rawRequesterId as @lid so we can reject/approve correctly using the original JID
                     }
                 } catch (e) {
                     if (cleanRequesterId.includes('@lid')) {
                         cleanRequesterId = cleanRequesterId.replace('@lid', '@c.us');
-                        rawRequesterId = rawRequesterId.replace('@lid', '@c.us');
+                        // Keep rawRequesterId as @lid so we can reject/approve correctly using the original JID
                     }
                 }
 
@@ -4479,7 +4479,8 @@ async function screenPendingMembershipRequests() {
 
                 // ── Blacklist check for pending join requests ──────────────────
                 if (isBlacklistEnabled) {
-                    const isExtBlocked = blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                    const isLID = rawRequesterId.includes('@lid');
+                    const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
                     const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
                     const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanRequesterId) : false;
                     const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanRequesterId);
