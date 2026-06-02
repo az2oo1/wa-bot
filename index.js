@@ -4051,7 +4051,7 @@ client.on('message', async msg => {
 
             const compactId = compactMsgId(msgId);
             const msgPreview = toLogPreview(normalizedMessageText, 100) || `[${internalMsgType}]`;
-            console.log(`[رسالة] استلام | id=${compactId} | نوع=${internalMsgType} | نص="${msgPreview}"`);
+            console.log(`[رسالة] استلام | من=${cleanAuthorId.split('@')[0]} (id=${compactId}) | نوع=${internalMsgType} | نص="${msgPreview}"`);
 
             let targetAdminGroup = config.defaultAdminGroup;
             let isWordFilterEnabled = config.enableWordFilter;
