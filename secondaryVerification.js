@@ -30,6 +30,46 @@ function toCanonical(value) {
     return `${raw}@c.us`;
 }
 
+async function resolveLidJid(client, rawId) {
+    if (!rawId || typeof rawId !== 'string') return { cleanId: rawId, unmasked: false };
+    
+    let cleanId = rawId.replace(/:[0-9]+/, '');
+    if (!cleanId.includes('@lid')) {
+        return { cleanId, unmasked: false };
+    }
+    
+    const originalUser = rawId.split('@')[0].split(':')[0];
+    
+    // 1. Try getContactLidAndPhone if available on the client
+    if (client && typeof client.getContactLidAndPhone === 'function') {
+        try {
+            const res = await client.getContactLidAndPhone([rawId]);
+            if (res && res[0] && res[0].pn) {
+                return { cleanId: `${res[0].pn}@c.us`, unmasked: true };
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+    
+    // 2. Try getContactById fallback
+    if (client) {
+        try {
+            const contact = await client.getContactById(rawId);
+            if (contact && contact.number) {
+                if (contact.number !== originalUser) {
+                    return { cleanId: `${contact.number}@c.us`, unmasked: true };
+                }
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+    
+    // 3. Fallback: replace @lid with @c.us (returns the LID digits but in c.us domain)
+    return { cleanId: `${originalUser}@c.us`, unmasked: false };
+}
+
 function addApprovedNumber(db, requesterId) {
     const numberKey = normalizeId(requesterId).replace(/\D/g, '');
     if (!numberKey) return;
@@ -316,16 +356,10 @@ function initVerification(client, db, config) {
 
             // Resolve @lid Ghost IDs to real phone numbers
             if (fromData.includes('@lid')) {
-                try {
-                    const contact = await client.getContactById(fromData);
-                    if (contact && contact.number) {
-                        fromData = `${contact.number}@c.us`;
-                        console.log('[VRF-LOOKUP] Resolved @lid to real number:', fromData);
-                    } else {
-                        fromData = fromData.replace('@lid', '@c.us');
-                    }
-                } catch (e) {
-                    fromData = fromData.replace('@lid', '@c.us');
+                const resolved = await resolveLidJid(client, fromData);
+                fromData = resolved.cleanId;
+                if (resolved.unmasked) {
+                    console.log('[VRF-LOOKUP] Resolved @lid to real number:', fromData);
                 }
             }
             

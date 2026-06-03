@@ -153,6 +153,46 @@ function tAdmin(groupConfig, conf, arText, enText) {
     return resolveAdminLang(groupConfig, conf) === 'en' ? enText : arText;
 }
 
+async function resolveLidJid(client, rawId) {
+    if (!rawId || typeof rawId !== 'string') return { cleanId: rawId, unmasked: false };
+    
+    let cleanId = rawId.replace(/:[0-9]+/, '');
+    if (!cleanId.includes('@lid')) {
+        return { cleanId, unmasked: false };
+    }
+    
+    const originalUser = rawId.split('@')[0].split(':')[0];
+    
+    // 1. Try getContactLidAndPhone if available on the client
+    if (client && typeof client.getContactLidAndPhone === 'function') {
+        try {
+            const res = await client.getContactLidAndPhone([rawId]);
+            if (res && res[0] && res[0].pn) {
+                return { cleanId: `${res[0].pn}@c.us`, unmasked: true };
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+    
+    // 2. Try getContactById fallback
+    if (client) {
+        try {
+            const contact = await client.getContactById(rawId);
+            if (contact && contact.number) {
+                if (contact.number !== originalUser) {
+                    return { cleanId: `${contact.number}@c.us`, unmasked: true };
+                }
+            }
+        } catch (e) {
+            // ignore
+        }
+    }
+    
+    // 3. Fallback: replace @lid with @c.us (returns the LID digits but in c.us domain)
+    return { cleanId: `${originalUser}@c.us`, unmasked: false };
+}
+
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
 
@@ -1311,29 +1351,10 @@ async function runGlobalBlacklistPurge() {
                     }
                     if (!rawId) continue;
 
-                    let cleanId = rawId.replace(/:[0-9]+/, '');
-                    let unmaskedSuccessfully = false;
-                    const originalUser = rawId.split('@')[0].split(':')[0];
+                    const resolved = await resolveLidJid(client, rawId);
+                    let cleanId = resolved.cleanId;
+                    let unmaskedSuccessfully = resolved.unmasked;
                     const originalIsLID = rawId.includes('@lid');
-
-                    if (cleanId.includes('@lid')) {
-                        try {
-                            const contact = await client.getContactById(rawId);
-                            if (contact && contact.number) {
-                                const isLidDigits = originalIsLID && (contact.number === originalUser);
-                                if (!isLidDigits) {
-                                    cleanId = `${contact.number}@c.us`;
-                                    unmaskedSuccessfully = true;
-                                } else {
-                                    cleanId = `${originalUser}@c.us`;
-                                }
-                            } else {
-                                cleanId = `${originalUser}@c.us`;
-                            }
-                        } catch (err) {
-                            cleanId = `${originalUser}@c.us`;
-                        }
-                    }
 
                     const finalCleanId = cleanId.replace(/:[0-9]+/, '').replace('@c.us', '');
                     const isLID = originalIsLID && !unmaskedSuccessfully;
@@ -1446,29 +1467,10 @@ async function runGlobalBlacklistScan() {
                     }
                     if (!rawId) continue;
 
-                    let cleanId = rawId.replace(/:[0-9]+/, '');
-                    let unmaskedSuccessfully = false;
-                    const originalUser = rawId.split('@')[0].split(':')[0];
+                    const resolved = await resolveLidJid(client, rawId);
+                    let cleanId = resolved.cleanId;
+                    let unmaskedSuccessfully = resolved.unmasked;
                     const originalIsLID = rawId.includes('@lid');
-
-                    if (cleanId.includes('@lid')) {
-                        try {
-                            const contact = await client.getContactById(rawId);
-                            if (contact && contact.number) {
-                                const isLidDigits = originalIsLID && (contact.number === originalUser);
-                                if (!isLidDigits) {
-                                    cleanId = `${contact.number}@c.us`;
-                                    unmaskedSuccessfully = true;
-                                } else {
-                                    cleanId = `${originalUser}@c.us`;
-                                }
-                            } else {
-                                cleanId = `${originalUser}@c.us`;
-                            }
-                        } catch (err) {
-                            cleanId = `${originalUser}@c.us`;
-                        }
-                    }
 
                     const finalCleanId = cleanId.replace(/:[0-9]+/, '').replace('@c.us', '');
                     const isLID = originalIsLID && !unmaskedSuccessfully;
@@ -3247,29 +3249,10 @@ client.on('group_join', async (notification) => {
         }
 
         for (const participantId of notification.recipientIds) {
-            let cleanJoinedId = participantId.replace(/:[0-9]+/, '');
-            let unmaskedSuccessfully = false;
-            const originalUser = participantId.split('@')[0].split(':')[0];
+            const resolved = await resolveLidJid(client, participantId);
+            let cleanJoinedId = resolved.cleanId;
+            let unmaskedSuccessfully = resolved.unmasked;
             const originalIsLID = participantId.includes('@lid');
-
-            if (cleanJoinedId.includes('@lid')) {
-                try {
-                    const contact = await client.getContactById(participantId);
-                    if (contact && contact.number) {
-                        const isLidDigits = originalIsLID && (contact.number === originalUser);
-                        if (!isLidDigits) {
-                            cleanJoinedId = `${contact.number}@c.us`;
-                            unmaskedSuccessfully = true;
-                        } else {
-                            cleanJoinedId = `${originalUser}@c.us`;
-                        }
-                    } else {
-                        cleanJoinedId = `${originalUser}@c.us`;
-                    }
-                } catch (e) {
-                    cleanJoinedId = `${originalUser}@c.us`;
-                }
-            }
 
             let isWhitelisted = false;
             if (isWhitelistEnabledForGroup) {
@@ -3529,29 +3512,10 @@ client.on('message', async msg => {
             if (handledAdminDecision) return;
 
             const rawAuthorId = msg.author || msg.from;
-            let cleanAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
-            let unmaskedSuccessfully = false;
-            const originalUser = rawAuthorId.split('@')[0].split(':')[0];
+            const resolved = await resolveLidJid(client, rawAuthorId);
+            let cleanAuthorId = resolved.cleanId;
+            let unmaskedSuccessfully = resolved.unmasked;
             const originalIsLID = rawAuthorId.includes('@lid');
-
-            if (cleanAuthorId.includes('@lid')) {
-                try {
-                    const contact = await msg.getContact();
-                    if (contact && contact.number) {
-                        const isLidDigits = originalIsLID && (contact.number === originalUser);
-                        if (!isLidDigits) {
-                            cleanAuthorId = `${contact.number}@c.us`;
-                            unmaskedSuccessfully = true;
-                        } else {
-                            cleanAuthorId = `${originalUser}@c.us`;
-                        }
-                    } else {
-                        cleanAuthorId = `${originalUser}@c.us`;
-                    }
-                } catch (e) {
-                    cleanAuthorId = `${originalUser}@c.us`;
-                }
-            }
 
             const groupId = chat.id._serialized;
             const groupConfig = config.groupsConfig[groupId];
@@ -4388,11 +4352,8 @@ client.on('message', async msg => {
             let cleanAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
 
             if (cleanAuthorId.includes('@lid')) {
-                try {
-                    const contact = await msg.getContact();
-                    if (contact && contact.number) cleanAuthorId = `${contact.number}@c.us`;
-                    else cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us');
-                } catch (e) { cleanAuthorId = cleanAuthorId.replace('@lid', '@c.us'); }
+                const resolved = await resolveLidJid(client, rawAuthorId);
+                cleanAuthorId = resolved.cleanId;
             }
 
             // Check if sender is VIP whitelist
@@ -4720,34 +4681,13 @@ async function screenPendingMembershipRequests() {
                 joinProfileReviewCache.set(cacheKey, Date.now());
 
                 const originalRequesterJid = rawRequesterId;
-                let cleanRequesterId = rawRequesterId.replace(/:[0-9]+/, '');
-                let unmaskedSuccessfully = false;
-
-                const originalUser = rawRequesterId.split('@')[0].split(':')[0];
-                const originalIsLID = rawRequesterId.includes('@lid');
-                
-                // Always eagerly attempt to unmask Ghost IDs (15-digit @c.us or @lid) using local WhatsApp native contacts!
-                try {
-                    const contact = await client.getContactById(rawRequesterId);
-                    if (contact && contact.number) {
-                        const isLidDigits = originalIsLID && (contact.number === originalUser);
-                        if (!isLidDigits) {
-                            cleanRequesterId = `${contact.number}@c.us`;
-                            rawRequesterId = `${contact.number}@c.us`;
-                            if (originalIsLID) {
-                                unmaskedSuccessfully = true;
-                            }
-                        } else {
-                            cleanRequesterId = `${originalUser}@c.us`;
-                        }
-                    } else if (originalIsLID) {
-                        cleanRequesterId = `${originalUser}@c.us`;
-                    }
-                } catch (e) {
-                    if (originalIsLID) {
-                        cleanRequesterId = `${originalUser}@c.us`;
-                    }
+                const resolved = await resolveLidJid(client, rawRequesterId);
+                let cleanRequesterId = resolved.cleanId;
+                let unmaskedSuccessfully = resolved.unmasked;
+                if (unmaskedSuccessfully) {
+                    rawRequesterId = resolved.cleanId;
                 }
+                const originalIsLID = originalRequesterJid.includes('@lid');
 
                 const finalCleanId = cleanRequesterId.replace('@c.us', '');
                 
