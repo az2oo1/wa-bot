@@ -158,39 +158,57 @@ async function resolveLidJid(client, rawId) {
     
     let cleanId = rawId.replace(/:[0-9]+/, '');
     if (!cleanId.includes('@lid')) {
+        // Strip device suffix but keep domain
         return { cleanId, unmasked: false };
     }
     
     const originalUser = rawId.split('@')[0].split(':')[0];
     
-    // 1. Try getContactLidAndPhone if available on the client
+    // ── Strategy 1: Use the official getContactLidAndPhone API ──────────────────
+    // Returns { lid: <lid JID>, pn: <phone JID e.g. "966501234567@c.us"> }
     if (client && typeof client.getContactLidAndPhone === 'function') {
         try {
             const res = await client.getContactLidAndPhone([rawId]);
             if (res && res[0] && res[0].pn) {
-                return { cleanId: `${res[0].pn}@c.us`, unmasked: true };
+                // pn is already a serialized @c.us JID
+                const pn = String(res[0].pn);
+                const phonePart = pn.includes('@') ? pn : `${pn}@c.us`;
+                if (!phonePart.includes('@lid')) {
+                    return { cleanId: phonePart, unmasked: true };
+                }
             }
-        } catch (e) {
-            // ignore
-        }
+        } catch (e) { /* ignore */ }
     }
     
-    // 2. Try getContactById fallback
+    // ── Strategy 2: getContactById with the raw @lid JID ────────────────────────
     if (client) {
         try {
             const contact = await client.getContactById(rawId);
-            if (contact && contact.number) {
-                if (contact.number !== originalUser) {
-                    return { cleanId: `${contact.number}@c.us`, unmasked: true };
-                }
+            // contact.number is just the digits (no domain)
+            if (contact && contact.number && String(contact.number) !== originalUser) {
+                const num = String(contact.number).replace(/@.*$/, ''); // strip any domain if already in there
+                return { cleanId: `${num}@c.us`, unmasked: true };
             }
-        } catch (e) {
-            // ignore
-        }
+        } catch (e) { /* ignore */ }
+    }
+
+    // ── Strategy 3: getContactById with the @c.us variant of the LID digits ─────
+    // Sometimes WA resolves this even though LID digits ≠ phone
+    if (client) {
+        try {
+            const contact = await client.getContactById(`${originalUser}@c.us`);
+            if (contact && contact.number && String(contact.number) !== originalUser) {
+                const num = String(contact.number).replace(/@.*$/, '');
+                return { cleanId: `${num}@c.us`, unmasked: true };
+            }
+        } catch (e) { /* ignore */ }
     }
     
-    // 3. Fallback: replace @lid with @c.us (returns the LID digits but in c.us domain)
-    return { cleanId: `${originalUser}@c.us`, unmasked: false };
+    // ── Could not resolve ────────────────────────────────────────────────────────
+    // We intentionally do NOT emit a fake @c.us ID with LID digits because
+    // those digits are NOT phone numbers and would corrupt the blacklist.
+    // Callers must check `unmasked === false` and handle accordingly.
+    return { cleanId: `${originalUser}@lid`, unmasked: false };
 }
 
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
@@ -1317,15 +1335,26 @@ async function runGlobalBlacklistPurge() {
         const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
         if (!botIsAdmin) continue;
 
-        const usersToKick = chat.participants
-            .map(p => p.id._serialized)
-            .filter(id => {
-                const cleanId = id.replace(/:[0-9]+/, '');
-                const finalCleanId = cleanId.replace('@c.us', '').replace('@lid', '');
-                const isLID = cleanId.includes('@lid');
-                const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
-                return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(id);
-            });
+        // Resolve @lid participants to real phone numbers before blacklist check
+        const participantData = await Promise.all(
+            chat.participants.map(async p => {
+                const rawId = p.id._serialized;
+                const resolved = await resolveLidJid(client, rawId);
+                return { rawId, cleanId: resolved.cleanId, unmasked: resolved.unmasked };
+            })
+        );
+
+        const usersToKick = participantData
+            .filter(({ cleanId, unmasked, rawId }) => {
+                const isLID = rawId.replace(/:[0-9]+/, '').includes('@lid');
+                const isUnresolvedLID = isLID && !unmasked;
+                // If we could not resolve the LID to a real number, skip extension checks
+                // to avoid false kicks, but still match against the blacklist by cleanId
+                const numberOnly = cleanId.replace('@c.us', '').replace('@lid', '');
+                const isExtBlocked = !isUnresolvedLID && blockedExtensionsArr.some(ext => numberOnly.startsWith(ext));
+                return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId);
+            })
+            .map(({ rawId }) => rawId);
 
         if (usersToKick.length > 0) {
             try {
@@ -1413,13 +1442,15 @@ async function runGlobalBlacklistScan() {
         const groupId = chat.id._serialized;
         const groupConfig = config.groupsConfig[groupId];
 
-        // 1. Scan group participants
+        // 1. Scan group participants – resolve @lid IDs to real numbers first
         for (const p of chat.participants) {
-            const id = p.id._serialized;
-            const cleanId = id.replace(/:[0-9]+/, '');
-            const finalCleanId = cleanId.replace('@c.us', '').replace('@lid', '');
-            const isLID = cleanId.includes('@lid');
-            
+            const rawId = p.id._serialized;
+            const resolved = await resolveLidJid(client, rawId);
+            const cleanId = resolved.cleanId;
+            const isLID = rawId.replace(/:[0-9]+/, '').includes('@lid');
+            const isUnresolvedLID = isLID && !resolved.unmasked;
+            const numberOnly = cleanId.replace('@c.us', '').replace('@lid', '');
+
             // Check if whitelisted
             let isWhitelisted = false;
             const isWhitelistEnabled = config.enableWhitelist && (!groupConfig || groupConfig.enableWhitelist !== false);
@@ -1431,7 +1462,7 @@ async function runGlobalBlacklistScan() {
             }
 
             if (!isWhitelisted) {
-                const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
+                const isExtBlocked = !isUnresolvedLID && blockedExtensionsArr.some(ext => numberOnly.startsWith(ext));
                 const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanId) : false;
                 const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanId);
                 const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
@@ -1439,11 +1470,11 @@ async function runGlobalBlacklistScan() {
                 if ((useGlobalBl && (globalBl || isExtBlocked)) || inCustomBl) {
                     let reason = '';
                     if (useGlobalBl && globalBl) reason = 'Blacklisted';
-                    else if (useGlobalBl && isExtBlocked) reason = `Blocked prefix (+${blockedExtensionsArr.find(ext => finalCleanId.startsWith(ext))})`;
+                    else if (useGlobalBl && isExtBlocked) reason = `Blocked prefix (+${blockedExtensionsArr.find(ext => numberOnly.startsWith(ext))})`;
                     else if (inCustomBl) reason = 'Custom Group Blacklist';
 
                     flaggedParticipants.push({
-                        id,
+                        id: rawId,
                         cleanId,
                         reason,
                         isLID
@@ -1562,8 +1593,12 @@ async function runAdminWhitelistSync() {
                 if (!participant || !participant.id || !participant.id._serialized) continue;
                 if (!(participant.isAdmin || participant.isSuperAdmin)) continue;
 
-                const normalized = participant.id._serialized.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                if (!normalized || normalized === botId || normalized === botIdClean) continue;
+                // Always resolve @lid to a real phone number before storing in whitelist
+                const resolved = await resolveLidJid(client, participant.id._serialized);
+                const normalized = resolved.cleanId;
+                // Skip if still unresolved @lid (we don't want fake numbers in the whitelist)
+                if (!normalized || normalized.includes('@lid')) continue;
+                if (normalized === botId || normalized === botIdClean) continue;
                 if (!currentWhitelist.includes(normalized) && !toAdd.includes(normalized)) {
                     toAdd.push(normalized);
                 }
@@ -1786,7 +1821,8 @@ app.post('/api/secondary-verification/test', requireAuthApi, requirePermission('
         const normalizeVerificationId = (value) => {
             let normalized = String(value || '').trim();
             normalized = normalized.replace(/:[0-9]+(?=@)/g, '');
-            if (normalized.includes('@lid')) normalized = normalized.replace('@lid', '@c.us');
+            // @lid resolution is async; callers that need a real phone number should use resolvePhoneNumber() instead.
+            // Here we just normalize format without losing the @lid domain so callers know it needs further resolution.
             if (normalized.includes('@s.whatsapp.net')) normalized = normalized.replace('@s.whatsapp.net', '@c.us');
             if (/^\d+$/.test(normalized)) normalized = `${normalized}@c.us`;
             return normalized;
@@ -1869,9 +1905,9 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
         const normalizeRequesterId = (value) => {
             let normalized = String(value || '').trim();
             normalized = normalized.replace(/:[0-9]+(?=@)/g, '');
-            if (normalized.includes('@lid')) normalized = normalized.replace('@lid', '@c.us');
             if (normalized.includes('@s.whatsapp.net')) normalized = normalized.replace('@s.whatsapp.net', '@c.us');
             if (/^\d+$/.test(normalized)) normalized = `${normalized}@c.us`;
+            // Note: @lid IDs are left as-is here; resolvePhoneNumber below handles them properly
             return normalized;
         };
         const toReplyLogKey = (value) => normalizeRequesterId(value).replace('@c.us', '').trim();
@@ -1880,23 +1916,32 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
             const normalized = normalizeRequesterId(rawRequesterId);
             if (!normalized) return '';
 
+            // If it's already a plain phone number, return it directly
             if (normalized.endsWith('@c.us')) {
                 return toDigits(normalized.replace('@c.us', ''));
             }
 
-            const candidates = [normalized];
-            if (normalized.endsWith('@lid')) {
-                const asCus = normalized.replace('@lid', '@c.us');
-                if (!candidates.includes(asCus)) candidates.push(asCus);
-            }
-
-            for (const candidate of candidates) {
+            // For @lid IDs, use the canonical resolveLidJid which tries all strategies
+            if (normalized.endsWith('@lid') || normalized.includes('@lid')) {
+                const resolved = await resolveLidJid(client, normalized);
+                if (resolved.unmasked) {
+                    return toDigits(resolved.cleanId.replace('@c.us', ''));
+                }
+                // Also try the raw requesterId directly (sometimes has different format)
                 try {
-                    const contact = await client.getContactById(candidate);
+                    const contact = await client.getContactById(rawRequesterId);
                     const digits = toDigits(contact && contact.number ? contact.number : '');
                     if (digits) return digits;
                 } catch (e) { }
+                return '';
             }
+
+            // Generic fallback – try resolving by exact ID
+            try {
+                const contact = await client.getContactById(normalized);
+                const digits = toDigits(contact && contact.number ? contact.number : '');
+                if (digits) return digits;
+            } catch (e) { }
 
             return '';
         };
@@ -2059,23 +2104,20 @@ app.post('/api/secondary-verification/pending/remove', requireAuthApi, requirePe
                 try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [row.requester_id] }); } catch (e) { }
             }
             if (addBlacklist) {
-                let cleanNumber = String(row.requester_id || '').replace(/:[0-9]+(?=@)/g, '');
-                if (cleanNumber.includes('@lid')) cleanNumber = cleanNumber.replace('@lid', '@c.us');
-                if (cleanNumber.includes('@s.whatsapp.net')) cleanNumber = cleanNumber.replace('@s.whatsapp.net', '@c.us');
-                if (/^\d+$/.test(cleanNumber)) cleanNumber = `${cleanNumber}@c.us`;
-                
-                if (cleanNumber) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanNumber);
-                if (row.requester_id && row.requester_id.includes('@lid')) {
-                    try {
-                        const contact = await client.getContactById(row.requester_id);
-                        if (contact && contact.number) {
-                            const originalUser = row.requester_id.split('@')[0].split(':')[0];
-                            if (contact.number !== originalUser) {
-                                const realCleanId = `${contact.number}@c.us`;
-                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(realCleanId);
-                            }
-                        }
-                    } catch (err) { }
+                // Always resolve @lid to a real phone number; never store LID digits as if they were a phone number
+                let cleanNumber = '';
+                const resolvedForBl = await resolveLidJid(client, row.requester_id);
+                if (resolvedForBl.unmasked) {
+                    cleanNumber = resolvedForBl.cleanId; // real @c.us number
+                } else {
+                    // Fallback: strip device suffix and normalize domain, but keep @lid intact (skip blacklisting)
+                    let tmp = String(row.requester_id || '').replace(/:[0-9]+(?=@)/g, '');
+                    if (tmp.includes('@s.whatsapp.net')) tmp = tmp.replace('@s.whatsapp.net', '@c.us');
+                    if (/^\d+$/.test(tmp)) tmp = `${tmp}@c.us`;
+                    if (!tmp.includes('@lid')) cleanNumber = tmp; // Only store if it's a real domain
+                }
+                if (cleanNumber && !cleanNumber.includes('@lid')) {
+                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanNumber);
                 }
             }
             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
@@ -2823,15 +2865,25 @@ async function runGlobalPurge() {
             const botIsAdmin = botData && (botData.isAdmin || botData.isSuperAdmin);
             if (!botIsAdmin) continue;
 
-            const usersToKick = chat.participants
-                .map(p => p.id._serialized)
-                .filter(id => {
-                    const cleanId = id.replace(/:[0-9]+/, '');
-                    const finalCleanId = cleanId.replace('@c.us', '').replace('@lid', '');
-                    const isLID = cleanId.includes('@lid');
-                    const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
-                    return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(id);
-                });
+            // Resolve @lid participants to real phone numbers before blacklist check
+            const participantData = await Promise.all(
+                chat.participants.map(async p => {
+                    const rawId = p.id._serialized;
+                    const resolved = await resolveLidJid(client, rawId);
+                    return { rawId, cleanId: resolved.cleanId, unmasked: resolved.unmasked };
+                })
+            );
+
+            const usersToKick = participantData
+                .filter(({ cleanId, unmasked, rawId }) => {
+                    const isLID = rawId.replace(/:[0-9]+/, '').includes('@lid');
+                    const isUnresolvedLID = isLID && !unmasked;
+                    const numberOnly = cleanId.replace('@c.us', '').replace('@lid', '');
+                    const isExtBlocked = !isUnresolvedLID && blockedExtensionsArr.some(ext => numberOnly.startsWith(ext));
+                    return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId);
+                })
+                .map(({ rawId }) => rawId);
+
             if (usersToKick.length > 0) {
                 try {
                     await chat.removeParticipants(usersToKick);
@@ -3318,13 +3370,8 @@ client.on('group_join', async (notification) => {
                         await safeDelay(chat);
                         await chat.removeParticipants([participantId]);
                         if (isBlacklistEnabledForGroup) {
+                            // cleanJoinedId was already resolved from @lid to a real @c.us number by resolveLidJid
                             try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanJoinedId); } catch (e) { }
-                            if (participantId && participantId.includes('@lid')) {
-                                try {
-                                    const lidClean = participantId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                } catch (err) { }
-                            }
                         }
 
                         const reportText = tAdmin(
@@ -3732,18 +3779,23 @@ client.on('message', async msg => {
                         const mentions = await msg.getMentions().catch(() => []);
                         const idsToProcess = (cmd === 'ban' || cmd === 'kick') ? msg.mentionedIds : [msg.mentionedIds[0]];
                         for (const mid of idsToProcess) {
-                            let cleanId = mid.replace(/:[0-9]+/, '');
                             let rawId = mid;
+                            let cleanId = mid.replace(/:[0-9]+/, '');
                             if (cleanId.includes('@lid')) {
+                                // First try the pre-fetched mentions list (fastest)
                                 const contact = mentions.find(c => c.id && c.id._serialized === mid);
                                 if (contact && contact.number) {
                                     cleanId = `${contact.number}@c.us`;
                                 } else {
-                                    try {
-                                        const fallbackContact = await client.getContactById(mid);
-                                        if (fallbackContact && fallbackContact.number) cleanId = `${fallbackContact.number}@c.us`;
-                                        else cleanId = cleanId.replace('@lid', '@c.us');
-                                    } catch (e) { cleanId = cleanId.replace('@lid', '@c.us'); }
+                                    // Fall back to the canonical resolveLidJid
+                                    const resolved = await resolveLidJid(client, mid);
+                                    if (resolved.unmasked) {
+                                        cleanId = resolved.cleanId;
+                                    } else {
+                                        // Could not get real number – log and skip this target
+                                        console.warn(`[أمر] تعذر تحديد رقم المستخدم الحقيقي من @lid: ${mid}`);
+                                        continue; // Do NOT use fake digits
+                                    }
                                 }
                                 // Keep rawId as mid (original @lid) so removeParticipants uses the correct group JID
                             }
@@ -3758,12 +3810,21 @@ client.on('message', async msg => {
                             let qRawId = quoted.author || quoted.from;
                             let qCleanId = qRawId ? qRawId.replace(/:[0-9]+/, '') : null;
                             if (qCleanId && qCleanId.includes('@lid')) {
+                                // Try quoted contact first, then fall back to canonical resolver
+                                let resolved = false;
                                 try {
                                     const contact = await quoted.getContact();
-                                    if (contact && contact.number) qCleanId = `${contact.number}@c.us`;
-                                    else qCleanId = qCleanId.replace('@lid', '@c.us');
-                                } catch (e) { qCleanId = qCleanId.replace('@lid', '@c.us'); }
-                                // Keep qRawId as the original JID (which could be @lid)
+                                    if (contact && contact.number) { qCleanId = `${contact.number}@c.us`; resolved = true; }
+                                } catch (e) { }
+                                if (!resolved) {
+                                    const r = await resolveLidJid(client, qRawId);
+                                    if (r.unmasked) { qCleanId = r.cleanId; resolved = true; }
+                                }
+                                if (!resolved) {
+                                    console.warn(`[أمر] تعذر تحديد رقم المستخدم الحقيقي من @lid: ${qRawId}`);
+                                    qRawId = null; // Skip — don't store fake numbers
+                                }
+                                // Keep qRawId as original JID for removeParticipants
                             }
                             if (qRawId) targetList.push({ rawId: qRawId, cleanId: qCleanId });
                         } catch (e) { }
@@ -3813,13 +3874,8 @@ client.on('message', async msg => {
                                 try {
                                     await chat.removeParticipants([target.rawId]);
                                     if (cmd === 'ban' && cmdBlacklistEnabled) {
+                                        // target.cleanId is already a real phone number (@c.us) resolved above
                                         try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(target.cleanId); } catch (e) { }
-                                        if (target.rawId && target.rawId.includes('@lid')) {
-                                            try {
-                                                const lidClean = target.rawId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                            } catch (err) { }
-                                        }
                                     }
                                     succeeded.push(target.cleanId.split('@')[0]);
                                     console.log(`[أمر] ${cmd} على ${target.cleanId} في ${chat.name} بواسطة ${cleanAuthorId}`);
@@ -3829,12 +3885,6 @@ client.on('message', async msg => {
                                     // Even if they failed kick (e.g. left group), we still insert into blacklist for /ban
                                     if (cmd === 'ban' && cmdBlacklistEnabled) {
                                         try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(target.cleanId); } catch (e) { }
-                                        if (target.rawId && target.rawId.includes('@lid')) {
-                                            try {
-                                                const lidClean = target.rawId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                            } catch (err) { }
-                                        }
                                     }
                                 }
                             }
@@ -4083,12 +4133,8 @@ client.on('message', async msg => {
                         await chat.removeParticipants([rawAuthorId]);
                         if (isBlacklistEnabled) {
                             try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanAuthorId); } catch (e) { }
-                            if (rawAuthorId && rawAuthorId.includes('@lid')) {
-                                try {
-                                    const lidClean = rawAuthorId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                } catch (err) { }
-                            }
+                            // cleanAuthorId was already resolved from @lid to real @c.us at message handler start
+                            // so no need for an extra fake @lid→@c.us insertion here
                         }
                         const reportText = adminMessageLang === 'en'
                             ? `🚨 *Auto Ban (Blocked Type)*\nA member sent (${internalMsgType}) in "${chat.name}" and was removed.\n👤 *Sender:* @${cleanAuthorId.split('@')[0]}`
@@ -4185,12 +4231,7 @@ client.on('message', async msg => {
                             await chat.removeParticipants([rawAuthorId]);
                             if (isBlacklistEnabled) {
                                 try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId); } catch (e) { }
-                                if (rawAuthorId && rawAuthorId.includes('@lid')) {
-                                    try {
-                                        const lidClean = rawAuthorId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                    } catch (err) { }
-                                }
+                                // senderId was already resolved from contact.number (real phone) — no fake insertion
                             }
                             const reportText = adminMessageLang === 'en'
                                 ? `🚨 *Auto Ban (Spam)*\nThe member was removed from "${chat.name}"${isBlacklistEnabled ? ' and added to blacklist' : ''}.\n\n👤 *Sender:* @${senderId.split('@')[0]}\n📋 *Reason:* ${spamFlagReason}`
@@ -4312,12 +4353,7 @@ client.on('message', async msg => {
                         await chat.removeParticipants([rawAuthorId]);
                         if (isBlacklistEnabled) {
                             try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId); } catch (e) { }
-                            if (rawAuthorId && rawAuthorId.includes('@lid')) {
-                                try {
-                                    const lidClean = rawAuthorId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                } catch (err) { }
-                            }
+                            // senderId already holds the real phone number (resolved from contact.number)
                         }
 
                         const reportText = adminMessageLang === 'en'
@@ -4440,11 +4476,10 @@ client.on('vote_update', async vote => {
     if (yesSelected) {
         if (data.isBlacklistEnabled) {
             try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan); } catch (e) { }
-            if (data.rawSenderId && data.rawSenderId.includes('@lid')) {
-                try {
-                    const lidClean = data.rawSenderId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                } catch (err) { }
+            // data.senderId was already resolved to a real phone number when stored in pendingBans
+            // so we only need to blacklist data.senderId (no raw LID digits allowed)
+            if (data.rawSenderId && data.rawSenderId.includes('@lid') && data.senderId && !data.senderId.includes('@lid')) {
+                try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(data.senderId); } catch (err) { }
             }
         }
 
@@ -4790,13 +4825,8 @@ async function screenPendingMembershipRequests() {
                         }
 
                         if (isBlacklistEnabled) {
+                            // cleanRequesterId was already resolved from @lid to a real @c.us number above
                             try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanRequesterId); } catch (e) { }
-                            if (originalRequesterJid && originalRequesterJid.includes('@lid')) {
-                                try {
-                                    const lidClean = originalRequesterJid.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                } catch (err) { }
-                            }
                         }
 
                         const reportText = tAdmin(
