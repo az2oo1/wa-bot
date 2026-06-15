@@ -298,7 +298,21 @@ function initVerification(client, db, config) {
                 if (!isEmail && !isPhoto && !isKw) { console.log('[startVerification] failed: no methods'); return false; }
                 
                 if (!isTest && !options.forceRestart && hasCooldown(db, reqKey)) { console.log('[startVerification] failed: has cooldown'); return false; }
-                
+
+                // ── Purge any old LID-digit fake sessions from before the @lid fix ──────────
+                // Old code stored rawRequesterId's LID digits as @c.us (e.g. "79616396017785@c.us").
+                // Delete those so we never end up with two sessions for the same person.
+                const lidDigits = rawRequesterId ? rawRequesterId.split('@')[0].split(':')[0] : '';
+                if (lidDigits && lidDigits !== normalizeId(reqCanon)) {
+                    const oldLidFake = `${lidDigits}@c.us`;
+                    const oldLidFakeRows = db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(oldLidFake);
+                    if (oldLidFakeRows.changes > 0) {
+                        db.prepare('DELETE FROM secondary_verification_reply_log WHERE requester_id = ?').run(oldLidFake);
+                        console.log('[startVerification] Purged old LID-digit fake session:', oldLidFake, '→ replaced by:', reqCanon);
+                    }
+                }
+                // ─────────────────────────────────────────────────────────────────────────────
+
                 const existing = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(reqCanon);
                 if (existing) {
                     if (isTest && existing.flow_type !== 'test') { console.log('[startVerification] failed: overlaps with real session'); return false; }
@@ -307,7 +321,6 @@ function initVerification(client, db, config) {
                         return false; 
                     }
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(existing.requester_id);
-                    // Also wipe trailing reply logs so the dashboard doesn't show ghost interaction timestamps!
                     db.prepare('DELETE FROM secondary_verification_reply_log WHERE requester_id = ?').run(existing.requester_id);
                 }
                 
