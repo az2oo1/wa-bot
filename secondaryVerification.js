@@ -165,11 +165,16 @@ function extractText(msg) {
 
 function keywordMatches(text, keywords, smartMatch) {
     const needle = (str) => {
-        let s = String(str||'').toLowerCase().trim();
+        let s = String(str||'').toLowerCase();
+        // Strip invisible Unicode characters WhatsApp sometimes injects
+        // (RTL mark U+200F, LTR mark U+200E, ZWNJ U+200C, ZWJ U+200D, BOM U+FEFF, etc.)
+        s = s.replace(/[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/g, '');
+        s = s.trim();
         if (smartMatch) {
             s = s.replace(/[!@#$%^&*()_+=\-\[\]{}:;"'<>,.?\/\\|~`]/g, '');
-            s = s.replace(/[\u064B-\u0652\u0640\u0670]/g, '');
-            s = s.replace(/[أإآ]/g, 'ا');
+            s = s.replace(/[\u064B-\u0652\u0640\u0670]/g, ''); // diacritics + kashida
+            s = s.replace(/[أإآ]/g, 'ا');  // alef variants
+            s = s.replace(/ة/g, 'ه');      // taa marbuta → haa (متابعة = متابعه)
         }
         return s;
     };
@@ -440,12 +445,15 @@ function initVerification(client, db, config) {
             const isTest = session.flow_type === 'test';
 
             if (state === 'EXPIRED_WAITING_REENTRY') {
-                const rt = text.trim().toLowerCase();
+                // Use keywordMatches with smartMatch=true so invisible chars, diacritics,
+                // and ة/ه variants are all normalized before comparison
                 const reopenCode = (config.secondaryVerificationReopenCode || '').trim().toLowerCase();
-                const isReopenKeyword = isText && (
-                    rt === reopenCode || rt === 'reopen' || rt === 'continue' || rt === '1' ||
-                    rt === 'متابعة' || rt === 'متابعه' || rt === 'تابعه' || rt === 'تابعة'
-                );
+                const reopenKeywordList = [
+                    'reopen', 'continue', '1',
+                    'متابعه', 'متابعة', 'تابعه', 'تابعة',
+                ];
+                if (reopenCode) reopenKeywordList.unshift(reopenCode);
+                const isReopenKeyword = isText && keywordMatches(text, reopenKeywordList, true);
                 if (isReopenKeyword) {
                     db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', wait_started_at = ? WHERE requester_id = ?").run(Date.now(), session.requester_id);
                     await msg.reply(isAr ? 'تمت إعادة فتح التحقق.' : 'Verification reopened.');
