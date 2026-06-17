@@ -2064,11 +2064,16 @@ app.post('/api/secondary-verification/pending/trigger', requireAuthApi, requireP
         
         const { initVerification } = require('./secondaryVerification');
         const verification = initVerification(client, db, config);
-        
-        const normalizeId = (val) => String(val || '').replace(/:[0-9]+/, '').replace('@lid', '@c.us').trim();
-        const reqCanon = normalizeId(requesterId);
 
-        await verification.startVerification(requesterId, reqCanon, groupId, { forceRestart: true });
+        // Resolve @lid to real phone before triggering — never store LID digits as @c.us
+        let resolvedRequesterId = requesterId;
+        if (String(requesterId).includes('@lid')) {
+            const lidResult = await resolveLidJid(client, requesterId);
+            if (lidResult.unmasked) resolvedRequesterId = lidResult.cleanId;
+            // If unresolvable, pass as-is — startVerification will handle it
+        }
+
+        await verification.startVerification(requesterId, resolvedRequesterId, groupId, { forceRestart: true });
         return res.json({ success: true });
     } catch (e) {
         console.error('[Verification Trigger]', e);
@@ -2087,10 +2092,11 @@ app.post('/api/secondary-verification/pending/remove', requireAuthApi, requirePe
         if (!requesterId && inputNumber) requesterId = `${inputNumber}@c.us`;
         if (!requesterId) return res.status(400).json({ error: 'requesterId or number is required.' });
 
-        const normalizeId = (value) => String(value || '').replace(/:[0-9]+/, '').replace('@lid', '@c.us').trim();
-        const targetNormalized = normalizeId(requesterId);
+        // Compare by digits only — never convert @lid digits to @c.us for lookup
+        const normalizeIdDigits = (value) => String(value || '').replace(/:[0-9]+/, '').replace(/@.*$/, '').trim();
+        const targetNormalized = normalizeIdDigits(requesterId);
         const rows = db.prepare('SELECT * FROM secondary_verification').all().filter(row => {
-            const sameRequester = normalizeId(row.requester_id) === targetNormalized;
+            const sameRequester = normalizeIdDigits(row.requester_id) === targetNormalized;
             const sameGroup = groupId ? row.group_id === groupId : true;
             return sameRequester && sameGroup;
         });
@@ -2205,9 +2211,10 @@ app.post('/api/secondary-verification/stop', requireAuthApi, requirePermission('
         if (!requesterId && inputNumber) requesterId = `${inputNumber}@c.us`;
         if (!requesterId) return res.status(400).json({ error: 'requesterId or number is required.' });
 
-        const normalizeId = (value) => String(value || '').replace(/:[0-9]+/, '').replace('@lid', '@c.us').trim();
-        const targetNormalized = normalizeId(requesterId);
-        const rows = db.prepare('SELECT * FROM secondary_verification').all().filter(row => normalizeId(row.requester_id) === targetNormalized);
+        // Compare by digits only — never convert @lid digits to @c.us for lookup
+        const normalizeIdDigits = (value) => String(value || '').replace(/:[0-9]+/, '').replace(/@.*$/, '').trim();
+        const targetNormalized = normalizeIdDigits(requesterId);
+        const rows = db.prepare('SELECT * FROM secondary_verification').all().filter(row => normalizeIdDigits(row.requester_id) === targetNormalized);
         if (!rows || rows.length === 0) return res.status(404).json({ error: 'No active approval process found.' });
 
         let stopped = 0;
@@ -3640,8 +3647,11 @@ client.on('message', async msg => {
                                 });
                             }
 
-                            const contact = await msg.getContact();
-                            const userName = contact ? (contact.name || contact.number) : cleanAuthorId.split('@')[0];
+                            const contact = await msg.getContact().catch(() => null);
+                            // contact.number can be LID digits for @lid users — prefer cleanAuthorId
+                            const userName = contact && contact.name
+                                ? contact.name
+                                : cleanAuthorId.split('@')[0];
                             finalAnswer = finalAnswer.replace(/{user}/g, userName);
 
                             await safeDelay(msg.from);
@@ -3714,8 +3724,11 @@ client.on('message', async msg => {
                                     });
                                 }
 
-                                const gcontact = await msg.getContact();
-                                const guserName = gcontact ? (gcontact.name || gcontact.number) : cleanAuthorId.split('@')[0];
+                                const gcontact = await msg.getContact().catch(() => null);
+                                // contact.number can be LID digits for @lid users — prefer cleanAuthorId
+                                const guserName = gcontact && gcontact.name
+                                    ? gcontact.name
+                                    : cleanAuthorId.split('@')[0];
                                 gFinalAnswer = gFinalAnswer.replace(/{user}/g, guserName);
 
                                 if (gFinalAnswer || gqa.mediaFile) {
@@ -3784,8 +3797,8 @@ client.on('message', async msg => {
                             if (cleanId.includes('@lid')) {
                                 // First try the pre-fetched mentions list (fastest)
                                 const contact = mentions.find(c => c.id && c.id._serialized === mid);
-                                if (contact && contact.number) {
-                                    cleanId = `${contact.number}@c.us`;
+                                if (contact && contact.number && !contact.id?._serialized?.includes('@lid')) {
+                                    cleanId = `${String(contact.number).replace(/@.*$/, '')}@c.us`;
                                 } else {
                                     // Fall back to the canonical resolveLidJid
                                     const resolved = await resolveLidJid(client, mid);
@@ -4222,9 +4235,19 @@ client.on('message', async msg => {
                     } catch (err) { }
                     userTrackers.delete(trackerKey);
 
-                    const contact = await msg.getContact();
+                    const contact = await msg.getContact().catch(() => null);
+                    // cleanAuthorId was already resolved from @lid via resolveLidJid at handler start.
+                    // contact.number can return LID digits for @lid users — only use it if it
+                    // looks like a real phone (shorter, different from the LID digits we already have).
                     let senderId = cleanAuthorId;
-                    if (contact && contact.number) senderId = `${contact.number}@c.us`;
+                    if (contact && contact.number) {
+                        const cNum = String(contact.number).replace(/@.*$/, '');
+                        const existing = cleanAuthorId.split('@')[0];
+                        // Only override if contact gave us something genuinely different and not @lid
+                        if (cNum && cNum !== existing && !contact.id?._serialized?.includes('@lid')) {
+                            senderId = `${cNum}@c.us`;
+                        }
+                    }
 
                     if (spamAction === 'auto') {
                         try {
@@ -4339,9 +4362,18 @@ client.on('message', async msg => {
             }
 
             if (isViolating) {
-                const contact = await msg.getContact();
+                const contact = await msg.getContact().catch(() => null);
+                // cleanAuthorId was already resolved from @lid via resolveLidJid at handler start.
+                // contact.number can return LID digits for @lid users — only use it if it
+                // looks like a real phone (shorter, different from the LID digits we already have).
                 let senderId = cleanAuthorId;
-                if (contact && contact.number) senderId = `${contact.number}@c.us`;
+                if (contact && contact.number) {
+                    const cNum = String(contact.number).replace(/@.*$/, '');
+                    const existing = cleanAuthorId.split('@')[0];
+                    if (cNum && cNum !== existing && !contact.id?._serialized?.includes('@lid')) {
+                        senderId = `${cNum}@c.us`;
+                    }
+                }
 
                 const cleanBodyFallback = stripRawVCardBlocks(msg.body || '');
                 const messageContent = normalizedMessageText || cleanBodyFallback || '[مرفق وسائط]';
