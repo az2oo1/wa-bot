@@ -168,7 +168,11 @@ async function resolveLidJid(client, rawId) {
         try {
             const res = await client.getContactLidAndPhone([rawId]);
             if (res && res[0] && res[0].pn) {
-                return { cleanId: `${res[0].pn}@c.us`, unmasked: true };
+                const pn = String(res[0].pn);
+                const phonePart = pn.includes('@') ? pn : `${pn}@c.us`;
+                if (!phonePart.includes('@lid')) {
+                    return { cleanId: phonePart, unmasked: true };
+                }
             }
         } catch (e) {
             // ignore
@@ -191,6 +195,13 @@ async function resolveLidJid(client, rawId) {
     
     // 3. Fallback: replace @lid with @c.us (returns the LID digits but in c.us domain)
     return { cleanId: `${originalUser}@c.us`, unmasked: false };
+}
+
+function isRealPhoneJid(jid) {
+    if (!jid || typeof jid !== 'string') return false;
+    const parts = jid.split('@');
+    if (parts.length !== 2) return false;
+    return parts[1] === 'c.us' && /^\d+$/.test(parts[0]);
 }
 
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
@@ -3314,16 +3325,18 @@ client.on('group_join', async (notification) => {
                             // Re-resolve
                             const resolvedAgain = await resolveLidJid(client, participantId);
                             const finalReportId = resolvedAgain.cleanId;
-                            const mentionId = participantId.replace(/:[0-9]+/, '');
-                            const mentionNum = mentionId.split('@')[0];
+                            const adminMentionId = isRealPhoneJid(finalReportId)
+                                ? finalReportId.replace(/:[0-9]+/, '')
+                                : participantId.replace(/:[0-9]+/, '');
+                            const adminMentionNum = adminMentionId.split('@')[0];
 
                             const reportText = tAdmin(
                                 groupConfig,
                                 config,
-                                `🛡️ *حماية (قائمة سوداء)*\nحاول رقم محظور الدخول لمجموعة "${chat.name}" وتم طرده.\nالرقم: @${mentionNum}`,
-                                `🛡️ *Protection (Blacklist)*\nA blacklisted number attempted to join "${chat.name}" and was removed.\nNumber: @${mentionNum}`
+                                `🛡️ *حماية (قائمة سوداء)*\nحاول رقم محظور الدخول لمجموعة "${chat.name}" وتم طرده.\nالرقم: @${adminMentionNum}`,
+                                `🛡️ *Protection (Blacklist)*\nA blacklisted number attempted to join "${chat.name}" and was removed.\nNumber: @${adminMentionNum}`
                             );
-                            await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionId] });
+                            await client.sendMessage(targetAdminGroup, reportText, { mentions: [adminMentionId] });
                         } catch (err) { }
                     }, 2000);
                 }
@@ -3376,8 +3389,10 @@ client.on('group_join', async (notification) => {
                             }
                         }
 
-                        const mentionId = participantId.replace(/:[0-9]+/, '');
-                        const mentionNum = mentionId.split('@')[0];
+                        const adminMentionId = isRealPhoneJid(finalCleanJoinedId)
+                            ? finalCleanJoinedId.replace(/:[0-9]+/, '')
+                            : participantId.replace(/:[0-9]+/, '');
+                        const adminMentionNum = adminMentionId.split('@')[0];
 
                         const reportText = tAdmin(
                             groupConfig,
@@ -3385,19 +3400,19 @@ client.on('group_join', async (notification) => {
                             `🚫 *فحص الانضمام*
 تم طرد عضو جديد بعد فحص الاسم/النبذة.
 المجموعة: "${chat.name}"
-الرقم: @${mentionNum}
+الرقم: @${adminMentionNum}
 السبب: ${profileResult.reason}
 البيانات:
 "${profileResult.profileText || 'غير متوفر'}"`,
                             `🚫 *Join Screening*
 A newly joined member was removed after profile screening.
 Group: "${chat.name}"
-Number: @${mentionNum}
+Number: @${adminMentionNum}
 Reason: ${profileResult.reason}
 Profile:
 "${profileResult.profileText || 'Unavailable'}"`
                         );
-                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionId] });
+                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [adminMentionId] });
                     } catch (err) { }
                 }, 2800);
             }
@@ -3970,9 +3985,15 @@ client.on('message', async msg => {
                                 serializedReportedMsgId = quoted.id._serialized;
                             } catch (e) { }
                         }
-                        const mentionSenderId = rawAuthorId.replace(/:[0-9]+/, '');
+                        const mentionSenderId = isRealPhoneJid(cleanAuthorId)
+                            ? cleanAuthorId.replace(/:[0-9]+/, '')
+                            : rawAuthorId.replace(/:[0-9]+/, '');
                         const mentionSenderNum = mentionSenderId.split('@')[0];
-                        const mentionTargetId = targetRawId ? targetRawId.replace(/:[0-9]+/, '') : null;
+                        const mentionTargetId = targetRawId
+                            ? (isRealPhoneJid(targetCleanId)
+                                ? targetCleanId.replace(/:[0-9]+/, '')
+                                : targetRawId.replace(/:[0-9]+/, ''))
+                            : null;
                         const mentionTargetNum = mentionTargetId ? mentionTargetId.split('@')[0] : '';
 
                         const pollTitle = cmdAdminLang === 'en'
@@ -4188,7 +4209,9 @@ client.on('message', async msg => {
                                 } catch (err) { }
                             }
                         }
-                        const mentionAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+                        const mentionAuthorId = isRealPhoneJid(cleanAuthorId)
+                            ? cleanAuthorId.replace(/:[0-9]+/, '')
+                            : rawAuthorId.replace(/:[0-9]+/, '');
                         const mentionAuthorNum = mentionAuthorId.split('@')[0];
 
                         const reportText = adminMessageLang === 'en'
@@ -4197,7 +4220,9 @@ client.on('message', async msg => {
                         await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionAuthorId] });
                     } catch (e) { }
                 } else if (blockedAction === 'poll') {
-                    const mentionAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+                    const mentionAuthorId = isRealPhoneJid(cleanAuthorId)
+                        ? cleanAuthorId.replace(/:[0-9]+/, '')
+                        : rawAuthorId.replace(/:[0-9]+/, '');
                     const mentionAuthorNum = mentionAuthorId.split('@')[0];
 
                     const pollTitle = adminMessageLang === 'en'
@@ -4296,7 +4321,9 @@ client.on('message', async msg => {
                                     } catch (err) { }
                                 }
                             }
-                            const mentionAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+                            const mentionAuthorId = isRealPhoneJid(senderId)
+                                ? senderId.replace(/:[0-9]+/, '')
+                                : rawAuthorId.replace(/:[0-9]+/, '');
                             const mentionAuthorNum = mentionAuthorId.split('@')[0];
 
                             const reportText = adminMessageLang === 'en'
@@ -4305,7 +4332,9 @@ client.on('message', async msg => {
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionAuthorId] });
                         } catch (e) { }
                     } else {
-                        const mentionAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+                        const mentionAuthorId = isRealPhoneJid(senderId)
+                            ? senderId.replace(/:[0-9]+/, '')
+                            : rawAuthorId.replace(/:[0-9]+/, '');
                         const mentionAuthorNum = mentionAuthorId.split('@')[0];
 
                         const pollOptions = isBlacklistEnabled
@@ -4430,7 +4459,9 @@ client.on('message', async msg => {
                             }
                         }
 
-                        const mentionAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+                        const mentionAuthorId = isRealPhoneJid(senderId)
+                            ? senderId.replace(/:[0-9]+/, '')
+                            : rawAuthorId.replace(/:[0-9]+/, '');
                         const mentionAuthorNum = mentionAuthorId.split('@')[0];
 
                         const reportText = adminMessageLang === 'en'
@@ -4439,7 +4470,9 @@ client.on('message', async msg => {
                         await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionAuthorId] });
                     } catch (e) { }
                 } else {
-                    const mentionAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+                    const mentionAuthorId = isRealPhoneJid(senderId)
+                        ? senderId.replace(/:[0-9]+/, '')
+                        : rawAuthorId.replace(/:[0-9]+/, '');
                     const mentionAuthorNum = mentionAuthorId.split('@')[0];
 
                     const pollOptions = isBlacklistEnabled
@@ -4861,16 +4894,18 @@ async function screenPendingMembershipRequests() {
                             rejectedRequestsCache.set(cacheKey, Date.now() + 24 * 60 * 60 * 1000); // cache for 24h
                             await chat.rejectGroupMembershipRequests({ requesterIds: [originalRequesterJid] });
                             
-                            const mentionId = originalRequesterJid.replace(/:[0-9]+/, '');
-                            const mentionNum = mentionId.split('@')[0];
+                            const adminMentionId = isRealPhoneJid(cleanRequesterId)
+                                ? cleanRequesterId.replace(/:[0-9]+/, '')
+                                : originalRequesterJid.replace(/:[0-9]+/, '');
+                            const adminMentionNum = adminMentionId.split('@')[0];
 
                             const reportText = tAdmin(
                                 groupConfig,
                                 config,
-                                `🛡️ *حماية (قائمة سوداء)*\nتم رفض طلب انضمام لرقم محظور في مجموعة "${chat.name}" تلقائياً.\nالرقم: @${mentionNum}`,
-                                `🛡️ *Protection (Blacklist)*\nA join request from a blacklisted number was automatically rejected in "${chat.name}".\nNumber: @${mentionNum}`
+                                `🛡️ *حماية (قائمة سوداء)*\nتم رفض طلب انضمام لرقم محظور في مجموعة "${chat.name}" تلقائياً.\nالرقم: @${adminMentionNum}`,
+                                `🛡️ *Protection (Blacklist)*\nA join request from a blacklisted number was automatically rejected in "${chat.name}".\nNumber: @${adminMentionNum}`
                             );
-                            try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionId] }); } catch (e) { }
+                            try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [adminMentionId] }); } catch (e) { }
                         } catch (e) { }
                         continue; // skip profile screening for this requester
                     }
@@ -4931,16 +4966,18 @@ async function screenPendingMembershipRequests() {
                             }
                         }
 
-                        const mentionId = originalRequesterJid.replace(/:[0-9]+/, '');
-                        const mentionNum = mentionId.split('@')[0];
+                        const adminMentionId = isRealPhoneJid(finalRequesterId)
+                            ? finalRequesterId.replace(/:[0-9]+/, '')
+                            : originalRequesterJid.replace(/:[0-9]+/, '');
+                        const adminMentionNum = adminMentionId.split('@')[0];
 
                         const reportText = tAdmin(
                             groupConfig,
                             config,
-                            `🚫 *فحص طلب الانضمام*\nتم رفض طلب انضمام بعد فحص الاسم/النبذة.\nالمجموعة: "${chat.name}"\nالرقم: @${mentionNum}\nالسبب: ${profileResult.reason}\nالبيانات:\n"${profileResult.profileText || 'غير متوفر'}"`,
-                            `🚫 *Join Request Screening*\nJoin request was rejected after profile screening.\nGroup: "${chat.name}"\nNumber: @${mentionNum}\nReason: ${profileResult.reason}\nProfile:\n"${profileResult.profileText || 'Unavailable'}"`
+                            `🚫 *فحص طلب الانضمام*\nتم رفض طلب انضمام بعد فحص الاسم/النبذة.\nالمجموعة: "${chat.name}"\nالرقم: @${adminMentionNum}\nالسبب: ${profileResult.reason}\nالبيانات:\n"${profileResult.profileText || 'غير متوفر'}"`,
+                            `🚫 *Join Request Screening*\nJoin request was rejected after profile screening.\nGroup: "${chat.name}"\nNumber: @${adminMentionNum}\nReason: ${profileResult.reason}\nProfile:\n"${profileResult.profileText || 'Unavailable'}"`
                         );
-                        try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionId] }); } catch (e) { }
+                        try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [adminMentionId] }); } catch (e) { }
                         continue;
                     }
                 }

@@ -667,19 +667,51 @@ function initVerification(client, db, config) {
                 const choice = parseAdminVote(vote.selectedOptions);
                 const isAr = config.secondaryVerificationLanguage === 'ar';
                 if (!choice) return true;
+
+                const phoneDisplay = `+${aSess.requester_id.split('@')[0]}`;
+                let replyText = '';
                 
                 if (choice === 'approve') {
+                    const isPhoto = aSess.state === 'WAITING_ADMIN_PHOTO_REVIEW';
                     await resolveSessionAction('approve', client, db, aSess);
-                    await client.sendMessage(toCanonical(aSess.requester_id), isAr ? '✅ تمت الموافقة على طلبك. مرحباً بك في المجموعة!' : '✅ Your request has been approved. Welcome!');
+                    if (isPhoto) {
+                        await client.sendMessage(toCanonical(aSess.requester_id), isAr 
+                            ? '✅ تم قبول صورتك والموافقة على انضمامك للمجموعة! مرحباً بك.' 
+                            : '✅ Your image has been approved and you are admitted to the group! Welcome.');
+                    } else {
+                        await client.sendMessage(toCanonical(aSess.requester_id), isAr ? '✅ تمت الموافقة على طلبك. مرحباً بك في المجموعة!' : '✅ Your request has been approved. Welcome!');
+                    }
+                    replyText = isAr 
+                        ? `✅ تم قبول الطلب والموافقة على العضو: ${phoneDisplay}`
+                        : `✅ Request approved for user: ${phoneDisplay}`;
                 } else if (choice === 'reject') {
                     await resolveSessionAction('reject', client, db, aSess);
                     await client.sendMessage(toCanonical(aSess.requester_id), isAr ? 'رُفضت.' : 'Rejected.');
+                    replyText = isAr 
+                        ? `❌ تم رفض طلب انضمام العضو: ${phoneDisplay}`
+                        : `❌ Request rejected for user: ${phoneDisplay}`;
                 } else if (choice === 'ban') {
                     await resolveSessionAction('ban', client, db, aSess);
                     await client.sendMessage(toCanonical(aSess.requester_id), isAr ? 'حُظرت.' : 'Banned.');
+                    replyText = isAr 
+                        ? `🚫 تم حظر العضو: ${phoneDisplay}`
+                        : `🚫 User banned: ${phoneDisplay}`;
                 } else if (choice === 'retry' && aSess.state === 'WAITING_ADMIN_PHOTO_REVIEW') {
                     db.prepare("UPDATE secondary_verification SET state='PENDING_PHOTO_UPLOAD' WHERE requester_id=?").run(aSess.requester_id);
                     await client.sendMessage(toCanonical(aSess.requester_id), isAr ? 'أرسل صورة أخرى.' : 'Send another photo.');
+                    replyText = isAr 
+                        ? `🔄 تم طلب إعادة إرسال الصورة من العضو: ${phoneDisplay}`
+                        : `🔄 Requested photo retry from user: ${phoneDisplay}`;
+                }
+
+                if (replyText) {
+                    try {
+                        await client.sendMessage(aSess.admin_group_id, replyText, { quotedMessageId: pollId });
+                    } catch (e) {
+                        try {
+                            await client.sendMessage(aSess.admin_group_id, replyText);
+                        } catch (err) {}
+                    }
                 }
                 return true;
             }
@@ -710,7 +742,16 @@ function initVerification(client, db, config) {
             await resolveSessionAction(act, client, db, session);
             await msg.reply('Done.');
             const isAr = config.secondaryVerificationLanguage === 'ar';
-            if (act==='approve') await client.sendMessage(toCanonical(session.requester_id), isAr ? '✅ تمت الموافقة على طلبك. مرحباً بك في المجموعة!' : '✅ Your request has been approved. Welcome!');
+            if (act==='approve') {
+                const isPhoto = session.state === 'WAITING_ADMIN_PHOTO_REVIEW';
+                if (isPhoto) {
+                    await client.sendMessage(toCanonical(session.requester_id), isAr 
+                        ? '✅ تم قبول صورتك والموافقة على انضمامك للمجموعة! مرحباً بك.' 
+                        : '✅ Your image has been approved and you are admitted to the group! Welcome.');
+                } else {
+                    await client.sendMessage(toCanonical(session.requester_id), isAr ? '✅ تمت الموافقة على طلبك. مرحباً بك في المجموعة!' : '✅ Your request has been approved. Welcome!');
+                }
+            }
             if (act==='reject') await client.sendMessage(toCanonical(session.requester_id), isAr ? 'رُفضت.' : 'Rejected.');
             if (act==='ban') await client.sendMessage(toCanonical(session.requester_id), isAr ? 'حُظرت.' : 'Banned.');
             return true;
