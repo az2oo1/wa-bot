@@ -40,34 +40,36 @@ async function resolveLidJid(client, rawId) {
     
     const originalUser = rawId.split('@')[0].split(':')[0];
     
-    // 1. Try getContactLidAndPhone if available on the client
+    // Strategy 1: Use the official getContactLidAndPhone API
+    // Returns { lid: "xxxxx@lid", pn: "966xxx@c.us" } — pn is already a serialized JID
     if (client && typeof client.getContactLidAndPhone === 'function') {
         try {
             const res = await client.getContactLidAndPhone([rawId]);
             if (res && res[0] && res[0].pn) {
-                return { cleanId: `${res[0].pn}@c.us`, unmasked: true };
+                const pn = String(res[0].pn);
+                // pn may already be a full JID (e.g. "966xxx@c.us") — don't double-append @c.us
+                const phonePart = pn.includes('@') ? pn : `${pn}@c.us`;
+                if (!phonePart.includes('@lid')) {
+                    return { cleanId: phonePart, unmasked: true };
+                }
             }
-        } catch (e) {
-            // ignore
-        }
+        } catch (e) { /* ignore */ }
     }
     
-    // 2. Try getContactById fallback
+    // Strategy 2: getContactById with the raw @lid JID
     if (client) {
         try {
             const contact = await client.getContactById(rawId);
-            if (contact && contact.number) {
-                if (contact.number !== originalUser) {
-                    return { cleanId: `${contact.number}@c.us`, unmasked: true };
-                }
+            if (contact && contact.number && String(contact.number) !== originalUser) {
+                const num = String(contact.number).replace(/@.*$/, '');
+                return { cleanId: `${num}@c.us`, unmasked: true };
             }
-        } catch (e) {
-            // ignore
-        }
+        } catch (e) { /* ignore */ }
     }
     
-    // 3. Fallback: replace @lid with @c.us (returns the LID digits but in c.us domain)
-    return { cleanId: `${originalUser}@c.us`, unmasked: false };
+    // Could not resolve — do NOT return a fake @c.us with LID digits.
+    // Signal failure so callers can decide to skip the action.
+    return { cleanId: `${originalUser}@lid`, unmasked: false };
 }
 
 function addApprovedNumber(db, requesterId) {
@@ -163,11 +165,16 @@ function extractText(msg) {
 
 function keywordMatches(text, keywords, smartMatch) {
     const needle = (str) => {
-        let s = String(str||'').toLowerCase().trim();
+        let s = String(str||'').toLowerCase();
+        // Strip invisible Unicode characters WhatsApp sometimes injects
+        // (RTL mark U+200F, LTR mark U+200E, ZWNJ U+200C, ZWJ U+200D, BOM U+FEFF, etc.)
+        s = s.replace(/[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/g, '');
+        s = s.trim();
         if (smartMatch) {
             s = s.replace(/[!@#$%^&*()_+=\-\[\]{}:;"'<>,.?\/\\|~`]/g, '');
-            s = s.replace(/[\u064B-\u0652\u0640\u0670]/g, '');
-            s = s.replace(/[أإآ]/g, 'ا');
+            s = s.replace(/[\u064B-\u0652\u0640\u0670]/g, ''); // diacritics + kashida
+            s = s.replace(/[أإآ]/g, 'ا');  // alef variants
+            s = s.replace(/ة/g, 'ه');      // taa marbuta → haa (متابعة = متابعه)
         }
         return s;
     };
@@ -182,7 +189,6 @@ function keywordMatches(text, keywords, smartMatch) {
 
 async function resolveSessionAction(action, client, db, session) {
     const canon = toCanonical(session.requester_id);
-    const key = normalizeId(session.requester_id);
     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(session.requester_id);
     
     // Always archive on completion to keep inbox clean
@@ -200,19 +206,13 @@ async function resolveSessionAction(action, client, db, session) {
     } else if (action === 'ban') {
         const cg = await client.getChatById(session.group_id).catch(()=>null);
         if (cg && cg.rejectGroupMembershipRequests) try { await cg.rejectGroupMembershipRequests({ requesterIds: [canon] }); } catch(e){}
-        const blKey = canon.replace('@lid', '@c.us');
-        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(blKey);
-        if (canon.includes('@lid')) {
-            try {
-                const contact = await client.getContactById(canon);
-                if (contact && contact.number) {
-                    const originalUser = canon.split('@')[0].split(':')[0];
-                    if (contact.number !== originalUser) {
-                        const realCleanId = `${contact.number}@c.us`;
-                        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(realCleanId);
-                    }
-                }
-            } catch (err) { }
+        // Resolve the real phone number via resolveLidJid — never store LID digits as phone
+        const resolved = await resolveLidJid(client, session.requester_id);
+        if (resolved.unmasked && !resolved.cleanId.includes('@lid')) {
+            db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(resolved.cleanId);
+        } else if (!canon.includes('@lid')) {
+            // canon is already a real @c.us number — safe to store
+            db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(canon);
         }
         upsertReplyLog(db, canon, session.group_id, 'no_reply', '', 'banned');
     }
@@ -268,8 +268,22 @@ function parseAdminVote(voteArr) {
 function initVerification(client, db, config) {
     return {
         startVerification: async (rawRequesterId, cleanUserId, groupId, options = {}) => {
-            const reqCanon = toCanonical(rawRequesterId);
-            const reqKey = normalizeId(rawRequesterId);
+            // ── Resolve @lid to real phone before anything else ──────────────────
+            // cleanUserId should already be the resolved phone (passed in from index.js),
+            // but rawRequesterId may still be a @lid. We must store the real phone as
+            // the requester_id so all future session lookups (DM replies, reopen) work.
+            let resolvedId = cleanUserId || rawRequesterId;
+            if (String(resolvedId).includes('@lid') || !String(resolvedId).includes('@')) {
+                const lidResult = await resolveLidJid(client, rawRequesterId);
+                if (lidResult.unmasked) resolvedId = lidResult.cleanId;
+                else if (!String(cleanUserId).includes('@lid')) resolvedId = toCanonical(cleanUserId);
+                else resolvedId = rawRequesterId; // give up — store raw, flag for debugging
+            } else {
+                resolvedId = toCanonical(resolvedId);
+            }
+            // Use the resolved real ID as the canonical key for this session
+            const reqCanon = resolvedId;
+            const reqKey = normalizeId(resolvedId);
             try {
                 if (!config.enableSecondaryVerification) { console.log('[startVerification] failed: disabled'); return false; }
                 
@@ -289,7 +303,21 @@ function initVerification(client, db, config) {
                 if (!isEmail && !isPhoto && !isKw) { console.log('[startVerification] failed: no methods'); return false; }
                 
                 if (!isTest && !options.forceRestart && hasCooldown(db, reqKey)) { console.log('[startVerification] failed: has cooldown'); return false; }
-                
+
+                // ── Purge any old LID-digit fake sessions from before the @lid fix ──────────
+                // Old code stored rawRequesterId's LID digits as @c.us (e.g. "79616396017785@c.us").
+                // Delete those so we never end up with two sessions for the same person.
+                const lidDigits = rawRequesterId ? rawRequesterId.split('@')[0].split(':')[0] : '';
+                if (lidDigits && lidDigits !== normalizeId(reqCanon)) {
+                    const oldLidFake = `${lidDigits}@c.us`;
+                    const oldLidFakeRows = db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(oldLidFake);
+                    if (oldLidFakeRows.changes > 0) {
+                        db.prepare('DELETE FROM secondary_verification_reply_log WHERE requester_id = ?').run(oldLidFake);
+                        console.log('[startVerification] Purged old LID-digit fake session:', oldLidFake, '→ replaced by:', reqCanon);
+                    }
+                }
+                // ─────────────────────────────────────────────────────────────────────────────
+
                 const existing = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(reqCanon);
                 if (existing) {
                     if (isTest && existing.flow_type !== 'test') { console.log('[startVerification] failed: overlaps with real session'); return false; }
@@ -298,7 +326,6 @@ function initVerification(client, db, config) {
                         return false; 
                     }
                     db.prepare('DELETE FROM secondary_verification WHERE requester_id = ?').run(existing.requester_id);
-                    // Also wipe trailing reply logs so the dashboard doesn't show ghost interaction timestamps!
                     db.prepare('DELETE FROM secondary_verification_reply_log WHERE requester_id = ?').run(existing.requester_id);
                 }
                 
@@ -366,9 +393,28 @@ function initVerification(client, db, config) {
             const senderKey = normalizeId(fromData);
             const sessionRows = db.prepare('SELECT * FROM secondary_verification').all();
             console.log('[VRF-LOOKUP] Sender key:', senderKey, '| Active sessions:', sessionRows.map(r => normalizeId(r.requester_id)));
-            const session = sessionRows.find(r => normalizeId(r.requester_id) === senderKey);
+            // Primary lookup: match by digits
+            let session = sessionRows.find(r => normalizeId(r.requester_id) === senderKey);
+            if (!session && senderKey) {
+                // Self-healing: The DB may contain a session stored with a LID-digit fake @c.us number
+                // (from before this fix). Try resolving each @lid session to see if it maps to this sender.
+                for (const r of sessionRows) {
+                    if (!r.requester_id || !r.requester_id.includes('@lid')) continue;
+                    try {
+                        const resolved = await resolveLidJid(client, r.requester_id);
+                        if (resolved && normalizeId(resolved.cleanId) === senderKey) {
+                            const fixedId = `${senderKey}@c.us`;
+                            db.prepare('UPDATE secondary_verification SET requester_id = ? WHERE requester_id = ?')
+                              .run(fixedId, r.requester_id);
+                            session = db.prepare('SELECT * FROM secondary_verification WHERE requester_id = ?').get(fixedId);
+                            console.log('[VRF-LOOKUP] Self-healed corrupt LID session to real phone:', fixedId);
+                            break;
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+            }
             if (!session) {
-                console.log('[VRF-LOOKUP] ❗ No session found. Sender not in verification list.');
+                console.log('[VRF-LOOKUP] No session found. Sender not in verification list.');
                 return false;
             }
             
@@ -399,9 +445,16 @@ function initVerification(client, db, config) {
             const isTest = session.flow_type === 'test';
 
             if (state === 'EXPIRED_WAITING_REENTRY') {
-                const rt = text.trim().toLowerCase();
+                // Use keywordMatches with smartMatch=true so invisible chars, diacritics,
+                // and ة/ه variants are all normalized before comparison
                 const reopenCode = (config.secondaryVerificationReopenCode || '').trim().toLowerCase();
-                if (isText && (rt === reopenCode || rt === 'reopen' || rt === 'متابعة' || rt === 'متابعه' || rt === 'continue' || rt === '1')) {
+                const reopenKeywordList = [
+                    'reopen', 'continue', '1',
+                    'متابعه', 'متابعة', 'تابعه', 'تابعة',
+                ];
+                if (reopenCode) reopenKeywordList.unshift(reopenCode);
+                const isReopenKeyword = isText && keywordMatches(text, reopenKeywordList, true);
+                if (isReopenKeyword) {
                     db.prepare("UPDATE secondary_verification SET state = 'PENDING_METHOD', wait_started_at = ? WHERE requester_id = ?").run(Date.now(), session.requester_id);
                     await msg.reply(isAr ? 'تمت إعادة فتح التحقق.' : 'Verification reopened.');
                     const s2 = db.prepare('SELECT * FROM secondary_verification WHERE requester_id=?').get(session.requester_id);
