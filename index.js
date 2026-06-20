@@ -1877,28 +1877,8 @@ app.get('/api/secondary-verification/pending', requireAuthApi, requirePermission
         const toReplyLogKey = (value) => normalizeRequesterId(value).replace('@c.us', '').trim();
         const toDigits = (value) => String(value || '').replace(/\D/g, '');
         const resolvePhoneNumber = async (rawRequesterId) => {
-            const normalized = normalizeRequesterId(rawRequesterId);
-            if (!normalized) return '';
-
-            if (normalized.endsWith('@c.us')) {
-                return toDigits(normalized.replace('@c.us', ''));
-            }
-
-            const candidates = [normalized];
-            if (normalized.endsWith('@lid')) {
-                const asCus = normalized.replace('@lid', '@c.us');
-                if (!candidates.includes(asCus)) candidates.push(asCus);
-            }
-
-            for (const candidate of candidates) {
-                try {
-                    const contact = await client.getContactById(candidate);
-                    const digits = toDigits(contact && contact.number ? contact.number : '');
-                    if (digits) return digits;
-                } catch (e) { }
-            }
-
-            return '';
+            const resolved = await resolveLidJid(client, rawRequesterId);
+            return resolved.cleanId.replace('@c.us', '').replace('@lid', '').trim();
         };
 
         const mapped = await Promise.all(rows.map(async (row) => {
@@ -3279,13 +3259,20 @@ client.on('group_join', async (notification) => {
                         try {
                             await safeDelay(chat);
                             await chat.removeParticipants([participantId]);
+                            
+                            // Re-resolve
+                            const resolvedAgain = await resolveLidJid(client, participantId);
+                            const finalReportId = resolvedAgain.cleanId;
+                            const mentionId = participantId.replace(/:[0-9]+/, '');
+                            const mentionNum = mentionId.split('@')[0];
+
                             const reportText = tAdmin(
                                 groupConfig,
                                 config,
-                                `🛡️ *حماية (قائمة سوداء)*\nحاول رقم محظور الدخول لمجموعة "${chat.name}" وتم طرده.\nالرقم: @${cleanJoinedId.split('@')[0]}`,
-                                `🛡️ *Protection (Blacklist)*\nA blacklisted number attempted to join "${chat.name}" and was removed.\nNumber: @${cleanJoinedId.split('@')[0]}`
+                                `🛡️ *حماية (قائمة سوداء)*\nحاول رقم محظور الدخول لمجموعة "${chat.name}" وتم طرده.\nالرقم: @${mentionNum}`,
+                                `🛡️ *Protection (Blacklist)*\nA blacklisted number attempted to join "${chat.name}" and was removed.\nNumber: @${mentionNum}`
                             );
-                            await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanJoinedId] });
+                            await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionId] });
                         } catch (err) { }
                     }, 2000);
                 }
@@ -3295,8 +3282,13 @@ client.on('group_join', async (notification) => {
                 setTimeout(async () => {
                     try {
                         await safeDelay(chat);
-                        const welcomeText = groupConfig.welcomeMessageText.replace(/{user}/g, `@${cleanJoinedId.split('@')[0]}`);
-                        await client.sendMessage(groupId, welcomeText, { mentions: [cleanJoinedId] });
+                        const resolvedAgain = await resolveLidJid(client, participantId);
+                        const finalWelcomeId = resolvedAgain.cleanId;
+                        const mentionId = participantId.replace(/:[0-9]+/, '');
+                        const mentionNum = mentionId.split('@')[0];
+
+                        const welcomeText = groupConfig.welcomeMessageText.replace(/{user}/g, `@${mentionNum}`);
+                        await client.sendMessage(groupId, welcomeText, { mentions: [mentionId] });
                     } catch (err) { }
                 }, 3500);
             }
@@ -3304,9 +3296,13 @@ client.on('group_join', async (notification) => {
             if (!isKicked && isJoinProfileScreeningEnabled && !isWhitelisted && (isWordFilterEnabled || isAIFilterEnabled)) {
                 setTimeout(async () => {
                     try {
+                        // Re-resolve
+                        const resolvedAgain = await resolveLidJid(client, participantId);
+                        const currentCleanJoinedId = resolvedAgain.cleanId;
+
                         const profileResult = await evaluateJoinProfileViolation({
                             participantId,
-                            cleanUserId: cleanJoinedId,
+                            cleanUserId: currentCleanJoinedId,
                             groupName: chat.name,
                             isWordFilterEnabled,
                             isAIFilterEnabled,
@@ -3317,8 +3313,10 @@ client.on('group_join', async (notification) => {
 
                         await safeDelay(chat);
                         await chat.removeParticipants([participantId]);
+                        
+                        const finalCleanJoinedId = profileResult.resolvedCleanUserId || currentCleanJoinedId;
                         if (isBlacklistEnabledForGroup) {
-                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanJoinedId); } catch (e) { }
+                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(finalCleanJoinedId); } catch (e) { }
                             if (participantId && participantId.includes('@lid')) {
                                 try {
                                     const lidClean = participantId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
@@ -3327,25 +3325,28 @@ client.on('group_join', async (notification) => {
                             }
                         }
 
+                        const mentionId = participantId.replace(/:[0-9]+/, '');
+                        const mentionNum = mentionId.split('@')[0];
+
                         const reportText = tAdmin(
                             groupConfig,
                             config,
                             `🚫 *فحص الانضمام*
 تم طرد عضو جديد بعد فحص الاسم/النبذة.
 المجموعة: "${chat.name}"
-الرقم: @${cleanJoinedId.split('@')[0]}
+الرقم: @${mentionNum}
 السبب: ${profileResult.reason}
 البيانات:
 "${profileResult.profileText || 'غير متوفر'}"`,
                             `🚫 *Join Screening*
 A newly joined member was removed after profile screening.
 Group: "${chat.name}"
-Number: @${cleanJoinedId.split('@')[0]}
+Number: @${mentionNum}
 Reason: ${profileResult.reason}
 Profile:
 "${profileResult.profileText || 'Unavailable'}"`
                         );
-                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanJoinedId] });
+                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionId] });
                     } catch (err) { }
                 }, 2800);
             }
@@ -3386,24 +3387,53 @@ async function extractJoinProfileText(participantId, cleanUserId) {
 }
 
 async function evaluateJoinProfileViolation({ participantId, cleanUserId, groupName, isWordFilterEnabled, isAIFilterEnabled, forbiddenWords, aiTriggerWords }) {
-    const profileText = await extractJoinProfileText(participantId, cleanUserId);
-    if (!profileText) return { isViolating: false, reason: '', profileText: '' };
+    const contact = await resolveContactForJoinScreening(participantId, cleanUserId);
+    const displayName = contact ? (contact.pushname || contact.name || contact.shortName || '') : '';
+    let about = '';
+    if (contact && typeof contact.getAbout === 'function') {
+        try {
+            const aboutText = await contact.getAbout();
+            if (typeof aboutText === 'string') about = aboutText.trim();
+        } catch (e) { }
+    }
+
+    const lines = [];
+    if (displayName) lines.push(`name: ${displayName}`);
+    if (about) lines.push(`bio: ${about}`);
+    const profileText = lines.join('\n').trim();
+
+    let resolvedCleanUserId = cleanUserId;
+    if (contact && contact.number) {
+        const digits = contact.number.replace(/\D/g, '');
+        const originalUser = (participantId || '').split('@')[0].split(':')[0];
+        if (digits && digits !== originalUser) {
+            resolvedCleanUserId = `${digits}@c.us`;
+        }
+    }
+
+    if (!profileText) return { isViolating: false, reason: '', profileText: '', resolvedCleanUserId };
 
     if (isWordFilterEnabled && Array.isArray(forbiddenWords) && forbiddenWords.length > 0) {
-        let lowered = profileText.toLowerCase();
+        const cleanName = displayName.toLowerCase();
+        const cleanAbout = about.toLowerCase();
+
+        let targetName = cleanName;
+        let targetAbout = cleanAbout;
         if (config.enableWordFilterSmartMatch) {
-            lowered = applySmartMatch(lowered);
+            targetName = applySmartMatch(targetName);
+            targetAbout = applySmartMatch(targetAbout);
         }
+
         const matchedWord = forbiddenWords.find(word => {
             if (typeof word !== 'string' || !word.trim()) return false;
             let targetWord = word.toLowerCase();
             if (config.enableWordFilterSmartMatch) {
                 targetWord = applySmartMatch(targetWord);
             }
-            return lowered.includes(targetWord);
+            return targetName.includes(targetWord) || targetAbout.includes(targetWord);
         });
         if (matchedWord) {
-            return { isViolating: true, reason: `كلمة محظورة في الملف الشخصي: [${matchedWord}]`, profileText };
+            return { isViolating: true, reason: `كلمة محظورة في الملف الشخصي: [${matchedWord}]`, profileText, resolvedCleanUserId };
         }
     }
 
@@ -3421,12 +3451,12 @@ async function evaluateJoinProfileViolation({ participantId, cleanUserId, groupN
             const aiText = data && typeof data.response === 'string' ? data.response : '';
             const triggers = Array.isArray(aiTriggerWords) && aiTriggerWords.length > 0 ? aiTriggerWords : ['نعم'];
             if (aiText && triggers.some(word => aiText.includes(word))) {
-                return { isViolating: true, reason: 'تم تصنيف الملف الشخصي كمخالفة عبر الذكاء الاصطناعي', profileText };
+                return { isViolating: true, reason: 'تم تصنيف الملف الشخصي كمخالفة عبر الذكاء الاصطناعي', profileText, resolvedCleanUserId };
             }
         } catch (e) { }
     }
 
-    return { isViolating: false, reason: '', profileText };
+    return { isViolating: false, reason: '', profileText, resolvedCleanUserId };
 }
 
 client.on('group_update', async (notification) => {
@@ -3889,17 +3919,22 @@ client.on('message', async msg => {
                                 serializedReportedMsgId = quoted.id._serialized;
                             } catch (e) { }
                         }
-                        const senderNum = cleanAuthorId.split('@')[0];
-                        const targetNum = (targetCleanId || '').split('@')[0];
+                        const mentionSenderId = rawAuthorId.replace(/:[0-9]+/, '');
+                        const mentionSenderNum = mentionSenderId.split('@')[0];
+                        const mentionTargetId = targetRawId ? targetRawId.replace(/:[0-9]+/, '') : null;
+                        const mentionTargetNum = mentionTargetId ? mentionTargetId.split('@')[0] : '';
+
                         const pollTitle = cmdAdminLang === 'en'
-                            ? `🚨 Member Report in "${chat.name}"\nReported by: @${senderNum}\nReported user: @${targetNum}${reportedContent ? `\nMessage:\n"${reportedContent.slice(0, 200)}"` : ''}\n\nRemove this member${cmdBlacklistEnabled ? ' and blacklist' : ''}?`
-                            : `🚨 بلاغ عضو في "${chat.name}"\nأرسله: @${senderNum}\nالمُبلَّغ عنه: @${targetNum}${reportedContent ? `\nالمحتوى:\n"${reportedContent.slice(0, 200)}"` : ''}\n\nهل تريد طرد هذا العضو${cmdBlacklistEnabled ? ' وحظره' : ''}؟`;
+                            ? `🚨 Member Report in "${chat.name}"\nReported by: @${mentionSenderNum}\nReported user: @${mentionTargetNum}${reportedContent ? `\nMessage:\n"${reportedContent.slice(0, 200)}"` : ''}\n\nRemove this member${cmdBlacklistEnabled ? ' and blacklist' : ''}?`
+                            : `🚨 بلاغ عضو في "${chat.name}"\nأرسله: @${mentionSenderNum}\nالمُبلَّغ عنه: @${mentionTargetNum}${reportedContent ? `\nالمحتوى:\n"${reportedContent.slice(0, 200)}"` : ''}\n\nهل تريد طرد هذا العضو${cmdBlacklistEnabled ? ' وحظره' : ''}؟`;
                         const pollOptions = cmdBlacklistEnabled
                             ? (cmdAdminLang === 'en' ? ['Yes, remove and blacklist', 'No'] : ['نعم، طرد وحظر', 'لا'])
                             : (cmdAdminLang === 'en' ? ['Yes, remove', 'No'] : ['نعم، طرد', 'لا']);
                         try {
                             const poll = new Poll(pollTitle, pollOptions);
-                            const pollMsg = await client.sendMessage(cmdAdminGroup, poll, { mentions: [cleanAuthorId, targetCleanId] });
+                            const mentionsArr = [mentionSenderId];
+                            if (mentionTargetId) mentionsArr.push(mentionTargetId);
+                            const pollMsg = await client.sendMessage(cmdAdminGroup, poll, { mentions: mentionsArr });
                             pendingBans.set(pollMsg.id._serialized, {
                                 senderId: targetCleanId,
                                 rawSenderId: targetRawId,
@@ -4090,17 +4125,23 @@ client.on('message', async msg => {
                                 } catch (err) { }
                             }
                         }
+                        const mentionAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+                        const mentionAuthorNum = mentionAuthorId.split('@')[0];
+
                         const reportText = adminMessageLang === 'en'
-                            ? `🚨 *Auto Ban (Blocked Type)*\nA member sent (${internalMsgType}) in "${chat.name}" and was removed.\n👤 *Sender:* @${cleanAuthorId.split('@')[0]}`
-                            : `🚨 *حظر تلقائي (نوع ممنوع)*\nأرسل العضو ملف (${internalMsgType}) في "${chat.name}" وتم طرده.\n👤 *المرسل:* @${cleanAuthorId.split('@')[0]}`;
-                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanAuthorId] });
+                            ? `🚨 *Auto Ban (Blocked Type)*\nA member sent (${internalMsgType}) in "${chat.name}" and was removed.\n👤 *Sender:* @${mentionAuthorNum}`
+                            : `🚨 *حظر تلقائي (نوع ممنوع)*\nأرسل العضو ملف (${internalMsgType}) في "${chat.name}" وتم طرده.\n👤 *المرسل:* @${mentionAuthorNum}`;
+                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionAuthorId] });
                     } catch (e) { }
                 } else if (blockedAction === 'poll') {
+                    const mentionAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+                    const mentionAuthorNum = mentionAuthorId.split('@')[0];
+
                     const pollTitle = adminMessageLang === 'en'
-                        ? `🚨 Violation Alert in "${chat.name}"\nSender: @${cleanAuthorId.split('@')[0]}\nReason: Sent blocked type (${internalMsgType})\n\nDo you want to remove this number${isBlacklistEnabled ? ' and add it to blacklist' : ''}?`
-                        : `🚨 إشعار بمخالفة في "${chat.name}"\nالمرسل: @${cleanAuthorId.split('@')[0]}\nالسبب: إرسال نوع ممنوع (${internalMsgType})\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
+                        ? `🚨 Violation Alert in "${chat.name}"\nSender: @${mentionAuthorNum}\nReason: Sent blocked type (${internalMsgType})\n\nDo you want to remove this number${isBlacklistEnabled ? ' and add it to blacklist' : ''}?`
+                        : `🚨 إشعار بمخالفة في "${chat.name}"\nالمرسل: @${mentionAuthorNum}\nالسبب: إرسال نوع ممنوع (${internalMsgType})\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
                     const poll = new Poll(pollTitle, isBlacklistEnabled ? (adminMessageLang === 'en' ? ['Yes, remove and blacklist', 'No'] : ['نعم، طرد وحظر', 'لا']) : (adminMessageLang === 'en' ? ['Yes, remove', 'No'] : ['نعم، طرد', 'لا']));
-                    const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [cleanAuthorId] });
+                    const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [mentionAuthorId] });
                     pendingBans.set(pollMsg.id._serialized, {
                         senderId: cleanAuthorId,
                         rawSenderId: rawAuthorId,
@@ -4192,20 +4233,26 @@ client.on('message', async msg => {
                                     } catch (err) { }
                                 }
                             }
+                            const mentionAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+                            const mentionAuthorNum = mentionAuthorId.split('@')[0];
+
                             const reportText = adminMessageLang === 'en'
-                                ? `🚨 *Auto Ban (Spam)*\nThe member was removed from "${chat.name}"${isBlacklistEnabled ? ' and added to blacklist' : ''}.\n\n👤 *Sender:* @${senderId.split('@')[0]}\n📋 *Reason:* ${spamFlagReason}`
-                                : `🚨 *حظر تلقائي (إزعاج)*\nتم طرد العضو من "${chat.name}"${isBlacklistEnabled ? ' وإدراجه في القائمة السوداء' : ''}.\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${spamFlagReason}`;
-                            await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
+                                ? `🚨 *Auto Ban (Spam)*\nThe member was removed from "${chat.name}"${isBlacklistEnabled ? ' and added to blacklist' : ''}.\n\n👤 *Sender:* @${mentionAuthorNum}\n📋 *Reason:* ${spamFlagReason}`
+                                : `🚨 *حظر تلقائي (إزعاج)*\nتم طرد العضو من "${chat.name}"${isBlacklistEnabled ? ' وإدراجه في القائمة السوداء' : ''}.\n\n👤 *المرسل:* @${mentionAuthorNum}\n📋 *السبب:* ${spamFlagReason}`;
+                            await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionAuthorId] });
                         } catch (e) { }
                     } else {
+                        const mentionAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+                        const mentionAuthorNum = mentionAuthorId.split('@')[0];
+
                         const pollOptions = isBlacklistEnabled
                             ? (adminMessageLang === 'en' ? ['Yes, remove and blacklist', 'No, only delete'] : ['نعم، طرد وحظر', 'لا، اكتف بالحذف'])
                             : (adminMessageLang === 'en' ? ['Yes, remove member', 'No'] : ['نعم، طرد العضو', 'لا']);
                         const pollTitle = adminMessageLang === 'en'
-                            ? `🚨 Spam Alert in "${chat.name}"\nSender: @${senderId.split('@')[0]}\nReason: ${spamFlagReason}\n\nDo you want to remove this number${isBlacklistEnabled ? ' and add it to blacklist' : ''}?`
-                            : `🚨 إشعار إزعاج في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${spamFlagReason}\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
+                            ? `🚨 Spam Alert in "${chat.name}"\nSender: @${mentionAuthorNum}\nReason: ${spamFlagReason}\n\nDo you want to remove this number${isBlacklistEnabled ? ' and add it to blacklist' : ''}?`
+                            : `🚨 إشعار إزعاج في "${chat.name}"\nالمرسل: @${mentionAuthorNum}\nالسبب: ${spamFlagReason}\n\nهل ترغب في طرد الرقم${isBlacklistEnabled ? ' وإضافته للقائمة السوداء' : ''}؟`;
                         const poll = new Poll(pollTitle, pollOptions);
-                        const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
+                        const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [mentionAuthorId] });
                         pendingBans.set(pollMsg.id._serialized, {
                             senderId: senderId,
                             rawSenderId: rawAuthorId,
@@ -4320,21 +4367,27 @@ client.on('message', async msg => {
                             }
                         }
 
+                        const mentionAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+                        const mentionAuthorNum = mentionAuthorId.split('@')[0];
+
                         const reportText = adminMessageLang === 'en'
-                            ? `🚨 *Auto Moderation Report*\nViolating content was deleted and the member was removed from "${chat.name}".\n\n👤 *Sender:* @${senderId.split('@')[0]}\n📋 *Reason:* ${violationReason}\n📝 *Deleted Content:*\n"${messageContent}"`
-                            : `🚨 *تقرير إجراء وحظر تلقائي*\nتم مسح محتوى مخالف وطرد العضو من "${chat.name}".\n\n👤 *المرسل:* @${senderId.split('@')[0]}\n📋 *السبب:* ${violationReason}\n📝 *النص الممسوح:*\n"${messageContent}"`;
-                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [senderId] });
+                            ? `🚨 *Auto Moderation Report*\nViolating content was deleted and the member was removed from "${chat.name}".\n\n👤 *Sender:* @${mentionAuthorNum}\n📋 *Reason:* ${violationReason}\n📝 *Deleted Content:*\n"${messageContent}"`
+                            : `🚨 *تقرير إجراء وحظر تلقائي*\nتم مسح محتوى مخالف وطرد العضو من "${chat.name}".\n\n👤 *المرسل:* @${mentionAuthorNum}\n📋 *السبب:* ${violationReason}\n📝 *النص الممسوح:*\n"${messageContent}"`;
+                        await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionAuthorId] });
                     } catch (e) { }
                 } else {
+                    const mentionAuthorId = rawAuthorId.replace(/:[0-9]+/, '');
+                    const mentionAuthorNum = mentionAuthorId.split('@')[0];
+
                     const pollOptions = isBlacklistEnabled
                         ? (adminMessageLang === 'en' ? ['Yes, remove and blacklist', 'No, only delete'] : ['نعم، طرد وحظر', 'لا، اكتف بالحذف'])
                         : (adminMessageLang === 'en' ? ['Yes, remove', 'No'] : ['نعم، طرد', 'لا']);
                     const pollTitle = adminMessageLang === 'en'
-                        ? `🚨 Violation Alert in "${chat.name}"\nSender: @${senderId.split('@')[0]}\nReason: ${violationReason}\nContent:\n"${messageContent}"\n\nDo you want to remove this member?`
-                        : `🚨 إشعار بمحتوى مخالف في "${chat.name}"\nالمرسل: @${senderId.split('@')[0]}\nالسبب: ${violationReason}\nالنص:\n"${messageContent}"\n\nهل ترغب في طرده؟`;
+                        ? `🚨 Violation Alert in "${chat.name}"\nSender: @${mentionAuthorNum}\nReason: ${violationReason}\nContent:\n"${messageContent}"\n\nDo you want to remove this member?`
+                        : `🚨 إشعار بمحتوى مخالف في "${chat.name}"\nالمرسل: @${mentionAuthorNum}\nالسبب: ${violationReason}\nالنص:\n"${messageContent}"\n\nهل ترغب في طرده؟`;
                     const poll = new Poll(pollTitle, pollOptions);
 
-                    const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [senderId] });
+                    const pollMsg = await client.sendMessage(targetAdminGroup, poll, { mentions: [mentionAuthorId] });
                     pendingBans.set(pollMsg.id._serialized, {
                         senderId: senderId,
                         rawSenderId: rawAuthorId,
@@ -4733,13 +4786,17 @@ async function screenPendingMembershipRequests() {
                         try {
                             rejectedRequestsCache.set(cacheKey, Date.now() + 24 * 60 * 60 * 1000); // cache for 24h
                             await chat.rejectGroupMembershipRequests({ requesterIds: [originalRequesterJid] });
+                            
+                            const mentionId = originalRequesterJid.replace(/:[0-9]+/, '');
+                            const mentionNum = mentionId.split('@')[0];
+
                             const reportText = tAdmin(
                                 groupConfig,
                                 config,
-                                `🛡️ *حماية (قائمة سوداء)*\nتم رفض طلب انضمام لرقم محظور في مجموعة "${chat.name}" تلقائياً.\nالرقم: @${cleanRequesterId.split('@')[0]}`,
-                                `🛡️ *Protection (Blacklist)*\nA join request from a blacklisted number was automatically rejected in "${chat.name}".\nNumber: @${cleanRequesterId.split('@')[0]}`
+                                `🛡️ *حماية (قائمة سوداء)*\nتم رفض طلب انضمام لرقم محظور في مجموعة "${chat.name}" تلقائياً.\nالرقم: @${mentionNum}`,
+                                `🛡️ *Protection (Blacklist)*\nA join request from a blacklisted number was automatically rejected in "${chat.name}".\nNumber: @${mentionNum}`
                             );
-                            try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanRequesterId] }); } catch (e) { }
+                            try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionId] }); } catch (e) { }
                         } catch (e) { }
                         continue; // skip profile screening for this requester
                     }
@@ -4789,8 +4846,9 @@ async function screenPendingMembershipRequests() {
                             continue;
                         }
 
+                        const finalRequesterId = profileResult.resolvedCleanUserId || cleanRequesterId;
                         if (isBlacklistEnabled) {
-                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanRequesterId); } catch (e) { }
+                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(finalRequesterId); } catch (e) { }
                             if (originalRequesterJid && originalRequesterJid.includes('@lid')) {
                                 try {
                                     const lidClean = originalRequesterJid.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
@@ -4799,13 +4857,16 @@ async function screenPendingMembershipRequests() {
                             }
                         }
 
+                        const mentionId = originalRequesterJid.replace(/:[0-9]+/, '');
+                        const mentionNum = mentionId.split('@')[0];
+
                         const reportText = tAdmin(
                             groupConfig,
                             config,
-                            `🚫 *فحص طلب الانضمام*\nتم رفض طلب انضمام بعد فحص الاسم/النبذة.\nالمجموعة: "${chat.name}"\nالرقم: @${cleanRequesterId.split('@')[0]}\nالسبب: ${profileResult.reason}\nالبيانات:\n"${profileResult.profileText || 'غير متوفر'}"`,
-                            `🚫 *Join Request Screening*\nJoin request was rejected after profile screening.\nGroup: "${chat.name}"\nNumber: @${cleanRequesterId.split('@')[0]}\nReason: ${profileResult.reason}\nProfile:\n"${profileResult.profileText || 'Unavailable'}"`
+                            `🚫 *فحص طلب الانضمام*\nتم رفض طلب انضمام بعد فحص الاسم/النبذة.\nالمجموعة: "${chat.name}"\nالرقم: @${mentionNum}\nالسبب: ${profileResult.reason}\nالبيانات:\n"${profileResult.profileText || 'غير متوفر'}"`,
+                            `🚫 *Join Request Screening*\nJoin request was rejected after profile screening.\nGroup: "${chat.name}"\nNumber: @${mentionNum}\nReason: ${profileResult.reason}\nProfile:\n"${profileResult.profileText || 'Unavailable'}"`
                         );
-                        try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [cleanRequesterId] }); } catch (e) { }
+                        try { await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionId] }); } catch (e) { }
                         continue;
                     }
                 }
