@@ -1324,7 +1324,13 @@ async function runGlobalBlacklistPurge() {
                 const finalCleanId = cleanId.replace('@c.us', '').replace('@lid', '');
                 const isLID = cleanId.includes('@lid');
                 const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
-                return isExtBlocked || blacklistArr.includes(cleanId) || blacklistArr.includes(id);
+                const cleanIdLidDomain = cleanId.replace('@lid', '@c.us');
+                const cleanIdRawDomain = cleanId.replace('@c.us', '@lid');
+                return isExtBlocked ||
+                    blacklistArr.includes(cleanId) ||
+                    blacklistArr.includes(cleanIdLidDomain) ||
+                    blacklistArr.includes(cleanIdRawDomain) ||
+                    blacklistArr.includes(id);
             });
 
         if (usersToKick.length > 0) {
@@ -1359,7 +1365,15 @@ async function runGlobalBlacklistPurge() {
                     const finalCleanId = cleanId.replace(/:[0-9]+/, '').replace('@c.us', '');
                     const isLID = originalIsLID && !unmaskedSuccessfully;
                     const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
-                    if (isExtBlocked || blacklistArr.includes(finalCleanId) || blacklistArr.includes(cleanId) || blacklistArr.includes(rawId)) {
+                    const rawIdCleanLid = rawId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                    const rawIdRawLid = rawId.replace(/:[0-9]+/, '');
+                    if (isExtBlocked ||
+                        blacklistArr.includes(finalCleanId) ||
+                        blacklistArr.includes(cleanId) ||
+                        blacklistArr.includes(rawId) ||
+                        blacklistArr.includes(rawIdCleanLid) ||
+                        blacklistArr.includes(rawIdRawLid)
+                    ) {
                         usersToReject.push(rawId);
                     }
                 }
@@ -1432,8 +1446,18 @@ async function runGlobalBlacklistScan() {
 
             if (!isWhitelisted) {
                 const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
-                const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanId) : false;
-                const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanId);
+                const cleanIdLidDomain = cleanId.replace('@lid', '@c.us');
+                const cleanIdRawDomain = cleanId.replace('@c.us', '@lid');
+                let inCustomBl = groupConfig && groupConfig.customBlacklist ? (
+                    groupConfig.customBlacklist.includes(cleanId) ||
+                    groupConfig.customBlacklist.includes(cleanIdLidDomain) ||
+                    groupConfig.customBlacklist.includes(cleanIdRawDomain)
+                ) : false;
+                let globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ? OR number = ? OR number = ?').get(
+                    cleanId,
+                    cleanIdLidDomain,
+                    cleanIdRawDomain
+                );
                 const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
 
                 if ((useGlobalBl && (globalBl || isExtBlocked)) || inCustomBl) {
@@ -1487,8 +1511,24 @@ async function runGlobalBlacklistScan() {
 
                     if (!isWhitelisted) {
                         const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
-                        const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanId) : false;
-                        const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanId);
+                        const cleanIdLidDomain = cleanId.replace('@lid', '@c.us');
+                        const cleanIdRawDomain = cleanId.replace('@c.us', '@lid');
+                        const rawIdCleanLid = rawId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                        const rawIdRawLid = rawId.replace(/:[0-9]+/, '');
+                        let inCustomBl = groupConfig && groupConfig.customBlacklist ? (
+                            groupConfig.customBlacklist.includes(cleanId) ||
+                            groupConfig.customBlacklist.includes(cleanIdLidDomain) ||
+                            groupConfig.customBlacklist.includes(cleanIdRawDomain) ||
+                            groupConfig.customBlacklist.includes(rawIdCleanLid) ||
+                            groupConfig.customBlacklist.includes(rawIdRawLid)
+                        ) : false;
+                        let globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ? OR number = ? OR number = ? OR number = ? OR number = ?').get(
+                            cleanId,
+                            cleanIdLidDomain,
+                            cleanIdRawDomain,
+                            rawIdCleanLid,
+                            rawIdRawLid
+                        );
                         const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
 
                         if ((useGlobalBl && (globalBl || isExtBlocked)) || inCustomBl) {
@@ -3245,12 +3285,23 @@ client.on('group_join', async (notification) => {
             let isKicked = false;
 
             if (isBlacklistEnabledForGroup && !isWhitelisted) {
-                const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanJoinedId);
+                let globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanJoinedId);
                 const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
                 const isLID = originalIsLID && !unmaskedSuccessfully;
                 const isExtBlocked = !isLID && blockedExtensionsRows.some(r => cleanJoinedId.replace('@c.us', '').startsWith(r.ext));
                 const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
-                const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanJoinedId) : false;
+                let inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanJoinedId) : false;
+
+                if (originalIsLID) {
+                    const lidClean = participantId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                    const lidRaw = participantId.replace(/:[0-9]+/, '');
+                    if (!globalBl) {
+                        globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ? OR number = ?').get(lidClean, lidRaw);
+                    }
+                    if (!inCustom && groupConfig && groupConfig.customBlacklist) {
+                        inCustom = groupConfig.customBlacklist.includes(lidClean) || groupConfig.customBlacklist.includes(lidRaw);
+                    }
+                }
 
                 if ((useGlobal && (globalBl || isExtBlocked)) || inCustom) {
                     console.log(`[أمان] محاولة دخول رقم محظور (${cleanJoinedId}). جاري الطرد...`);
@@ -4094,12 +4145,24 @@ client.on('message', async msg => {
             }
 
             if (isBlacklistEnabled) {
-                const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanAuthorId);
+                let globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanAuthorId);
                 const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
                 const isLID = originalIsLID && !unmaskedSuccessfully;
                 const isExtBlocked = !isLID && blockedExtensionsRows.some(r => cleanAuthorId.replace('@c.us', '').startsWith(r.ext));
                 const useGlobal = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
-                const inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanAuthorId) : false;
+                let inCustom = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanAuthorId) : false;
+
+                if (originalIsLID) {
+                    const lidClean = rawAuthorId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                    const lidRaw = rawAuthorId.replace(/:[0-9]+/, '');
+                    if (!globalBl) {
+                        globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ? OR number = ?').get(lidClean, lidRaw);
+                    }
+                    if (!inCustom && groupConfig && groupConfig.customBlacklist) {
+                        inCustom = groupConfig.customBlacklist.includes(lidClean) || groupConfig.customBlacklist.includes(lidRaw);
+                    }
+                }
+
                 if ((useGlobal && (globalBl || isExtBlocked)) || inCustom) {
                     console.log(`[أمان] رقم محظور أرسل رسالة. سيتم حذفه.`);
                     await safeDelay(msg.from);
@@ -4778,8 +4841,19 @@ async function screenPendingMembershipRequests() {
                     const isLID = originalRequesterJid.includes('@lid') && !unmaskedSuccessfully;
                     const isExtBlocked = !isLID && blockedExtensionsArr.some(ext => finalCleanId.startsWith(ext));
                     const useGlobalBl = groupConfig ? (groupConfig.useGlobalBlacklist !== false) : true;
-                    const inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanRequesterId) : false;
-                    const globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanRequesterId);
+                    let inCustomBl = groupConfig && groupConfig.customBlacklist ? groupConfig.customBlacklist.includes(cleanRequesterId) : false;
+                    let globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ?').get(cleanRequesterId);
+
+                    if (originalIsLID) {
+                        const lidClean = originalRequesterJid.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+                        const lidRaw = originalRequesterJid.replace(/:[0-9]+/, '');
+                        if (!globalBl) {
+                            globalBl = db.prepare('SELECT 1 FROM blacklist WHERE number = ? OR number = ?').get(lidClean, lidRaw);
+                        }
+                        if (!inCustomBl && groupConfig && groupConfig.customBlacklist) {
+                            inCustomBl = groupConfig.customBlacklist.includes(lidClean) || groupConfig.customBlacklist.includes(lidRaw);
+                        }
+                    }
 
                     if ((useGlobalBl && (globalBl || isExtBlocked)) || inCustomBl) {
                         console.log(`[أمان] رفض طلب انضمام لرقم محظور (${cleanRequesterId}) في: ${chat.name}`);
