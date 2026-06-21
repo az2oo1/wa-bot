@@ -216,6 +216,21 @@ function getAdminMentionId(cleanId, rawId, unmasked) {
     return rawClean || (cleanId ? cleanId.replace(/:[0-9]+/, '') : '');
 }
 
+function handleListOperation(req, res, param, table, isInsert, logMsg) {
+    const val = req.body[param];
+    if (val) {
+        try {
+            const col = param === 'ext' ? 'ext' : 'number';
+            const query = isInsert 
+                ? `INSERT OR IGNORE INTO ${table} (${col}) VALUES (?)`
+                : `DELETE FROM ${table} WHERE ${col} = ?`;
+            db.prepare(query).run(String(val));
+            console.log(`[أمان] ${logMsg}: ${val}`);
+        } catch (e) { }
+    }
+    res.sendStatus(200);
+}
+
 
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
@@ -1196,83 +1211,35 @@ app.get('/api/groups', requireAuthApi, requirePermission('groups:view'), (req, r
 });
 
 app.post('/api/blacklist/add', requireAuthApi, requirePermission('security:manage'), (req, res) => {
-    if (req.body.number) {
-        try {
-            db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(req.body.number);
-            console.log(`[أمان] تم إضافة رقم للقائمة السوداء عبر اللوحة: ${req.body.number}`);
-        } catch (e) { }
-    }
-    res.sendStatus(200);
+    handleListOperation(req, res, 'number', 'blacklist', true, 'تم إضافة رقم للقائمة السوداء عبر اللوحة');
 });
 
 app.post('/api/whitelist/add', requireAuthApi, requirePermission('security:manage'), (req, res) => {
-    if (req.body.number) {
-        try {
-            db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)').run(req.body.number);
-            console.log(`[أمان] تم إضافة رقم موثوق للقائمة البيضاء عبر اللوحة: ${req.body.number}`);
-        } catch (e) { }
-    }
-    res.sendStatus(200);
+    handleListOperation(req, res, 'number', 'whitelist', true, 'تم إضافة رقم موثوق للقائمة البيضاء عبر اللوحة');
 });
 
 app.post('/api/blacklist/remove', requireAuthApi, requirePermission('security:manage'), (req, res) => {
-    if (req.body.number) {
-        try {
-            db.prepare('DELETE FROM blacklist WHERE number = ?').run(req.body.number);
-            console.log(`[أمان] تم إزالة رقم من القائمة السوداء عبر اللوحة: ${req.body.number}`);
-        } catch (e) { }
-    }
-    res.sendStatus(200);
+    handleListOperation(req, res, 'number', 'blacklist', false, 'تم إزالة رقم من القائمة السوداء عبر اللوحة');
 });
 
 app.post('/api/extensions/add', requireAuthApi, requirePermission('security:manage'), (req, res) => {
-    if (req.body.ext) {
-        try {
-            db.prepare('INSERT OR IGNORE INTO blocked_extensions (ext) VALUES (?)').run(String(req.body.ext));
-            console.log(`[أمان] تم إضافة رمز دولة للقائمة السوداء: ${req.body.ext}`);
-        } catch (e) { }
-    }
-    res.sendStatus(200);
+    handleListOperation(req, res, 'ext', 'blocked_extensions', true, 'تم إضافة رمز دولة للقائمة السوداء');
 });
 
 app.post('/api/extensions/remove', requireAuthApi, requirePermission('security:manage'), (req, res) => {
-    if (req.body.ext) {
-        try {
-            db.prepare('DELETE FROM blocked_extensions WHERE ext = ?').run(String(req.body.ext));
-            console.log(`[أمان] تم إزالة رمز دولة من القائمة السوداء: ${req.body.ext}`);
-        } catch (e) { }
-    }
-    res.sendStatus(200);
+    handleListOperation(req, res, 'ext', 'blocked_extensions', false, 'تم إزالة رمز دولة من القائمة السوداء');
 });
 
 app.post('/api/whitelist/remove', requireAuthApi, requirePermission('security:manage'), (req, res) => {
-    if (req.body.number) {
-        try {
-            db.prepare('DELETE FROM whitelist WHERE number = ?').run(req.body.number);
-            console.log(`[أمان] تم إزالة رقم من القائمة البيضاء عبر اللوحة: ${req.body.number}`);
-        } catch (e) { }
-    }
-    res.sendStatus(200);
+    handleListOperation(req, res, 'number', 'whitelist', false, 'تم إزالة رقم من القائمة البيضاء عبر اللوحة');
 });
 
 app.post('/api/approved/add', requireAuthApi, requirePermission('security:manage'), (req, res) => {
-    if (req.body.number) {
-        try {
-            db.prepare('INSERT OR IGNORE INTO approved_numbers (number) VALUES (?)').run(req.body.number);
-            console.log(`[أمان] تم إضافة رقم لقائمة المتحقق منهم: ${req.body.number}`);
-        } catch (e) { }
-    }
-    res.sendStatus(200);
+    handleListOperation(req, res, 'number', 'approved_numbers', true, 'تم إضافة رقم لقائمة المتحقق منهم');
 });
 
 app.post('/api/approved/remove', requireAuthApi, requirePermission('security:manage'), (req, res) => {
-    if (req.body.number) {
-        try {
-            db.prepare('DELETE FROM approved_numbers WHERE number = ?').run(req.body.number);
-            console.log(`[أمان] تم إزالة رقم من قائمة المتحقق منهم: ${req.body.number}`);
-        } catch (e) { }
-    }
-    res.sendStatus(200);
+    handleListOperation(req, res, 'number', 'approved_numbers', false, 'تم إزالة رقم من قائمة المتحقق منهم');
 });
 
 app.post('/api/approved/extract-groups', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
@@ -2103,33 +2070,8 @@ app.post('/api/secondary-verification/pending/remove', requireAuthApi, requirePe
                 try { await chatObj.rejectGroupMembershipRequests({ requesterIds: [row.requester_id] }); } catch (e) { }
             }
             if (addBlacklist) {
-                let cleanNumber = String(row.requester_id || '').replace(/:[0-9]+(?=@)/g, '');
-                if (cleanNumber.includes('@s.whatsapp.net')) cleanNumber = cleanNumber.replace('@s.whatsapp.net', '@c.us');
-                if (/^\d+$/.test(cleanNumber)) cleanNumber = `${cleanNumber}@c.us`;
-                
-                let isLid = cleanNumber.includes('@lid');
-                let unmasked = false;
-                let finalBlacklistId = cleanNumber;
-                
-                if (isLid) {
-                    try {
-                        const contact = await client.getContactById(row.requester_id);
-                        if (contact && contact.number) {
-                            const originalUser = row.requester_id.split('@')[0].split(':')[0];
-                            if (contact.number !== originalUser) {
-                                finalBlacklistId = `${contact.number}@c.us`;
-                                unmasked = true;
-                            }
-                        }
-                    } catch (err) { }
-                    if (!unmasked) {
-                        finalBlacklistId = cleanNumber.replace('@lid', '@c.us');
-                    }
-                }
-                
-                if (finalBlacklistId) {
-                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(finalBlacklistId);
-                }
+                const resolved = await resolveLidJid(client, row.requester_id);
+                saveToBlacklist(resolved.cleanId, row.requester_id, resolved.unmasked);
             }
             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
             removed += 1;
