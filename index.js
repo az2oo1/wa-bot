@@ -197,12 +197,25 @@ async function resolveLidJid(client, rawId) {
     return { cleanId: `${originalUser}@c.us`, unmasked: false };
 }
 
-function isRealPhoneJid(jid) {
-    if (!jid || typeof jid !== 'string') return false;
-    const parts = jid.split('@');
-    if (parts.length !== 2) return false;
-    return parts[1] === 'c.us' && /^\d+$/.test(parts[0]);
+function saveToBlacklist(cleanId, rawId, unmasked) {
+    if (!cleanId) return;
+    try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanId); } catch (e) { }
+    if (!unmasked && rawId && rawId.includes('@lid')) {
+        try {
+            const lidClean = rawId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
+            db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
+        } catch (err) { }
+    }
 }
+
+function getAdminMentionId(cleanId, rawId, unmasked) {
+    const rawClean = rawId ? rawId.replace(/:[0-9]+/, '') : '';
+    if (unmasked && cleanId) {
+        return cleanId.replace(/:[0-9]+/, '');
+    }
+    return rawClean || (cleanId ? cleanId.replace(/:[0-9]+/, '') : '');
+}
+
 
 console.log = (...args) => { origLog(...args); saveLog('معلومة', args); };
 console.error = (...args) => { origErr(...args); saveLog('خطأ', args); };
@@ -2091,22 +2104,31 @@ app.post('/api/secondary-verification/pending/remove', requireAuthApi, requirePe
             }
             if (addBlacklist) {
                 let cleanNumber = String(row.requester_id || '').replace(/:[0-9]+(?=@)/g, '');
-                if (cleanNumber.includes('@lid')) cleanNumber = cleanNumber.replace('@lid', '@c.us');
                 if (cleanNumber.includes('@s.whatsapp.net')) cleanNumber = cleanNumber.replace('@s.whatsapp.net', '@c.us');
                 if (/^\d+$/.test(cleanNumber)) cleanNumber = `${cleanNumber}@c.us`;
                 
-                if (cleanNumber) db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanNumber);
-                if (row.requester_id && row.requester_id.includes('@lid')) {
+                let isLid = cleanNumber.includes('@lid');
+                let unmasked = false;
+                let finalBlacklistId = cleanNumber;
+                
+                if (isLid) {
                     try {
                         const contact = await client.getContactById(row.requester_id);
                         if (contact && contact.number) {
                             const originalUser = row.requester_id.split('@')[0].split(':')[0];
                             if (contact.number !== originalUser) {
-                                const realCleanId = `${contact.number}@c.us`;
-                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(realCleanId);
+                                finalBlacklistId = `${contact.number}@c.us`;
+                                unmasked = true;
                             }
                         }
                     } catch (err) { }
+                    if (!unmasked) {
+                        finalBlacklistId = cleanNumber.replace('@lid', '@c.us');
+                    }
+                }
+                
+                if (finalBlacklistId) {
+                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(finalBlacklistId);
                 }
             }
             db.prepare('DELETE FROM secondary_verification WHERE requester_id = ? AND group_id = ?').run(row.requester_id, row.group_id);
@@ -3325,7 +3347,7 @@ client.on('group_join', async (notification) => {
                             // Re-resolve
                             const resolvedAgain = await resolveLidJid(client, participantId);
                             const finalReportId = resolvedAgain.cleanId;
-                            const adminMentionId = isRealPhoneJid(finalReportId)
+                            const adminMentionId = resolvedAgain.unmasked
                                 ? finalReportId.replace(/:[0-9]+/, '')
                                 : participantId.replace(/:[0-9]+/, '');
                             const adminMentionNum = adminMentionId.split('@')[0];
@@ -3379,19 +3401,12 @@ client.on('group_join', async (notification) => {
                         await chat.removeParticipants([participantId]);
                         
                         const finalCleanJoinedId = profileResult.resolvedCleanUserId || currentCleanJoinedId;
+                        const finalUnmasked = resolvedAgain.unmasked || !!(profileResult.resolvedCleanUserId && profileResult.resolvedCleanUserId !== currentCleanJoinedId);
                         if (isBlacklistEnabledForGroup) {
-                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(finalCleanJoinedId); } catch (e) { }
-                            if (participantId && participantId.includes('@lid')) {
-                                try {
-                                    const lidClean = participantId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                } catch (err) { }
-                            }
+                            saveToBlacklist(finalCleanJoinedId, participantId, finalUnmasked);
                         }
 
-                        const adminMentionId = isRealPhoneJid(finalCleanJoinedId)
-                            ? finalCleanJoinedId.replace(/:[0-9]+/, '')
-                            : participantId.replace(/:[0-9]+/, '');
+                        const adminMentionId = getAdminMentionId(finalCleanJoinedId, participantId, finalUnmasked);
                         const adminMentionNum = adminMentionId.split('@')[0];
 
                         const reportText = tAdmin(
@@ -3822,7 +3837,7 @@ client.on('message', async msg => {
                     // For /ban and /kick: all mentions (multi-ban support)
                     // For /report: first mention or quoted author (single)
                     // Also support: reply to a message → add quoted author as target
-                    let targetList = []; // [{ rawId, cleanId }]
+                    let targetList = []; // [{ rawId, cleanId, unmasked }]
 
                     if (msg.mentionedIds && msg.mentionedIds.length > 0) {
                         const mentions = await msg.getMentions().catch(() => []);
@@ -3830,20 +3845,27 @@ client.on('message', async msg => {
                         for (const mid of idsToProcess) {
                             let cleanId = mid.replace(/:[0-9]+/, '');
                             let rawId = mid;
+                            let unmasked = false;
                             if (cleanId.includes('@lid')) {
                                 const contact = mentions.find(c => c.id && c.id._serialized === mid);
-                                if (contact && contact.number) {
+                                if (contact && contact.number && contact.number !== cleanId.split('@')[0]) {
                                     cleanId = `${contact.number}@c.us`;
+                                    unmasked = true;
                                 } else {
                                     try {
                                         const fallbackContact = await client.getContactById(mid);
-                                        if (fallbackContact && fallbackContact.number) cleanId = `${fallbackContact.number}@c.us`;
-                                        else cleanId = cleanId.replace('@lid', '@c.us');
+                                        if (fallbackContact && fallbackContact.number && fallbackContact.number !== cleanId.split('@')[0]) {
+                                            cleanId = `${fallbackContact.number}@c.us`;
+                                            unmasked = true;
+                                        } else {
+                                            cleanId = cleanId.replace('@lid', '@c.us');
+                                        }
                                     } catch (e) { cleanId = cleanId.replace('@lid', '@c.us'); }
                                 }
-                                // Keep rawId as mid (original @lid) so removeParticipants uses the correct group JID
+                            } else {
+                                unmasked = true;
                             }
-                            targetList.push({ rawId, cleanId });
+                            targetList.push({ rawId, cleanId, unmasked });
                         }
                     }
 
@@ -3853,15 +3875,21 @@ client.on('message', async msg => {
                             const quoted = await msg.getQuotedMessage();
                             let qRawId = quoted.author || quoted.from;
                             let qCleanId = qRawId ? qRawId.replace(/:[0-9]+/, '') : null;
+                            let unmasked = false;
                             if (qCleanId && qCleanId.includes('@lid')) {
                                 try {
-                                    const contact = await quoted.getContact();
-                                    if (contact && contact.number) qCleanId = `${contact.number}@c.us`;
-                                    else qCleanId = qCleanId.replace('@lid', '@c.us');
+                                    const contact = await quoted.getContact().catch(() => null);
+                                    if (contact && contact.number && contact.number !== qCleanId.split('@')[0]) {
+                                        qCleanId = `${contact.number}@c.us`;
+                                        unmasked = true;
+                                    } else {
+                                        qCleanId = qCleanId.replace('@lid', '@c.us');
+                                    }
                                 } catch (e) { qCleanId = qCleanId.replace('@lid', '@c.us'); }
-                                // Keep qRawId as the original JID (which could be @lid)
+                            } else if (qCleanId) {
+                                unmasked = true;
                             }
-                            if (qRawId) targetList.push({ rawId: qRawId, cleanId: qCleanId });
+                            if (qRawId) targetList.push({ rawId: qRawId, cleanId: qCleanId, unmasked });
                         } catch (e) { }
                     }
 
@@ -3901,7 +3929,10 @@ client.on('message', async msg => {
                                 } catch (e) { }
                             }
 
-                            const senderNum = cleanAuthorId.split('@')[0];
+                            const senderMentionId = unmaskedSuccessfully
+                                ? cleanAuthorId.replace(/:[0-9]+/, '')
+                                : rawAuthorId.replace(/:[0-9]+/, '');
+                            const senderNum = senderMentionId.split('@')[0];
                             const succeeded = [];
                             const failed = [];
 
@@ -3909,36 +3940,31 @@ client.on('message', async msg => {
                                 try {
                                     await chat.removeParticipants([target.rawId]);
                                     if (cmd === 'ban' && cmdBlacklistEnabled) {
-                                        try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(target.cleanId); } catch (e) { }
-                                        if (target.rawId && target.rawId.includes('@lid')) {
-                                            try {
-                                                const lidClean = target.rawId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                            } catch (err) { }
-                                        }
+                                        saveToBlacklist(target.cleanId, target.rawId, target.unmasked);
                                     }
-                                    succeeded.push(target.cleanId.split('@')[0]);
+                                    succeeded.push(target.unmasked
+                                        ? target.cleanId.split('@')[0]
+                                        : target.rawId.split('@')[0]);
                                     console.log(`[أمر] ${cmd} على ${target.cleanId} في ${chat.name} بواسطة ${cleanAuthorId}`);
                                     if (targetList.length > 1) await new Promise(r => setTimeout(r, 600)); // small gap between kicks
                                 } catch (err) {
-                                    failed.push(target.cleanId.split('@')[0]);
+                                    failed.push(target.unmasked
+                                        ? target.cleanId.split('@')[0]
+                                        : target.rawId.split('@')[0]);
                                     // Even if they failed kick (e.g. left group), we still insert into blacklist for /ban
                                     if (cmd === 'ban' && cmdBlacklistEnabled) {
-                                        try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(target.cleanId); } catch (e) { }
-                                        if (target.rawId && target.rawId.includes('@lid')) {
-                                            try {
-                                                const lidClean = target.rawId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                                db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                            } catch (err) { }
-                                        }
+                                        saveToBlacklist(target.cleanId, target.rawId, target.unmasked);
                                     }
                                 }
                             }
 
                             // Summary report to admin group
-                            const succeededMentions = targetList
-                                .map(t => t.cleanId); // Mention everyone involved
-                            const allMentions = [cleanAuthorId, ...succeededMentions];
+                            const succeededMentions = targetList.map(t => {
+                                return t.unmasked
+                                    ? t.cleanId.replace(/:[0-9]+/, '')
+                                    : t.rawId.replace(/:[0-9]+/, '');
+                            });
+                            const allMentions = [senderMentionId, ...succeededMentions];
 
                             const successLine = succeeded.length > 0
                                 ? (cmdAdminLang === 'en'
@@ -3985,15 +4011,17 @@ client.on('message', async msg => {
                                 serializedReportedMsgId = quoted.id._serialized;
                             } catch (e) { }
                         }
-                        const mentionSenderId = isRealPhoneJid(cleanAuthorId)
-                            ? cleanAuthorId.replace(/:[0-9]+/, '')
-                            : rawAuthorId.replace(/:[0-9]+/, '');
+                        let targetUnmasked = false;
+                        let resolvedTargetId = targetRawId;
+                        if (targetRawId) {
+                            const resolvedTarget = await resolveLidJid(client, targetRawId);
+                            resolvedTargetId = resolvedTarget.cleanId;
+                            targetUnmasked = resolvedTarget.unmasked;
+                        }
+
+                        const mentionSenderId = getAdminMentionId(cleanAuthorId, rawAuthorId, unmaskedSuccessfully);
                         const mentionSenderNum = mentionSenderId.split('@')[0];
-                        const mentionTargetId = targetRawId
-                            ? (isRealPhoneJid(targetCleanId)
-                                ? targetCleanId.replace(/:[0-9]+/, '')
-                                : targetRawId.replace(/:[0-9]+/, ''))
-                            : null;
+                        const mentionTargetId = targetRawId ? getAdminMentionId(resolvedTargetId, targetRawId, targetUnmasked) : null;
                         const mentionTargetNum = mentionTargetId ? mentionTargetId.split('@')[0] : '';
 
                         const pollTitle = cmdAdminLang === 'en'
@@ -4201,17 +4229,9 @@ client.on('message', async msg => {
                     try {
                         await chat.removeParticipants([rawAuthorId]);
                         if (isBlacklistEnabled) {
-                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(cleanAuthorId); } catch (e) { }
-                            if (rawAuthorId && rawAuthorId.includes('@lid')) {
-                                try {
-                                    const lidClean = rawAuthorId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                } catch (err) { }
-                            }
+                            saveToBlacklist(cleanAuthorId, rawAuthorId, unmaskedSuccessfully);
                         }
-                        const mentionAuthorId = isRealPhoneJid(cleanAuthorId)
-                            ? cleanAuthorId.replace(/:[0-9]+/, '')
-                            : rawAuthorId.replace(/:[0-9]+/, '');
+                        const mentionAuthorId = getAdminMentionId(cleanAuthorId, rawAuthorId, unmaskedSuccessfully);
                         const mentionAuthorNum = mentionAuthorId.split('@')[0];
 
                         const reportText = adminMessageLang === 'en'
@@ -4220,9 +4240,7 @@ client.on('message', async msg => {
                         await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionAuthorId] });
                     } catch (e) { }
                 } else if (blockedAction === 'poll') {
-                    const mentionAuthorId = isRealPhoneJid(cleanAuthorId)
-                        ? cleanAuthorId.replace(/:[0-9]+/, '')
-                        : rawAuthorId.replace(/:[0-9]+/, '');
+                    const mentionAuthorId = getAdminMentionId(cleanAuthorId, rawAuthorId, unmaskedSuccessfully);
                     const mentionAuthorNum = mentionAuthorId.split('@')[0];
 
                     const pollTitle = adminMessageLang === 'en'
@@ -4235,7 +4253,8 @@ client.on('message', async msg => {
                         rawSenderId: rawAuthorId,
                         sourceGroupId: groupId,
                         pollMsg: pollMsg,
-                        isBlacklistEnabled: isBlacklistEnabled
+                        isBlacklistEnabled: isBlacklistEnabled,
+                        unmasked: unmaskedSuccessfully
                     });
                 }
                 return;
@@ -4305,25 +4324,15 @@ client.on('message', async msg => {
                     } catch (err) { }
                     userTrackers.delete(trackerKey);
 
-                    const contact = await msg.getContact();
                     let senderId = cleanAuthorId;
-                    if (contact && contact.number) senderId = `${contact.number}@c.us`;
 
                     if (spamAction === 'auto') {
                         try {
                             await chat.removeParticipants([rawAuthorId]);
                             if (isBlacklistEnabled) {
-                                try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId); } catch (e) { }
-                                if (rawAuthorId && rawAuthorId.includes('@lid')) {
-                                    try {
-                                        const lidClean = rawAuthorId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                        db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                    } catch (err) { }
-                                }
+                                saveToBlacklist(senderId, rawAuthorId, unmaskedSuccessfully);
                             }
-                            const mentionAuthorId = isRealPhoneJid(senderId)
-                                ? senderId.replace(/:[0-9]+/, '')
-                                : rawAuthorId.replace(/:[0-9]+/, '');
+                            const mentionAuthorId = getAdminMentionId(senderId, rawAuthorId, unmaskedSuccessfully);
                             const mentionAuthorNum = mentionAuthorId.split('@')[0];
 
                             const reportText = adminMessageLang === 'en'
@@ -4332,9 +4341,7 @@ client.on('message', async msg => {
                             await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionAuthorId] });
                         } catch (e) { }
                     } else {
-                        const mentionAuthorId = isRealPhoneJid(senderId)
-                            ? senderId.replace(/:[0-9]+/, '')
-                            : rawAuthorId.replace(/:[0-9]+/, '');
+                        const mentionAuthorId = getAdminMentionId(senderId, rawAuthorId, unmaskedSuccessfully);
                         const mentionAuthorNum = mentionAuthorId.split('@')[0];
 
                         const pollOptions = isBlacklistEnabled
@@ -4350,7 +4357,8 @@ client.on('message', async msg => {
                             rawSenderId: rawAuthorId,
                             sourceGroupId: groupId,
                             pollMsg: pollMsg,
-                            isBlacklistEnabled: isBlacklistEnabled
+                            isBlacklistEnabled: isBlacklistEnabled,
+                            unmasked: unmaskedSuccessfully
                         });
                     }
                     return;
@@ -4437,9 +4445,7 @@ client.on('message', async msg => {
             }
 
             if (isViolating) {
-                const contact = await msg.getContact();
                 let senderId = cleanAuthorId;
-                if (contact && contact.number) senderId = `${contact.number}@c.us`;
 
                 const cleanBodyFallback = stripRawVCardBlocks(msg.body || '');
                 const messageContent = normalizedMessageText || cleanBodyFallback || '[مرفق وسائط]';
@@ -4450,18 +4456,9 @@ client.on('message', async msg => {
                     try {
                         await chat.removeParticipants([rawAuthorId]);
                         if (isBlacklistEnabled) {
-                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(senderId); } catch (e) { }
-                            if (rawAuthorId && rawAuthorId.includes('@lid')) {
-                                try {
-                                    const lidClean = rawAuthorId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                } catch (err) { }
-                            }
+                            saveToBlacklist(senderId, rawAuthorId, unmaskedSuccessfully);
                         }
-
-                        const mentionAuthorId = isRealPhoneJid(senderId)
-                            ? senderId.replace(/:[0-9]+/, '')
-                            : rawAuthorId.replace(/:[0-9]+/, '');
+                        const mentionAuthorId = getAdminMentionId(senderId, rawAuthorId, unmaskedSuccessfully);
                         const mentionAuthorNum = mentionAuthorId.split('@')[0];
 
                         const reportText = adminMessageLang === 'en'
@@ -4470,9 +4467,7 @@ client.on('message', async msg => {
                         await client.sendMessage(targetAdminGroup, reportText, { mentions: [mentionAuthorId] });
                     } catch (e) { }
                 } else {
-                    const mentionAuthorId = isRealPhoneJid(senderId)
-                        ? senderId.replace(/:[0-9]+/, '')
-                        : rawAuthorId.replace(/:[0-9]+/, '');
+                    const mentionAuthorId = getAdminMentionId(senderId, rawAuthorId, unmaskedSuccessfully);
                     const mentionAuthorNum = mentionAuthorId.split('@')[0];
 
                     const pollOptions = isBlacklistEnabled
@@ -4489,7 +4484,8 @@ client.on('message', async msg => {
                         rawSenderId: rawAuthorId,
                         sourceGroupId: groupId,
                         pollMsg: pollMsg,
-                        isBlacklistEnabled: isBlacklistEnabled
+                        isBlacklistEnabled: isBlacklistEnabled,
+                        unmasked: unmaskedSuccessfully
                     });
                 }
             }
@@ -4588,13 +4584,7 @@ client.on('vote_update', async vote => {
 
     if (yesSelected) {
         if (data.isBlacklistEnabled) {
-            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(userToBan); } catch (e) { }
-            if (data.rawSenderId && data.rawSenderId.includes('@lid')) {
-                try {
-                    const lidClean = data.rawSenderId.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                } catch (err) { }
-            }
+            saveToBlacklist(userToBan, data.rawSenderId, data.unmasked);
         }
 
         let removed = false;
@@ -4894,9 +4884,7 @@ async function screenPendingMembershipRequests() {
                             rejectedRequestsCache.set(cacheKey, Date.now() + 24 * 60 * 60 * 1000); // cache for 24h
                             await chat.rejectGroupMembershipRequests({ requesterIds: [originalRequesterJid] });
                             
-                            const adminMentionId = isRealPhoneJid(cleanRequesterId)
-                                ? cleanRequesterId.replace(/:[0-9]+/, '')
-                                : originalRequesterJid.replace(/:[0-9]+/, '');
+                            const adminMentionId = getAdminMentionId(cleanRequesterId, originalRequesterJid, unmaskedSuccessfully);
                             const adminMentionNum = adminMentionId.split('@')[0];
 
                             const reportText = tAdmin(
@@ -4956,19 +4944,12 @@ async function screenPendingMembershipRequests() {
                         }
 
                         const finalRequesterId = profileResult.resolvedCleanUserId || cleanRequesterId;
+                        const finalUnmasked = unmaskedSuccessfully || !!(profileResult.resolvedCleanUserId && profileResult.resolvedCleanUserId !== cleanRequesterId);
                         if (isBlacklistEnabled) {
-                            try { db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(finalRequesterId); } catch (e) { }
-                            if (originalRequesterJid && originalRequesterJid.includes('@lid')) {
-                                try {
-                                    const lidClean = originalRequesterJid.replace(/:[0-9]+/, '').replace('@lid', '@c.us');
-                                    db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)').run(lidClean);
-                                } catch (err) { }
-                            }
+                            saveToBlacklist(finalRequesterId, originalRequesterJid, finalUnmasked);
                         }
 
-                        const adminMentionId = isRealPhoneJid(finalRequesterId)
-                            ? finalRequesterId.replace(/:[0-9]+/, '')
-                            : originalRequesterJid.replace(/:[0-9]+/, '');
+                        const adminMentionId = getAdminMentionId(finalRequesterId, originalRequesterJid, finalUnmasked);
                         const adminMentionNum = adminMentionId.split('@')[0];
 
                         const reportText = tAdmin(
