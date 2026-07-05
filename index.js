@@ -3782,32 +3782,11 @@ client.on('message', async msg => {
                     let targetList = []; // [{ rawId, cleanId, unmasked }]
 
                     if (msg.mentionedIds && msg.mentionedIds.length > 0) {
-                        const mentions = await msg.getMentions().catch(() => []);
                         const idsToProcess = (cmd === 'ban' || cmd === 'kick') ? msg.mentionedIds : [msg.mentionedIds[0]];
                         for (const mid of idsToProcess) {
-                            let cleanId = mid.replace(/:[0-9]+/, '');
-                            let rawId = mid;
-                            let unmasked = false;
-                            if (cleanId.includes('@lid')) {
-                                const contact = mentions.find(c => c.id && c.id._serialized === mid);
-                                if (contact && contact.number && contact.number !== cleanId.split('@')[0]) {
-                                    cleanId = `${contact.number}@c.us`;
-                                    unmasked = true;
-                                } else {
-                                    try {
-                                        const fallbackContact = await client.getContactById(mid);
-                                        if (fallbackContact && fallbackContact.number && fallbackContact.number !== cleanId.split('@')[0]) {
-                                            cleanId = `${fallbackContact.number}@c.us`;
-                                            unmasked = true;
-                                        } else {
-                                            cleanId = cleanId.replace('@lid', '@c.us');
-                                        }
-                                    } catch (e) { cleanId = cleanId.replace('@lid', '@c.us'); }
-                                }
-                            } else {
-                                unmasked = true;
-                            }
-                            targetList.push({ rawId, cleanId, unmasked });
+                            const resolved = await resolveLidJid(client, mid);
+                            const unmasked = !mid.includes('@lid') || resolved.unmasked;
+                            targetList.push({ rawId: mid, cleanId: resolved.cleanId, unmasked });
                         }
                     }
 
@@ -3816,22 +3795,11 @@ client.on('message', async msg => {
                         try {
                             const quoted = await msg.getQuotedMessage();
                             let qRawId = quoted.author || quoted.from;
-                            let qCleanId = qRawId ? qRawId.replace(/:[0-9]+/, '') : null;
-                            let unmasked = false;
-                            if (qCleanId && qCleanId.includes('@lid')) {
-                                try {
-                                    const contact = await quoted.getContact().catch(() => null);
-                                    if (contact && contact.number && contact.number !== qCleanId.split('@')[0]) {
-                                        qCleanId = `${contact.number}@c.us`;
-                                        unmasked = true;
-                                    } else {
-                                        qCleanId = qCleanId.replace('@lid', '@c.us');
-                                    }
-                                } catch (e) { qCleanId = qCleanId.replace('@lid', '@c.us'); }
-                            } else if (qCleanId) {
-                                unmasked = true;
+                            if (qRawId) {
+                                const resolved = await resolveLidJid(client, qRawId);
+                                const unmasked = !qRawId.includes('@lid') || resolved.unmasked;
+                                targetList.push({ rawId: qRawId, cleanId: resolved.cleanId, unmasked });
                             }
-                            if (qRawId) targetList.push({ rawId: qRawId, cleanId: qCleanId, unmasked });
                         } catch (e) { }
                     }
 
@@ -3879,8 +3847,24 @@ client.on('message', async msg => {
                             const failed = [];
 
                             for (const target of targetList) {
-                                try {
-                                    await chat.removeParticipants([target.rawId]);
+                                let kicked = false;
+                                const kickCandidates = [];
+                                if (target.unmasked && target.cleanId) {
+                                    kickCandidates.push(target.cleanId);
+                                }
+                                kickCandidates.push(target.rawId);
+
+                                for (const kid of kickCandidates) {
+                                    try {
+                                        await chat.removeParticipants([kid]);
+                                        kicked = true;
+                                        break;
+                                    } catch (err) {
+                                        // try next
+                                    }
+                                }
+
+                                if (kicked) {
                                     if (cmd === 'ban' && cmdBlacklistEnabled) {
                                         saveToBlacklist(target.cleanId, target.rawId, target.unmasked);
                                     }
@@ -3889,7 +3873,7 @@ client.on('message', async msg => {
                                         : target.rawId.split('@')[0]);
                                     console.log(`[أمر] ${cmd} على ${target.cleanId} في ${chat.name} بواسطة ${cleanAuthorId}`);
                                     if (targetList.length > 1) await new Promise(r => setTimeout(r, 600)); // small gap between kicks
-                                } catch (err) {
+                                } else {
                                     failed.push(target.unmasked
                                         ? target.cleanId.split('@')[0]
                                         : target.rawId.split('@')[0]);
