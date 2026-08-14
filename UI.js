@@ -58,7 +58,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
         return { id: key, name };
     });
 
-    return `<!DOCTYPE html><html dir="${dir}" lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${t('لوحة تحكم المشرف الآلي', 'Auto Mod Dashboard')}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><link rel="stylesheet" href="/css/style.css">
+    return `<!DOCTYPE html><html dir="${dir}" lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>${t('لوحة تحكم المشرف الآلي', 'Auto Mod Dashboard')}</title><link rel="preconnect" href="https://fonts.googleapis.com"><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet"><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"><link rel="stylesheet" href="/public/css/style.css">
     </head>
     <body>
         
@@ -1748,7 +1748,7 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
             customMessageText: ${JSON.stringify(config.customMessageText || '')}
         };
         </script>
-        <script src="/js/dashboard.js"></script>
+        <script src="/public/js/dashboard.js"></script>
         <div class="modal" id="confirmModal">
             <div class="modal-content" style="max-width:460px;">
                 <div class="modal-header" style="margin-bottom:14px;">

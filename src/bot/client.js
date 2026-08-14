@@ -21,7 +21,16 @@ function resolveBrowserExecutablePath() {
     }
 
     if (process.platform === 'linux') {
-        const linuxCandidates = ['/usr/bin/chromium', '/usr/bin/chromium-browser', '/usr/bin/google-chrome'];
+        const linuxCandidates = [
+            '/usr/bin/chromium',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/google-chrome',
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/chrome',
+            '/opt/google/chrome/chrome',
+            '/bin/chromium',
+            '/bin/google-chrome'
+        ];
         const found = linuxCandidates.find(p => fs.existsSync(p));
         return found || null;
     }
@@ -81,14 +90,22 @@ let isInitializing = false;
 let initializationTimeout = null;
 let initializationStartTime = null;
 let lastConnectionTimestamp = null;
+const logsHistory = [];
 const clientConnectionHistory = [];
+function addLog(msg) {
+    const timestamp = new Date().toLocaleTimeString('ar-SA', { hour12: false });
+    const entry = `[${timestamp}] ${msg}`;
+    logsHistory.push(entry);
+    if (logsHistory.length > 200) logsHistory.shift();
+    console.log(entry);
+}
 
 function addConnectionLog(status, details = '') {
     const timestamp = new Date().toLocaleTimeString('ar-SA', { hour12: false });
     const logEntry = `[${timestamp}] Status: ${status}${details ? ` | Details: ${details}` : ''}`;
     clientConnectionHistory.push(logEntry);
     if (clientConnectionHistory.length > 100) clientConnectionHistory.shift();
-    console.log(`[اتصال] ${logEntry}`);
+    addLog(`[اتصال] ${logEntry}`);
 }
 
 function getDashboardStatusSnapshot(lang) {
@@ -320,6 +337,8 @@ function setBotStatus(status, kind) {
 module.exports = {
     client,
     addConnectionLog,
+    logsHistory,
+    addLog,
     getDashboardStatusSnapshot,
     initializeClientWithRetry,
     setBotStatus,

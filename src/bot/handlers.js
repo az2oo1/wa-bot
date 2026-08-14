@@ -1,12 +1,45 @@
 const { Poll, MessageMedia } = require('whatsapp-web.js');
 const fs = require('fs');
 const path = require('path');
-const { db, loadConfigFromDB, saveConfigToDB } = require('../db/index.js');
+const { db, loadConfigFromDB, saveConfigToDB, syncTx } = require('../db/index.js');
 const { client, addConnectionLog, initializeClientWithRetry, setBotStatus } = require('./client.js');
 
 let config = loadConfigFromDB();
 
 let isScreeningRunning = false;
+
+async function safeGetChats(clientTarget = client, options = {}) {
+    const maxRetries = options.maxRetries || 4;
+    const initialDelay = typeof options.initialDelay === 'number' ? options.initialDelay : 2500;
+    const retryDelayBase = options.retryDelayBase || 2000;
+
+    if (initialDelay > 0) {
+        await new Promise(r => setTimeout(r, initialDelay));
+    }
+
+    let lastErr = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            if (!clientTarget || !clientTarget.pupPage || clientTarget.pupPage.isClosed()) {
+                throw new Error('صفحة المتصفح غير جاهزة أو مغلقة');
+            }
+            const chats = await clientTarget.getChats();
+            if (Array.isArray(chats)) {
+                return chats;
+            }
+            throw new Error('النتيجة المسترجعة ليست مصفوفة مجموعات صالحة');
+        } catch (err) {
+            lastErr = err;
+            const errMsg = err ? (err.message || String(err)) : 'Unknown error';
+            console.warn(`[مزامنة المجموعات] المحاولة ${attempt}/${maxRetries} لجلب المجموعات: ${errMsg}`);
+            if (attempt < maxRetries) {
+                const waitTime = retryDelayBase * attempt;
+                await new Promise(r => setTimeout(r, waitTime));
+            }
+        }
+    }
+    throw lastErr;
+}
 
 function resolveLidJid(cl, rawJid) {
     return new Promise((resolve) => {
@@ -64,9 +97,12 @@ function setupBotHandlers() {
 
         try {
             console.log('[معلومة] بدء مزامنة المجموعات من قاعدة البيانات...');
-            const chats = await client.getChats();
-            addConnectionLog('مزامنة مجموعات', `تم جلب ${chats.length} مجموعة`);
-            addConnectionLog('مزامنة ناجحة', `متصل وجاهز - ${chats.length} مجموعة`);
+            const chats = await safeGetChats(client);
+            if (Array.isArray(chats)) {
+                syncTx(chats);
+                addConnectionLog('مزامنة مجموعات', `تم جلب ${chats.length} مجموعة`);
+                addConnectionLog('مزامنة ناجحة', `متصل وجاهز - ${chats.length} مجموعة`);
+            }
         } catch (error) {
             const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
             addConnectionLog('خطأ في المزامنة', errorMsg);
