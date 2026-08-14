@@ -279,6 +279,135 @@ router.delete('/api/media/delete/:groupId/:filename', requireAuthApi, requirePer
 });
 
 // Import & Export Configuration APIs
+router.post('/api/export', requireAuthApi, requirePermission('import-export:manage'), (req, res) => {
+    try {
+        const { selected } = req.body || {};
+        const exportData = {
+            version: '6.5.0',
+            exportedAt: new Date().toISOString(),
+            global_settings: selected && selected.global_settings !== false ? db.prepare('SELECT * FROM global_settings').all() : [],
+            llm_settings: selected && selected.llm_settings !== false ? db.prepare('SELECT * FROM llm_settings').all() : [],
+            blacklist: selected && selected.blacklist !== false ? db.prepare('SELECT * FROM blacklist').all() : [],
+            blocked_extensions: selected && selected.blocked_extensions !== false ? db.prepare('SELECT * FROM blocked_extensions').all() : [],
+            whitelist: selected && selected.whitelist !== false ? db.prepare('SELECT * FROM whitelist').all() : [],
+            approved_numbers: selected && selected.approved_numbers !== false ? db.prepare('SELECT * FROM approved_numbers').all() : [],
+            whatsapp_groups: selected && selected.whatsapp_groups !== false ? db.prepare('SELECT * FROM whatsapp_groups').all() : [],
+            custom_groups: selected && selected.custom_groups !== false ? db.prepare('SELECT * FROM custom_groups').all() : []
+        };
+        exportData.data = exportData;
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Content-Disposition', `attachment; filename=automod_backup_${new Date().toISOString().split('T')[0]}.json`);
+        res.json(exportData);
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
+router.post('/api/import', requireAuthApi, requirePermission('import-export:manage'), (req, res) => {
+    try {
+        const { dataset, selected } = req.body || {};
+        const data = dataset || req.body.data;
+        if (!data || typeof data !== 'object') {
+            return res.status(400).json({ error: 'بيانات الاستيراد غير صالحة.' });
+        }
+
+        const sel = selected || {
+            global_settings: true,
+            llm_settings: true,
+            blacklist: true,
+            whitelist: true,
+            blocked_extensions: true,
+            whatsapp_groups: true,
+            custom_groups: true
+        };
+
+        const importTx = db.transaction(() => {
+            if (sel.blacklist) {
+                if (sel.blacklist_clear) db.prepare('DELETE FROM blacklist').run();
+                const insertBl = db.prepare('INSERT OR IGNORE INTO blacklist (number) VALUES (?)');
+                const items = Array.isArray(data.blacklist) ? data.blacklist : [];
+                for (const item of items) {
+                    const num = typeof item === 'object' ? item.number : String(item);
+                    if (num) insertBl.run(num);
+                }
+            }
+
+            if (sel.whitelist) {
+                if (sel.whitelist_clear) db.prepare('DELETE FROM whitelist').run();
+                const insertWl = db.prepare('INSERT OR IGNORE INTO whitelist (number) VALUES (?)');
+                const items = Array.isArray(data.whitelist) ? data.whitelist : [];
+                for (const item of items) {
+                    const num = typeof item === 'object' ? item.number : String(item);
+                    if (num) insertWl.run(num);
+                }
+            }
+
+            if (sel.blocked_extensions) {
+                if (sel.blocked_extensions_clear) db.prepare('DELETE FROM blocked_extensions').run();
+                const insertExt = db.prepare('INSERT OR IGNORE INTO blocked_extensions (ext) VALUES (?)');
+                const items = Array.isArray(data.blocked_extensions) ? data.blocked_extensions : [];
+                for (const item of items) {
+                    const ext = typeof item === 'object' ? item.ext : String(item);
+                    if (ext) insertExt.run(ext);
+                }
+            }
+
+            if (sel.whatsapp_groups && Array.isArray(data.whatsapp_groups)) {
+                const insertWg = db.prepare('INSERT OR REPLACE INTO whatsapp_groups (id, name) VALUES (?, ?)');
+                for (const item of data.whatsapp_groups) {
+                    if (item && item.id) insertWg.run(String(item.id), String(item.name || ''));
+                }
+            }
+
+            if (sel.global_settings && Array.isArray(data.global_settings)) {
+                const insertGlobal = db.prepare('INSERT OR REPLACE INTO global_settings (key, value) VALUES (?, ?)');
+                for (const item of data.global_settings) {
+                    if (item && item.key) insertGlobal.run(String(item.key), String(item.value || ''));
+                }
+            }
+
+            if (sel.llm_settings && Array.isArray(data.llm_settings)) {
+                const insertLLM = db.prepare('INSERT OR REPLACE INTO llm_settings (key, value) VALUES (?, ?)');
+                for (const item of data.llm_settings) {
+                    if (item && item.key) insertLLM.run(String(item.key), String(item.value || ''));
+                }
+            }
+
+            if (sel.custom_groups && (Array.isArray(data.custom_groups) || typeof data.custom_groups === 'object')) {
+                if (sel.custom_groups_clear) db.prepare('DELETE FROM custom_groups').run();
+                if (Array.isArray(data.custom_groups)) {
+                    for (const item of data.custom_groups) {
+                        if (item && item.group_id) {
+                            try {
+                                const cols = Object.keys(item).filter(k => k !== 'group_id');
+                                if (cols.length > 0) {
+                                    const placeholders = cols.map(() => '?').join(', ');
+                                    const sql = `INSERT OR REPLACE INTO custom_groups (group_id, ${cols.join(', ')}) VALUES (?, ${placeholders})`;
+                                    const vals = [item.group_id, ...cols.map(c => item[c])];
+                                    db.prepare(sql).run(...vals);
+                                }
+                            } catch (e) {}
+                        }
+                    }
+                } else {
+                    const conf = loadConfigFromDB();
+                    for (const [gId, gData] of Object.entries(data.custom_groups)) {
+                        conf.groupsConfig[gId] = gData;
+                    }
+                    saveConfigToDB(conf);
+                }
+            }
+        });
+        importTx();
+
+        console.log('[استيراد] تم استيراد البيانات من ملف النسخة الاحتياطية بنجاح');
+        res.json({ success: true, message: 'تم الاستيراد بنجاح' });
+    } catch (e) {
+        console.error('[خطأ] فشل استيراد البيانات:', e.message);
+        res.status(500).json({ error: e.message || 'فشل استيراد الملف' });
+    }
+});
+
 router.get('/export-config', requireAuthApi, requirePermission('import-export:manage'), (req, res) => {
     try {
         const exportData = {
@@ -292,6 +421,7 @@ router.get('/export-config', requireAuthApi, requirePermission('import-export:ma
             approved_numbers: db.prepare('SELECT * FROM approved_numbers').all(),
             custom_groups: db.prepare('SELECT * FROM custom_groups').all()
         };
+        exportData.data = exportData;
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Content-Disposition', `attachment; filename=wa_bot_config_${Date.now()}.json`);
         res.send(JSON.stringify(exportData, null, 2));

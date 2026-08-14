@@ -3287,8 +3287,9 @@ const currentLang = 'ar';
                 try {
                     const json = await file.text();
                     const importedData = JSON.parse(json);
+                    const dataset = importedData.data || importedData;
 
-                    if (!importedData.data) {
+                    if (!dataset || typeof dataset !== 'object') {
                         showToast(currentLang==='en' ? '❌ Invalid file format' : '❌ صيغة الملف غير صحيحة');
                         return;
                     }
@@ -3315,7 +3316,7 @@ const currentLang = 'ar';
                     const res = await fetch('/api/import', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ dataset: importedData.data, selected })
+                        body: JSON.stringify({ dataset, selected })
                     });
 
                     if (!res.ok) {
