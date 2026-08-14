@@ -1742,11 +1742,15 @@ module.exports = function renderDashboard(req, db, config, runtimeStatus = {}) {
         </div>
 
         <script>
-        window.INITIAL_CONFIG = {
-            defaultAdminGroup: ${JSON.stringify(config.defaultAdminGroup || '')},
-            defaultAdminLanguage: ${JSON.stringify(config.defaultAdminLanguage || 'ar')},
-            customMessageText: ${JSON.stringify(config.customMessageText || '')}
+        window.INITIAL_DATA = {
+            blacklistArr: ${JSON.stringify(blacklistArr)},
+            blockedExtensionsArr: ${JSON.stringify(blockedExtensionsArr)},
+            whitelistArr: ${JSON.stringify(whitelistArr)},
+            approvedArr: ${JSON.stringify(approvedArr)},
+            groupsConfigObj: ${JSON.stringify(groupsConfigObj)},
+            config: ${JSON.stringify(config)}
         };
+        window.INITIAL_CONFIG = window.INITIAL_DATA.config;
         </script>
         <script src="/public/js/dashboard.js"></script>
         <div class="modal" id="confirmModal">

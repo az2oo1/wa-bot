@@ -321,6 +321,19 @@ router.post('/api/import', requireAuthApi, requirePermission('import-export:mana
             custom_groups: true
         };
 
+        const insertCustomGroupStmt = db.prepare(`
+            INSERT OR REPLACE INTO custom_groups (
+                group_id, admin_group, admin_language, use_default_words, enable_word_filter, enable_ai_filter, 
+                enable_ai_media, auto_action, enable_blacklist, enable_whitelist, enable_anti_spam, spam_duplicate_limit, 
+                spam_action, enable_welcome_message, welcome_message_text, custom_words,
+                blocked_types, blocked_action, spam_types, spam_limits,
+                enable_panic_mode, panic_message_limit, panic_time_window, panic_lockout_duration,
+                panic_alert_target, panic_alert_message, custom_blacklist, custom_whitelist, use_global_blacklist, use_global_whitelist, use_global_qa,
+                enable_qa_feature, custom_qa, qa_event_date, qa_language, qa_event_dates, custom_ai_trigger_words, enable_join_profile_screening,
+                enable_admin_sync, enable_commands
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
         const importTx = db.transaction(() => {
             if (sel.blacklist) {
                 if (sel.blacklist_clear) db.prepare('DELETE FROM blacklist').run();
@@ -383,22 +396,51 @@ router.post('/api/import', requireAuthApi, requirePermission('import-export:mana
                                 if (cols.length > 0) {
                                     const placeholders = cols.map(() => '?').join(', ');
                                     const sql = `INSERT OR REPLACE INTO custom_groups (group_id, ${cols.join(', ')}) VALUES (?, ${placeholders})`;
-                                    const vals = [item.group_id, ...cols.map(c => item[c])];
+                                    const vals = [item.group_id, ...cols.map(c => typeof item[c] === 'object' ? JSON.stringify(item[c]) : item[c])];
                                     db.prepare(sql).run(...vals);
                                 }
                             } catch (e) {}
                         }
                     }
-                } else {
-                    const conf = loadConfigFromDB();
+                } else if (typeof data.custom_groups === 'object') {
                     for (const [gId, gData] of Object.entries(data.custom_groups)) {
-                        conf.groupsConfig[gId] = gData;
+                        insertCustomGroupStmt.run(
+                            gId, gData.adminGroup || '', gData.adminLanguage || 'default', gData.useDefaultWords ? 1 : 0, gData.enableWordFilter ? 1 : 0,
+                            gData.enableAIFilter ? 1 : 0, gData.enableAIMedia ? 1 : 0, gData.autoAction ? 1 : 0,
+                            gData.enableBlacklist ? 1 : 0, gData.enableWhitelist ? 1 : 0, gData.enableAntiSpam ? 1 : 0, gData.spamDuplicateLimit || 3,
+                            gData.spamAction || 'poll', gData.enableWelcomeMessage ? 1 : 0, gData.welcomeMessageText || '', JSON.stringify(gData.words || []),
+                            JSON.stringify(gData.blockedTypes || []), gData.blockedAction || 'delete',
+                            JSON.stringify(gData.spamTypes || []), JSON.stringify(gData.spamLimits || {}),
+                            gData.enablePanicMode ? 1 : 0, gData.panicMessageLimit || 10, gData.panicTimeWindow || 5,
+                            gData.panicLockoutDuration || 10, gData.panicAlertTarget || 'both', gData.panicAlertMessage || '',
+                            JSON.stringify(gData.customBlacklist || []), JSON.stringify(gData.customWhitelist || []),
+                            gData.useGlobalBlacklist ? 1 : 0, gData.useGlobalWhitelist ? 1 : 0,
+                            gData.useGlobalQA ? 1 : 0,
+                            gData.enableQAFeature ? 1 : 0, JSON.stringify(gData.qaList || []), gData.eventDate || '', gData.qaLanguage || 'ar', JSON.stringify(gData.eventDates || []), JSON.stringify(gData.aiFilterTriggerWords || []), gData.enableJoinProfileScreening ? 1 : 0,
+                            gData.enableAdminSync ? 1 : 0, gData.enableCommands !== false ? 1 : 0
+                        );
                     }
-                    saveConfigToDB(conf);
                 }
             }
         });
         importTx();
+
+        if (sel.media && data.media && typeof data.media === 'object') {
+            for (const [gId, files] of Object.entries(data.media)) {
+                const dir = path.join('./media', gId);
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                if (typeof files === 'object') {
+                    for (const [fileName, fileContent] of Object.entries(files)) {
+                        if (fileContent) {
+                            try {
+                                const filePath = path.join(dir, fileName);
+                                fs.writeFileSync(filePath, Buffer.from(fileContent, 'base64'));
+                            } catch (e) {}
+                        }
+                    }
+                }
+            }
+        }
 
         console.log('[استيراد] تم استيراد البيانات من ملف النسخة الاحتياطية بنجاح');
         res.json({ success: true, message: 'تم الاستيراد بنجاح' });

@@ -1029,11 +1029,12 @@ const currentLang = 'ar';
             let globalQAPendingMediaFile = '';
             let globalQALanguage = 'ar';
             let globalQAMediaLoaded = false;
-            let blacklistArr = []; 
-            let blockedExtensionsArr = [];
-            let approvedArr = []; 
-            let whitelistArr = []; 
-            let groupsConfigObj = {};
+            const initialData = window.INITIAL_DATA || {};
+            let blacklistArr = initialData.blacklistArr || []; 
+            let blockedExtensionsArr = initialData.blockedExtensionsArr || [];
+            let approvedArr = initialData.approvedArr || []; 
+            let whitelistArr = initialData.whitelistArr || []; 
+            let groupsConfigObj = initialData.groupsConfigObj || {};
             const metaTypes = [{"id":"text","icon":"<i class=\"fas fa-file-alt\"></i>","name":"نصوص"},{"id":"image","icon":"<i class=\"fas fa-image\"></i>","name":"صور"},{"id":"video","icon":"<i class=\"fas fa-video\"></i>","name":"فيديو"},{"id":"audio","icon":"<i class=\"fas fa-music\"></i>","name":"صوتيات"},{"id":"document","icon":"<i class=\"fas fa-file\"></i>","name":"ملفات"},{"id":"sticker","icon":"<i class=\"fas fa-smile\"></i>","name":"ملصقات"}];
             
             let groupsArr = Object.keys(groupsConfigObj).map(key => ({
@@ -3278,35 +3279,49 @@ const currentLang = 'ar';
 
             async function importData() {
                 const fileInput = document.getElementById('importFile');
-                if (!fileInput.files.length) {
+                if (!fileInput || !fileInput.files.length) {
                     showToast(currentLang==='en' ? '⚠️ Please select a file' : '⚠️ يرجى اختيار ملف');
                     return;
                 }
 
                 const file = fileInput.files[0];
+                let importedData;
                 try {
-                    const json = await file.text();
-                    const importedData = JSON.parse(json);
+                    const rawJson = await file.text();
+                    const cleanJson = rawJson.replace(/^\uFEFF/, '').trim();
+                    importedData = JSON.parse(cleanJson);
+                } catch (parseErr) {
+                    console.error('JSON Parse error:', parseErr);
+                    showToast(currentLang==='en' ? '❌ Invalid JSON syntax: ' + parseErr.message : '❌ خطأ في تنسيق ملف JSON: ' + parseErr.message);
+                    return;
+                }
+
+                try {
                     const dataset = importedData.data || importedData;
 
                     if (!dataset || typeof dataset !== 'object') {
-                        showToast(currentLang==='en' ? '❌ Invalid file format' : '❌ صيغة الملف غير صحيحة');
+                        showToast(currentLang==='en' ? '❌ Invalid backup dataset format' : '❌ صيغة النسخة الاحتياطية غير صالحة');
                         return;
                     }
 
+                    const getChecked = (id) => {
+                        const el = document.getElementById(id);
+                        return el ? el.checked : false;
+                    };
+
                     const selected = {
-                        global_settings: document.getElementById('import_global_settings').checked,
-                        llm_settings: document.getElementById('import_llm_settings').checked,
-                        blacklist: document.getElementById('import_blacklist').checked,
-                        blacklist_clear: document.getElementById('import_blacklist_clear').checked,
-                        whitelist: document.getElementById('import_whitelist').checked,
-                        whitelist_clear: document.getElementById('import_whitelist_clear').checked,
-                        blocked_extensions: document.getElementById('import_blocked_extensions').checked,
-                        blocked_extensions_clear: document.getElementById('import_blocked_extensions_clear').checked,
-                        whatsapp_groups: document.getElementById('import_whatsapp_groups').checked,
-                        custom_groups: document.getElementById('import_custom_groups').checked,
-                        custom_groups_clear: document.getElementById('import_custom_groups_clear').checked,
-                        media: document.getElementById('import_media') ? document.getElementById('import_media').checked : false
+                        global_settings: getChecked('import_global_settings'),
+                        llm_settings: getChecked('import_llm_settings'),
+                        blacklist: getChecked('import_blacklist'),
+                        blacklist_clear: getChecked('import_blacklist_clear'),
+                        whitelist: getChecked('import_whitelist'),
+                        whitelist_clear: getChecked('import_whitelist_clear'),
+                        blocked_extensions: getChecked('import_blocked_extensions'),
+                        blocked_extensions_clear: getChecked('import_blocked_extensions_clear'),
+                        whatsapp_groups: getChecked('import_whatsapp_groups'),
+                        custom_groups: getChecked('import_custom_groups'),
+                        custom_groups_clear: getChecked('import_custom_groups_clear'),
+                        media: getChecked('import_media')
                     };
 
                     if (!await showConfirmModal(currentLang==='en' ? 'Confirm import? This action may override existing data.' : 'هل تؤكد الاستيراد؟ قد يؤدي هذا إلى إلغاء البيانات الموجودة.')) {
@@ -3320,8 +3335,14 @@ const currentLang = 'ar';
                     });
 
                     if (!res.ok) {
-                        const errorData = await res.json();
-                        showToast(currentLang==='en' ? '❌ Import failed: ' + errorData.error : '❌ فشل الاستيراد: ' + errorData.error);
+                        let errMsg = '';
+                        try {
+                            const errData = await res.json();
+                            errMsg = errData.error || errData.message || String(res.status);
+                        } catch (_) {
+                            try { errMsg = (await res.text()).trim(); } catch (_) {}
+                        }
+                        showToast(currentLang==='en' ? '❌ Import failed: ' + (errMsg || res.statusText) : '❌ فشل الاستيراد: ' + (errMsg || res.statusText));
                         return;
                     }
 
@@ -3329,7 +3350,7 @@ const currentLang = 'ar';
                     fileInput.value = '';
                     setTimeout(() => window.location.reload(), 1500);
                 } catch (error) {
-                    console.error('Import error:', error);
+                    console.error('Import process error:', error);
                     showToast(currentLang==='en' ? '❌ Import error: ' + error.message : '❌ خطأ الاستيراد: ' + error.message);
                 }
             }
