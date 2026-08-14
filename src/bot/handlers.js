@@ -9,9 +9,9 @@ let config = loadConfigFromDB();
 let isScreeningRunning = false;
 
 async function safeGetChats(clientTarget = client, options = {}) {
-    const maxRetries = options.maxRetries || 4;
-    const initialDelay = typeof options.initialDelay === 'number' ? options.initialDelay : 2500;
-    const retryDelayBase = options.retryDelayBase || 2000;
+    const maxRetries = options.maxRetries || 8;
+    const initialDelay = typeof options.initialDelay === 'number' ? options.initialDelay : 3000;
+    const retryDelayBase = options.retryDelayBase || 3000;
 
     if (initialDelay > 0) {
         await new Promise(r => setTimeout(r, initialDelay));
@@ -23,6 +23,17 @@ async function safeGetChats(clientTarget = client, options = {}) {
             if (!clientTarget || !clientTarget.pupPage || clientTarget.pupPage.isClosed()) {
                 throw new Error('صفحة المتصفح غير جاهزة أو مغلقة');
             }
+
+            const isStoreReady = await clientTarget.pupPage.evaluate(() => {
+                return typeof window !== 'undefined' && window.Store && (window.Store.Chat || window.Store.GroupMetadata);
+            }).catch(() => false);
+
+            if (!isStoreReady && attempt < maxRetries) {
+                console.log(`[مزامنة المجموعات] بانتظار تجهيز WhatsApp Store (محاولة ${attempt}/${maxRetries})...`);
+                await new Promise(r => setTimeout(r, retryDelayBase * attempt));
+                continue;
+            }
+
             const chats = await clientTarget.getChats();
             if (Array.isArray(chats)) {
                 return chats;
@@ -39,6 +50,23 @@ async function safeGetChats(clientTarget = client, options = {}) {
         }
     }
     throw lastErr;
+}
+
+async function triggerGroupSync() {
+    try {
+        console.log('[معلومة] بدء مزامنة المجموعات من قاعدة البيانات و WhatsApp...');
+        const chats = await safeGetChats(client);
+        if (Array.isArray(chats)) {
+            syncTx(chats);
+            addConnectionLog('مزامنة مجموعات', `تم جلب ${chats.length} مجموعة`);
+            addConnectionLog('مزامنة ناجحة', `متصل وجاهز - ${chats.length} مجموعة`);
+        }
+    } catch (error) {
+        const errorMsg = error ? (error.message || error.toString()) : 'Unknown error';
+        console.error('[خطأ مزامنة المجموعات]', errorMsg);
+        addConnectionLog('خطأ في المزامنة', errorMsg);
+        setTimeout(triggerGroupSync, 15000);
+    }
 }
 
 function resolveLidJid(cl, rawJid) {

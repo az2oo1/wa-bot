@@ -159,13 +159,150 @@ router.post('/api/approved/extract-groups', requireAuthApi, requirePermission('s
     }
 });
 
-// Operations & Schedules APIs
+function isParticipantBlacklisted(rawParticipantId, groupConfig = {}, globalBlacklist = [], globalWhitelist = [], globalBlockedExts = []) {
+    if (!rawParticipantId || typeof rawParticipantId !== 'string') return false;
+
+    const cleanId = rawParticipantId.replace(/:[0-9]+/, '');
+    const numOnly = cleanId.replace('@c.us', '').replace('@lid', '').replace('+', '').trim();
+
+    const isWhitelisted = globalWhitelist.some(w => {
+        const wNum = String(w).replace('@c.us', '').replace('@lid', '').replace('+', '').trim();
+        return wNum === numOnly || cleanId === w || rawParticipantId === w;
+    }) || (groupConfig.customWhitelist || []).some(w => {
+        const wNum = String(w).replace('@c.us', '').replace('@lid', '').replace('+', '').trim();
+        return wNum === numOnly || cleanId === w || rawParticipantId === w;
+    });
+
+    if (isWhitelisted) return false;
+
+    const isBlacklisted = globalBlacklist.some(b => {
+        const bNum = String(b).replace('@c.us', '').replace('@lid', '').replace('+', '').trim();
+        return bNum === numOnly || cleanId === b || rawParticipantId === b;
+    }) || (groupConfig.customBlacklist || []).some(b => {
+        const bNum = String(b).replace('@c.us', '').replace('@lid', '').replace('+', '').trim();
+        return bNum === numOnly || cleanId === b || rawParticipantId === b;
+    });
+
+    if (isBlacklisted) return true;
+
+    const isExtensionBlocked = globalBlockedExts.some(ext => {
+        let cleanExt = String(ext).replace('+', '').trim();
+        return cleanExt && numOnly.startsWith(cleanExt);
+    });
+
+    if (isExtensionBlocked) return true;
+
+    return false;
+}
+
 router.post('/api/blacklist/purge', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
-    res.json({ message: 'عملية التنظيف اكتملت بنجاح.', kickedCount: 0, rejectedCount: 0 });
+    try {
+        if (!client || !client.pupPage || client.pupPage.isClosed()) {
+            return res.status(400).json({ error: 'بوت الواتساب غير متصل حالياً' });
+        }
+
+        const globalBlacklist = db.prepare('SELECT number FROM blacklist').all().map(r => r.number);
+        const globalWhitelist = db.prepare('SELECT number FROM whitelist').all().map(r => r.number);
+        const globalBlockedExts = db.prepare('SELECT ext FROM blocked_extensions').all().map(r => r.ext);
+        const config = loadConfigFromDB();
+        const groupsConfig = config.groupsConfig || {};
+
+        const chats = await client.getChats().catch(() => []);
+        const groupChats = (chats || []).filter(c => c.isGroup);
+
+        let kickedCount = 0;
+        let rejectedCount = 0;
+
+        const botUser = client.info ? (client.info.wid ? client.info.wid._serialized : (client.info.me ? client.info.me._serialized : '')) : '';
+        const botClean = botUser.replace(/:[0-9]+/, '');
+
+        for (const chat of groupChats) {
+            const groupConfig = groupsConfig[chat.id._serialized] || {};
+            if (groupConfig.enableBlacklist === false) continue;
+
+            const participants = chat.participants || [];
+            const toKick = [];
+
+            for (const participant of participants) {
+                const pId = participant.id._serialized;
+                const pClean = pId.replace(/:[0-9]+/, '');
+                if (pClean === botClean || pId === botUser) continue;
+                if (participant.isAdmin || participant.isSuperAdmin) continue;
+
+                if (isParticipantBlacklisted(pId, groupConfig, globalBlacklist, globalWhitelist, globalBlockedExts)) {
+                    toKick.push(pId);
+                }
+            }
+
+            if (toKick.length > 0) {
+                try {
+                    await chat.removeParticipants(toKick);
+                    kickedCount += toKick.length;
+                    addConnectionLog('طرد رجعي', `تم طرد ${toKick.length} عضو محظور من ${chat.name}`);
+                } catch (kickErr) {
+                    console.error(`[Purge Error] Failed to kick from group ${chat.name}:`, kickErr.message);
+                    rejectedCount += toKick.length;
+                }
+            }
+        }
+
+        res.json({
+            message: `عملية التنظيف اكتملت بنجاح. تم طرد ${kickedCount} عضو.`,
+            kickedCount,
+            rejectedCount
+        });
+    } catch (e) {
+        console.error('[Blacklist Purge Error]', e);
+        res.status(500).json({ error: e.message || 'فشل عملية الطرد الرجعي' });
+    }
 });
 
 router.post('/api/blacklist/scan', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
-    res.json({ success: true, scanResults: [] });
+    try {
+        if (!client || !client.pupPage || client.pupPage.isClosed()) {
+            return res.status(400).json({ error: 'بوت الواتساب غير متصل حالياً' });
+        }
+
+        const globalBlacklist = db.prepare('SELECT number FROM blacklist').all().map(r => r.number);
+        const globalWhitelist = db.prepare('SELECT number FROM whitelist').all().map(r => r.number);
+        const globalBlockedExts = db.prepare('SELECT ext FROM blocked_extensions').all().map(r => r.ext);
+        const config = loadConfigFromDB();
+        const groupsConfig = config.groupsConfig || {};
+
+        const chats = await client.getChats().catch(() => []);
+        const groupChats = (chats || []).filter(c => c.isGroup);
+
+        const scanResults = [];
+        const botUser = client.info ? (client.info.wid ? client.info.wid._serialized : (client.info.me ? client.info.me._serialized : '')) : '';
+        const botClean = botUser.replace(/:[0-9]+/, '');
+
+        for (const chat of groupChats) {
+            const groupConfig = groupsConfig[chat.id._serialized] || {};
+            if (groupConfig.enableBlacklist === false) continue;
+
+            const participants = chat.participants || [];
+            for (const participant of participants) {
+                const pId = participant.id._serialized;
+                const pClean = pId.replace(/:[0-9]+/, '');
+                if (pClean === botClean || pId === botUser) continue;
+                if (participant.isAdmin || participant.isSuperAdmin) continue;
+
+                if (isParticipantBlacklisted(pId, groupConfig, globalBlacklist, globalWhitelist, globalBlockedExts)) {
+                    scanResults.push({
+                        groupId: chat.id._serialized,
+                        groupName: chat.name || chat.id._serialized,
+                        participantId: pId,
+                        number: pId.replace('@c.us', '').replace('@lid', '')
+                    });
+                }
+            }
+        }
+
+        res.json({ success: true, scanResults });
+    } catch (e) {
+        console.error('[Blacklist Scan Error]', e);
+        res.status(500).json({ error: e.message || 'فشل فحص القائمة السوداء' });
+    }
 });
 
 router.post('/api/whitelist/sync-admins', requireAuthApi, requirePermission('security:manage'), async (req, res) => {
@@ -282,9 +419,7 @@ router.delete('/api/media/delete/:groupId/:filename', requireAuthApi, requirePer
 router.post('/api/export', requireAuthApi, requirePermission('import-export:manage'), (req, res) => {
     try {
         const { selected } = req.body || {};
-        const exportData = {
-            version: '6.5.0',
-            exportedAt: new Date().toISOString(),
+        const payload = {
             global_settings: selected && selected.global_settings !== false ? db.prepare('SELECT * FROM global_settings').all() : [],
             llm_settings: selected && selected.llm_settings !== false ? db.prepare('SELECT * FROM llm_settings').all() : [],
             blacklist: selected && selected.blacklist !== false ? db.prepare('SELECT * FROM blacklist').all() : [],
@@ -294,11 +429,19 @@ router.post('/api/export', requireAuthApi, requirePermission('import-export:mana
             whatsapp_groups: selected && selected.whatsapp_groups !== false ? db.prepare('SELECT * FROM whatsapp_groups').all() : [],
             custom_groups: selected && selected.custom_groups !== false ? db.prepare('SELECT * FROM custom_groups').all() : []
         };
-        exportData.data = exportData;
+
+        const result = {
+            version: '6.5.0',
+            exportedAt: new Date().toISOString(),
+            data: payload,
+            ...payload
+        };
+
         res.setHeader('Content-Type', 'application/json');
         res.setHeader('Content-Disposition', `attachment; filename=automod_backup_${new Date().toISOString().split('T')[0]}.json`);
-        res.json(exportData);
+        res.json(result);
     } catch (e) {
+        console.error('[Export Error]', e);
         res.status(500).json({ error: e.message });
     }
 });
