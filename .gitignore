@@ -11,6 +11,8 @@ package-lock.json
 *.sqlite-journal
 *.sqlite-shm
 *.sqlite-wal
+*.sqlite.bak
+*.bak
 bot_data.sqlite
 
 # Media uploads

@@ -14,12 +14,28 @@ function resolveDbPath() {
 
 function ensureDbPathReady(dbPath) {
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    const backupPath = `${dbPath}.bak`;
 
     if (fs.existsSync(dbPath)) {
         const stat = fs.statSync(dbPath);
         if (stat.isDirectory()) {
             throw new Error(`[DB] Invalid database path: ${dbPath} points to a directory.`);
         }
+        if (stat.size > 0) {
+            try {
+                fs.copyFileSync(dbPath, backupPath);
+            } catch (e) {}
+        } else if (fs.existsSync(backupPath) && fs.statSync(backupPath).size > 0) {
+            try {
+                console.log(`[DB] Restoring database from backup: ${backupPath}`);
+                fs.copyFileSync(backupPath, dbPath);
+            } catch (e) {}
+        }
+    } else if (fs.existsSync(backupPath) && fs.statSync(backupPath).size > 0) {
+        try {
+            console.log(`[DB] Restoring missing database from backup: ${backupPath}`);
+            fs.copyFileSync(backupPath, dbPath);
+        } catch (e) {}
     }
 
     fs.closeSync(fs.openSync(dbPath, 'a'));
