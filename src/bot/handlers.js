@@ -1,8 +1,8 @@
 const { Poll, MessageMedia } = require('whatsapp-web.js');
 const fs = require('fs');
 const path = require('path');
-const { db, loadConfigFromDB, saveConfigToDB } = require('../db');
-const { client, addConnectionLog, initializeClientWithRetry, setBotStatus } = require('./client');
+const { db, loadConfigFromDB, saveConfigToDB } = require('../db/index.js');
+const { client, addConnectionLog, initializeClientWithRetry, setBotStatus } = require('./client.js');
 
 let config = loadConfigFromDB();
 

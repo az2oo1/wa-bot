@@ -1,12 +1,12 @@
 try { require('dotenv').config(); } catch (e) {}
 const express = require('express');
 const path = require('path');
-const { db, loadConfigFromDB } = require('./src/db');
-const authRoutes = require('./src/routes/auth');
-const userRoutes = require('./src/routes/users');
-const apiRoutes = require('./src/routes/api');
-const { client, initializeClientWithRetry } = require('./src/bot/client');
-const { setupBotHandlers } = require('./src/bot/handlers');
+const { db, loadConfigFromDB } = require('./src/db/index.js');
+const authRoutes = require('./src/routes/auth.js');
+const userRoutes = require('./src/routes/users.js');
+const apiRoutes = require('./src/routes/api.js');
+const { client, initializeClientWithRetry } = require('./src/bot/client.js');
+const { setupBotHandlers } = require('./src/bot/handlers.js');
 
 const app = express();
 const PORT = process.env.PORT || 3000;

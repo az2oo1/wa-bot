@@ -3,8 +3,8 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
-const { db, loadConfigFromDB, saveConfigToDB } = require('../db');
-const { requireAuthApi, requireAuthPage, requirePermission, getAllowedGroupIds } = require('../middleware/auth');
+const { db, loadConfigFromDB, saveConfigToDB } = require('../db/index.js');
+const { requireAuthApi, requireAuthPage, requirePermission, getAllowedGroupIds } = require('../middleware/auth.js');
 const renderDashboard = require('../../UI.js');
 
 // Multer storage for media

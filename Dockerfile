@@ -72,6 +72,8 @@ else\n\
   cp /app_staging/UI.js /app/UI.js\n\
   cp /app_staging/index.js /app/index.js\n\
   cp /app_staging/secondaryVerification.js /app/secondaryVerification.js\n\
+  if [ -d /app_staging/src ]; then cp -r /app_staging/src /app/; fi\n\
+  if [ -d /app_staging/public ]; then cp -r /app_staging/public /app/; fi\n\
 fi\n\
 mkdir -p /app/public\n\
 if [ -f /app_staging/public/logo.png ]; then\n\

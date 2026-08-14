@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { db } = require('../db');
+const { db } = require('../db/index.js');
 const {
     SESSION_TTL_MS,
     REMEMBER_ME_TTL_MS,
@@ -16,7 +16,7 @@ const {
     shouldShowDefaultLoginHint,
     getAllowedGroupIds,
     requireAuthApi
-} = require('../middleware/auth');
+} = require('../middleware/auth.js');
 
 function nowIso() {
     return new Date().toISOString();
