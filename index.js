@@ -1,3 +1,4 @@
+process.env.DBUS_SESSION_BUS_ADDRESS = 'disabled';
 const express = require('express');
 const { Client, LocalAuth, Poll, MessageMedia } = require('whatsapp-web.js');
 const qrcode = require('qrcode');
@@ -2794,6 +2795,41 @@ async function safeDelay(chatOrId) {
     }
 }
 
+// Safe wrapper for fetching chats with retries and timing buffer for Puppeteer context
+async function safeGetChats(clientTarget = client, options = {}) {
+    const maxRetries = options.maxRetries || 4;
+    const initialDelay = typeof options.initialDelay === 'number' ? options.initialDelay : 2000;
+    const retryDelayBase = options.retryDelayBase || 2000;
+
+    if (initialDelay > 0) {
+        await new Promise(r => setTimeout(r, initialDelay));
+    }
+
+    let lastErr = null;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            if (!clientTarget || !clientTarget.pupPage || clientTarget.pupPage.isClosed()) {
+                throw new Error('صفحة المتصفح غير جاهزة أو مغلقة');
+            }
+            const chats = await clientTarget.getChats();
+            if (Array.isArray(chats)) {
+                return chats;
+            }
+            throw new Error('النتيجة المسترجعة ليست مصفوفة مجموعات صالحة');
+        } catch (err) {
+            lastErr = err;
+            const errMsg = err ? (err.message || String(err)) : 'Unknown error';
+            console.warn(`[مزامنة المجموعات] المحاولة ${attempt}/${maxRetries} لجلب المجموعات فشلت: ${errMsg}`);
+            if (attempt < maxRetries) {
+                const waitTime = retryDelayBase * attempt;
+                console.log(`[مزامنة المجموعات] انتظار ${waitTime}ms قبل المحاولة التالية...`);
+                await new Promise(r => setTimeout(r, waitTime));
+            }
+        }
+    }
+    throw lastErr;
+}
+
 // ── Shared global purge function ──────────────────────────────────────────────
 async function runGlobalPurge() {
     if (!client.info || !client.info.wid) {
@@ -2807,7 +2843,7 @@ async function runGlobalPurge() {
         const blockedExtensionsRows = db.prepare('SELECT ext FROM blocked_extensions').all();
         const blockedExtensionsArr = blockedExtensionsRows.map(r => r.ext);
 
-        const chats = await client.getChats();
+        const chats = await safeGetChats(client, { initialDelay: 0, maxRetries: 3, retryDelayBase: 1500 });
         const botId = client.info.wid._serialized;
         let kickedCount = 0;
         let rejectedCount = 0;
@@ -2958,6 +2994,7 @@ const client = new Client({
         ...(resolvedBrowserExecutablePath ? { executablePath: resolvedBrowserExecutablePath } : {}),
         headless: true,
         timeout: 60000,
+        dumpio: true,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -3005,7 +3042,7 @@ client.on('ready', async () => {
 
     try {
         console.log('[معلومة] بدء مزامنة المجموعات من قاعدة البيانات...');
-        const chats = await client.getChats();
+        const chats = await safeGetChats(client, { initialDelay: 2000, maxRetries: 4, retryDelayBase: 2500 });
         addConnectionLog('مزامنة مجموعات', `تم جلب ${chats.length} مجموعة`);
 
         console.log('[معلومة] بدء تحديث قاعدة البيانات...');
@@ -4679,7 +4716,7 @@ async function screenPendingMembershipRequests() {
     if (isScreeningRunning) return;
     isScreeningRunning = true;
     try {
-        const chats = await client.getChats();
+        const chats = await safeGetChats(client, { initialDelay: 0, maxRetries: 3, retryDelayBase: 1500 });
         for (const chat of chats) {
             if (!chat.isGroup) continue;
 

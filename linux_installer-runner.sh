@@ -60,4 +60,5 @@ fi
 echo ""
 echo "[INFO] Launching bot..."
 echo "=========================================="
+export DBUS_SESSION_BUS_ADDRESS=disabled
 node index.js
